@@ -250,6 +250,9 @@ type JiraProjectStatus struct {
 	Backfilled bool       `json:"backfilled"`
 	LastError  string     `json:"last_error,omitempty"`
 	Warnings   []string   `json:"warnings"`
+	// Mail says what email does for this project: Tasklane sends none while it is mirrored (Jira keeps sending its own) and inbound
+	// mail addressed to it waits in quarantine. Tasklane cannot see Jira's notification settings, so it cannot say whether they are on.
+	Mail string `json:"mail"`
 }
 
 // JiraStatus is the mirror's Admin tab: lag, errors, permission freshness and warnings (MIR-12).
@@ -281,6 +284,7 @@ func (s *Service) JiraStatus(ctx context.Context, a Actor) ([]JiraProjectStatus,
 		}
 		st.PermFresh = st.PermAt != nil && s.Now().Sub(*st.PermAt) < permFreshFor
 		st.Warnings = []string{}
+		st.Mail = "Tasklane sends no email for this project (Jira sends its own, and Tasklane cannot see whether those are on); mail sent to the project\u2019s address is held in quarantine. Email starts after cut-over to native."
 		wr, _ := s.DB.Query(ctx, `SELECT detail FROM jira_warning WHERE project_id::text=$1 ORDER BY kind`, r.pid)
 		for wr.Next() {
 			var d string

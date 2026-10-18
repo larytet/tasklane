@@ -188,6 +188,12 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 			body = cur
 		}
 	}
+	// Mirror mode (SPEC 13.1): Jira sends its own email for a mirrored project, so Tasklane sends none; the in-app inbox is Tasklane's
+	// own and keeps working. Cut-over to native turns email on from then on.
+	var mirrored bool
+	if err := tx.QueryRow(ctx, `SELECT mirror_of IS NOT NULL FROM project WHERE id=$1`, pid).Scan(&mirrored); err != nil {
+		return 0, err
+	}
 	classes := s.schemeClasses(ctx, tx, pid, evName)
 	if ids, err = s.audience(ctx, tx, id, reporter, assignee, classes, evName == "issue.created" || evName == "issue.assigned"); err != nil {
 		return 0, err
@@ -213,7 +219,7 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 				return err
 			}
 		}
-		if s.Mail == nil || !pr.Email {
+		if s.Mail == nil || !pr.Email || mirrored {
 			return nil
 		}
 		if k == "edit" { // one "edited by" notice per person and issue while the previous one is still waiting
