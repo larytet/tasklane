@@ -1,0 +1,103 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/larytet/tasklane/internal/testutil"
+)
+
+// UPG-05, UPG-06: the real binary refuses to start on a schema outside its range, and says why; doctor says the same.
+func TestUPG06_TheServerRefusesToStartOutsideItsSchemaRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the real binary")
+	}
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, testutil.DSN())
+	if err != nil || admin.Ping(ctx) != nil {
+		t.Skip("PostgreSQL not available")
+	}
+	defer admin.Close()
+	db := fmt.Sprintf("tl_compat_%d", time.Now().UnixNano()%1e9)
+	if _, err := admin.Exec(ctx, `CREATE DATABASE `+db); err != nil {
+		t.Skip("cannot create a database: " + err.Error())
+	}
+	defer admin.Exec(ctx, `DROP DATABASE `+db+` WITH (FORCE)`)
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tasklane")
+	if out, err := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	dsn := strings.Replace(testutil.DSN(), "/tasklane", "/"+db, 1)
+	env := []string{"TASKLANE_DATABASE_URL=" + dsn, "TASKLANE_LISTEN=127.0.0.1:0", "TASKLANE_BLOB_DIR=" + filepath.Join(dir, "blobs")}
+	run := func(args ...string) (string, error) {
+		c := exec.Command(bin, args...)
+		c.Env = append(os.Environ(), env...)
+		var b bytes.Buffer
+		c.Stdout, c.Stderr = &b, &b
+		done := make(chan error, 1)
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		go func() { done <- c.Wait() }()
+		select {
+		case err := <-done:
+			return b.String(), err
+		case <-time.After(20 * time.Second):
+			c.Process.Kill()
+			return b.String() + "\n(still running after 20 s)", nil
+		}
+	}
+	if out, err := run("migrate"); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out)
+	}
+	pool, _ := pgxpool.New(ctx, dsn)
+	defer pool.Close()
+	var latest int
+	pool.QueryRow(ctx, `SELECT max(version) FROM schema_migration`).Scan(&latest)
+	// 1. a database behind the binary: the newest migration looks not yet applied (its row is parked under another number)
+	pool.Exec(ctx, `UPDATE schema_migration SET version = version - 1000 WHERE version = $1`, latest)
+	out, err := run("serve")
+	if err == nil || !strings.Contains(out, "refusing to start") || !strings.Contains(out, "behind") || !strings.Contains(out, "tasklane migrate") {
+		t.Fatalf("a schema behind the binary: err=%v\n%s", err, out)
+	}
+	if out, err := run("doctor"); err == nil || !strings.Contains(out, "behind") {
+		t.Fatalf("doctor on a schema behind the binary: err=%v\n%s", err, out)
+	}
+	pool.Exec(ctx, `UPDATE schema_migration SET version = version + 1000 WHERE version = $1`, latest-1000)
+	// 2. a database finalized by a newer release: serve refuses and says to restore
+	pool.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum,phase) VALUES(9001,'9001_newer_contract','x','contract')`)
+	out, err = run("serve")
+	if err == nil || !strings.Contains(out, "refusing to start") || !strings.Contains(out, "finalized") || !strings.Contains(out, "restore a backup") {
+		t.Fatalf("a finalized newer schema: err=%v\n%s", err, out)
+	}
+	if out, err := run("doctor"); err == nil || !strings.Contains(out, "finalized") {
+		t.Fatalf("doctor on a finalized schema: err=%v\n%s", err, out)
+	}
+	// 3. a newer schema that only expanded: inside the window the binary runs, with a warning
+	pool.Exec(ctx, `UPDATE schema_migration SET phase='expand', name='9001_newer_expand' WHERE version=9001`)
+	out, _ = run("serve")
+	if !strings.Contains(out, "warning: running beside a newer schema") || strings.Contains(out, "refusing to start") {
+		t.Fatalf("inside the window:\n%s", out)
+	}
+	if out, err := run("doctor"); err != nil || !strings.Contains(out, "expand-only") {
+		t.Fatalf("doctor inside the window: err=%v\n%s", err, out)
+	}
+	// 4. nothing to finalize today, and the command says so
+	if out, err := run("migrate", "finalize"); err != nil || !strings.Contains(out, "applied 0 migration") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, err := run("migrate", "plan"); err != nil || !strings.Contains(out, "up to date") {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}

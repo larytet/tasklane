@@ -59,8 +59,8 @@ func main() {
 		return
 	}
 	cfgArgs := os.Args[min(2, len(os.Args)):]
-	if cmd == "blobs" {
-		cfgArgs = nil // its words (migrate, verify, rewrap, --verify) are the command's own; settings come from the environment and the file
+	if cmd == "blobs" || cmd == "migrate" {
+		cfgArgs = nil // their words (migrate, verify, rewrap, plan, finalize, --verify) are the command's own; settings come from the environment and the file
 	}
 	cfg, err := config.Load(config.Options{Args: cfgArgs})
 	if err != nil {
@@ -73,6 +73,14 @@ func main() {
 	case "migrate":
 		st := mustOpen(ctx, cfg)
 		defer st.Close()
+		if len(os.Args) > 2 && os.Args[2] == "finalize" {
+			applied, err := st.Finalize(ctx)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("applied %d migration(s) %v; the previous release can no longer run on this database\n", len(applied), applied)
+			return
+		}
 		if len(os.Args) > 2 && os.Args[2] == "plan" {
 			plan, err := st.Plan(ctx)
 			if err != nil {
@@ -82,7 +90,7 @@ func main() {
 				fmt.Println("the schema is up to date; nothing to apply")
 			}
 			for _, p := range plan {
-				fmt.Printf("would apply %04d %s  [%s%s]\n", p.Version, p.Name, p.Phase, map[bool]string{true: ", no transaction", false: ""}[p.NoTx])
+				fmt.Printf("would apply %04d %s  [%s%s%s]\n", p.Version, p.Name, p.Phase, map[bool]string{true: ", no transaction", false: ""}[p.NoTx], map[bool]string{true: ", held until `migrate finalize`", false: ""}[p.Held])
 			}
 			return
 		}
@@ -183,11 +191,17 @@ func serve(ctx context.Context, cfg config.Config) {
 	defer st.Close()
 	// refuse to run against a schema this binary does not match; migrations are an explicit step
 	// except for a brand-new database, which is initialized here.
-	cur, err := st.SchemaVersion(ctx)
-	if err != nil || cur == 0 {
+	verdict, err := st.CheckCompat(ctx, store.DefaultPolicy())
+	if err != nil {
+		log.Fatalf("refusing to start: %v", err)
+	}
+	if verdict.Fresh {
 		if _, err := st.Migrate(ctx); err != nil {
 			log.Fatalf("migrate: %v", err)
 		}
+	}
+	if verdict.Window {
+		log.Printf("warning: %s", verdict.Note)
 	}
 	svc := domain.New(st.Pool)
 	svc.WebhookAllowPrivate = cfg.WebhookAllowPrivate

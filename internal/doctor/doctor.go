@@ -77,19 +77,15 @@ func Run(ctx context.Context, cfg config.Config) []Check {
 				add("clock", true, "in step with the database")
 			}
 		}
-		ms, _ := store.Migrations()
-		want := 0
-		if len(ms) > 0 {
-			want = ms[len(ms)-1].Version
-		}
 		got, err := st.SchemaVersion(ctx)
+		verdict, cerr := st.CheckCompat(ctx, store.DefaultPolicy())
 		switch {
-		case err != nil:
+		case err != nil || verdict.Fresh:
 			add("schema", false, "schema is not initialized: run `tasklane migrate`")
-		case got < want:
-			add("schema", false, fmt.Sprintf("schema version %d is behind the binary (%d): run `tasklane migrate`", got, want))
-		case got > want:
-			add("schema", false, fmt.Sprintf("schema version %d is newer than this binary (%d): upgrade the binary", got, want))
+		case cerr != nil:
+			add("schema", false, cerr.Error())
+		case verdict.Window:
+			add("schema", true, verdict.Note, true)
 		default:
 			add("schema", true, fmt.Sprintf("version %d", got))
 			var n int

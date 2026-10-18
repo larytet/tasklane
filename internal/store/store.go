@@ -17,7 +17,18 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-type Store struct{ Pool *pgxpool.Pool }
+type Store struct {
+	Pool *pgxpool.Pool
+	// Source supplies the migrations; nil means the ones embedded in the binary. Tests set it to inject failures and releases.
+	Source func() ([]Migration, error)
+}
+
+func (s *Store) migrations() ([]Migration, error) {
+	if s.Source != nil {
+		return s.Source()
+	}
+	return Migrations()
+}
 
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)
@@ -66,6 +77,10 @@ func LintAll() []string {
 	if err != nil {
 		return []string{err.Error()}
 	}
+	return lintSet(ms)
+}
+
+func lintSet(ms []Migration) []string {
 	var out []string
 	earlier := map[string]bool{}
 	for _, m := range ms {
@@ -83,6 +98,9 @@ type PlanStep struct {
 	Name    string
 	Phase   Phase
 	NoTx    bool
+	// Held: a contract migration removes what the previous release still uses, so `migrate` does not apply it; only
+	// `migrate finalize` does, once no node of the previous release is left and a rollback is no longer wanted.
+	Held bool
 }
 
 // ErrChecksum is returned when an applied migration's file changed afterwards (history must not be rewritten).
@@ -98,7 +116,7 @@ func (e *ErrChecksum) Error() string {
 // Plan lists what Migrate would apply, in order, without changing anything. It also verifies the checksums of
 // everything already applied, so a rewritten migration is caught before it can cause drift.
 func (s *Store) Plan(ctx context.Context) ([]PlanStep, error) {
-	ms, err := Migrations()
+	ms, err := s.migrations()
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +151,7 @@ func (s *Store) Plan(ctx context.Context) ([]PlanStep, error) {
 			continue
 		}
 		ph, _ := phaseOf(m.SQL)
-		plan = append(plan, PlanStep{m.Version, m.Name, ph, hasNoTx(m.SQL)})
+		plan = append(plan, PlanStep{m.Version, m.Name, ph, hasNoTx(m.SQL), ph == Contract})
 	}
 	return plan, nil
 }
@@ -141,8 +159,18 @@ func (s *Store) Plan(ctx context.Context) ([]PlanStep, error) {
 // Migrate applies pending migrations under an advisory lock so concurrent nodes are safe. Each migration runs in its own
 // transaction (unless marked no-transaction) with a one second lock timeout: a migration that cannot get its lock fails
 // fast and leaves the schema untouched, instead of queueing behind traffic and blocking it.
-func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
-	if problems := LintAll(); len(problems) > 0 {
+func (s *Store) Migrate(ctx context.Context) (applied []int, err error) { return s.migrate(ctx, false) }
+
+// Finalize applies the pending contract migrations as well. After it, the previous release can no longer run on this
+// database: going back means restoring a backup.
+func (s *Store) Finalize(ctx context.Context) (applied []int, err error) { return s.migrate(ctx, true) }
+
+func (s *Store) migrate(ctx context.Context, finalize bool) (applied []int, err error) {
+	all, err := s.migrations()
+	if err != nil {
+		return nil, err
+	}
+	if problems := lintSet(all); len(problems) > 0 {
 		return nil, fmt.Errorf("migration lint failed:\n  %s", strings.Join(problems, "\n  "))
 	}
 	conn, err := s.Pool.Acquire(ctx)
@@ -183,6 +211,10 @@ func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
 	if _, err = conn.Exec(ctx, `ALTER TABLE schema_migration ADD COLUMN IF NOT EXISTS checksum text`); err != nil {
 		return nil, err
 	}
+	// the phase of each applied migration is what tells a node of an older release whether the schema is still one it can run on
+	if _, err = conn.Exec(ctx, `ALTER TABLE schema_migration ADD COLUMN IF NOT EXISTS phase text`); err != nil {
+		return nil, err
+	}
 	done := map[int]string{}
 	rows, err := conn.Query(ctx, `SELECT version, COALESCE(checksum,'') FROM schema_migration`)
 	if err != nil {
@@ -195,10 +227,7 @@ func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
 		done[v] = c
 	}
 	rows.Close()
-	ms, err := Migrations()
-	if err != nil {
-		return nil, err
-	}
+	ms := all
 	for _, m := range ms {
 		if c, ok := done[m.Version]; ok {
 			switch {
@@ -209,13 +238,17 @@ func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
 			}
 			continue
 		}
+		ph, _ := phaseOf(m.SQL)
+		if ph == Contract && !finalize {
+			return applied, nil // nothing after a held migration is applied either: the order of the schema is the order of the files
+		}
 		if hasNoTx(m.SQL) {
 			if _, err = conn.Exec(ctx, `SET lock_timeout = '1s'`); err == nil {
 				_, err = conn.Exec(ctx, m.SQL)
 			}
 			conn.Exec(ctx, `RESET lock_timeout`)
 			if err == nil {
-				_, err = conn.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum) VALUES($1,$2,$3)`, m.Version, m.Name, checksum(m.SQL))
+				_, err = conn.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum,phase) VALUES($1,$2,$3,$4)`, m.Version, m.Name, checksum(m.SQL), string(ph))
 			}
 			if err != nil {
 				return applied, fmt.Errorf("migration %s: %w", m.Name, err)
@@ -231,7 +264,7 @@ func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
 			_, err = tx.Exec(ctx, m.SQL)
 		}
 		if err == nil {
-			_, err = tx.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum) VALUES($1,$2,$3)`, m.Version, m.Name, checksum(m.SQL))
+			_, err = tx.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum,phase) VALUES($1,$2,$3,$4)`, m.Version, m.Name, checksum(m.SQL), string(ph))
 		}
 		if err != nil {
 			tx.Rollback(ctx)

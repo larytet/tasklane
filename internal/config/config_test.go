@@ -114,3 +114,81 @@ func TestCFG02_ReferenceMatchesSchema(t *testing.T) {
 		t.Fatalf("docs/CONFIGURATION.md is out of date; run `tasklane config docs` and paste the table.\nwant:\n%s\ngot:\n%s", config.Docs(), got)
 	}
 }
+
+// UPG-11: a setting that was renamed or removed still works for one minor release, with a warning.
+func TestUPG11_RenamedAndRemovedSettingsAreMappedWithAWarning(t *testing.T) {
+	renames := []config.Rename{
+		{Old: "smtp_server", New: "smtp_host", Since: "1.3.0"},
+		{Old: "smtp_password", New: "smtp_pass", Since: "1.3.0"},
+		{Old: "legacy_search", Since: "1.3.0", Note: "use search_engine"},
+	}
+	run := func(env []string, file string, args ...string) (map[string]config.Entry, []string, error) {
+		var warns []string
+		es, err := config.Resolve(config.Options{Args: args, Environ: func() []string { return env },
+			ReadFile: func(p string) ([]byte, error) {
+				if p == "tasklane.conf" && file != "" {
+					return []byte(file), nil
+				}
+				if p == "/run/secret" {
+					return []byte("s3cret\n"), nil
+				}
+				return nil, os.ErrNotExist
+			}, Renames: renames, Warn: func(m string) { warns = append(warns, m) }})
+		out := map[string]config.Entry{}
+		for _, e := range es {
+			out[e.Key.Name] = e
+		}
+		return out, warns, err
+	}
+	// the three layers each accept the old name
+	for name, c := range map[string]struct {
+		env  []string
+		file string
+		args []string
+		src  config.Source
+	}{
+		"environment": {env: []string{"TASKLANE_SMTP_SERVER=mx.example.com"}, src: config.SrcEnv},
+		"file":        {file: "smtp_server = mx.example.com", src: config.SrcFile},
+		"flag":        {args: []string{"--smtp-server", "mx.example.com"}, src: config.SrcFlag},
+	} {
+		es, warns, err := run(c.env, c.file, c.args...)
+		if err != nil || es["smtp_host"].Value != "mx.example.com" || es["smtp_host"].Source != c.src {
+			t.Errorf("%s: %+v %v", name, es["smtp_host"], err)
+		}
+		if len(warns) != 1 || !strings.Contains(warns[0], `"smtp_server" was renamed to "smtp_host" in 1.3.0`) || !strings.Contains(warns[0], "next minor release") {
+			t.Errorf("%s: warnings %q", name, warns)
+		}
+	}
+	// the new name wins over the old one in the same layer, whichever is written first
+	for _, env := range [][]string{{"TASKLANE_SMTP_SERVER=old", "TASKLANE_SMTP_HOST=new"}, {"TASKLANE_SMTP_HOST=new", "TASKLANE_SMTP_SERVER=old"}} {
+		es, warns, err := run(env, "")
+		if err != nil || es["smtp_host"].Value != "new" || len(warns) < 1 {
+			t.Errorf("%v: %+v %v %q", env, es["smtp_host"], err, warns)
+		}
+	}
+	// precedence between layers is unchanged: an old name in the environment still beats a new name in the file
+	if es, _, _ := run([]string{"TASKLANE_SMTP_SERVER=from-env"}, "smtp_host = from-file"); es["smtp_host"].Value != "from-env" {
+		t.Errorf("%+v", es["smtp_host"])
+	}
+	// a secret read from a file under its old name
+	if es, _, err := run([]string{"TASKLANE_SMTP_PASSWORD_FILE=/run/secret"}, ""); err != nil || es["smtp_pass"].Value != "s3cret" {
+		t.Errorf("%+v %v", es["smtp_pass"], err)
+	}
+	// a removed setting is ignored, with a warning that says what replaces it, in every layer
+	for name, c := range map[string]struct {
+		env  []string
+		file string
+		args []string
+	}{"environment": {env: []string{"TASKLANE_LEGACY_SEARCH=on"}}, "file": {file: "legacy_search = on"}, "flag": {args: []string{"--legacy-search", "on"}}} {
+		_, warns, err := run(c.env, c.file, c.args...)
+		if err != nil || len(warns) != 1 || !strings.Contains(warns[0], "was removed in 1.3.0") || !strings.Contains(warns[0], "use search_engine") {
+			t.Errorf("%s: %v %q", name, err, warns)
+		}
+	}
+	// the old name is an ordinary unknown setting when it is not in the table (after the release it was kept for)
+	var warns []string
+	_, err := config.Resolve(config.Options{Environ: func() []string { return []string{"TASKLANE_SMTP_SERVER=x"} }, ReadFile: func(string) ([]byte, error) { return nil, os.ErrNotExist }, Renames: []config.Rename{}, Warn: func(m string) { warns = append(warns, m) }})
+	if err == nil || !strings.Contains(err.Error(), "unknown environment variable") || len(warns) != 0 {
+		t.Errorf("%v %q", err, warns)
+	}
+}

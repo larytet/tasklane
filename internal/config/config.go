@@ -118,6 +118,18 @@ var Schema = []Key{
 	{Name: "smtp_pass", Default: "", Kind: "string", Secret: true, Doc: "SMTP password"},
 }
 
+// Rename records a setting whose name changed or that was removed (UPG-11). For one minor release the old name still works: its
+// value is used under the new name (or ignored when the setting is gone) and a warning says so; after that the entry is deleted
+// here and the old name is an unknown setting. Nothing is listed yet because there has been no release to rename anything in.
+type Rename struct {
+	Old   string // the old setting name, lower case with underscores
+	New   string // the new name; empty when the setting was removed
+	Since string // the release that renamed or removed it, for the message
+	Note  string // for a removed setting: what replaces it
+}
+
+var Renamed = []Rename{}
+
 // Source says where an effective value came from.
 type Source string
 
@@ -140,6 +152,9 @@ type Options struct {
 	Args     []string // flags, after the subcommand
 	Environ  func() []string
 	ReadFile func(path string) ([]byte, error)
+	// Renames overrides the table of renamed settings (tests); Warn receives the warnings (default: standard error).
+	Renames []Rename
+	Warn    func(string)
 }
 
 func envName(k string) string { return "TASKLANE_" + strings.ToUpper(k) }
@@ -211,6 +226,29 @@ func Resolve(o Options) ([]Entry, error) {
 		o.ReadFile = os.ReadFile
 	}
 	var errs []string
+	renames := o.Renames
+	if renames == nil {
+		renames = Renamed
+	}
+	warn := o.Warn
+	if warn == nil {
+		warn = func(m string) { fmt.Fprintln(os.Stderr, "warning: "+m) }
+	}
+	// tr maps an old name to its current one; skip says the setting is gone and its value is dropped
+	tr := func(name string, src Source) (cur string, skip bool) {
+		for _, r := range renames {
+			if r.Old != name {
+				continue
+			}
+			if r.New == "" {
+				warn(fmt.Sprintf("setting %q was removed in %s and is ignored%s; delete it from your configuration (it will be an error in the next minor release)", name, r.Since, map[bool]string{true: ": " + r.Note, false: ""}[r.Note != ""]))
+				return "", true
+			}
+			warn(fmt.Sprintf("setting %q was renamed to %q in %s: using it for now; rename it (the old name stops working in the next minor release)", name, r.New, r.Since))
+			return r.New, false
+		}
+		return name, false
+	}
 	vals := map[string]Entry{}
 	for _, k := range Schema {
 		vals[k.Name] = Entry{Key: k, Value: k.Default, Source: SrcDefault}
@@ -218,6 +256,14 @@ func Resolve(o Options) ([]Entry, error) {
 	set := func(name, v string, src Source) {
 		k, _ := find(name)
 		vals[name] = Entry{Key: k, Value: v, Source: src}
+	}
+	// setRenamed applies a value given under an old name, unless the same layer also gave the new name: the new name wins
+	setRenamed := func(old, cur, v string, src Source) {
+		if e := vals[cur]; e.Source == src {
+			warn(fmt.Sprintf("both %q and its new name %q are set; using %q", old, cur, cur))
+			return
+		}
+		set(cur, v, src)
 	}
 	env := map[string]string{}
 	for _, kv := range o.Environ() {
@@ -251,8 +297,19 @@ func Resolve(o Options) ([]Entry, error) {
 			}
 			name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line[:i]), "TASKLANE_")))
 			v := strings.Trim(strings.TrimSpace(line[i+1:]), `"`)
+			old := name
+			if _, ok := find(name); !ok {
+				var skip bool
+				if name, skip = tr(name, SrcFile); skip {
+					continue
+				}
+			}
 			if _, ok := find(name); !ok {
 				errs = append(errs, fmt.Sprintf("%s:%d: %v", path, n+1, unknown("setting", name)))
+				continue
+			}
+			if old != name {
+				setRenamed(old, name, v, SrcFile)
 				continue
 			}
 			set(name, v, SrcFile)
@@ -271,6 +328,18 @@ func Resolve(o Options) ([]Entry, error) {
 			continue
 		}
 		name := strings.ToLower(strings.TrimPrefix(ev, "TASKLANE_"))
+		oldName := ""
+		if _, known := find(strings.TrimSuffix(name, "_file")); !known {
+			base, suffix := name, ""
+			if strings.HasSuffix(name, "_file") {
+				base, suffix = strings.TrimSuffix(name, "_file"), "_file"
+			}
+			if cur, skip := tr(base, SrcEnv); skip {
+				continue
+			} else if cur != base {
+				oldName, name = base, cur+suffix
+			}
+		}
 		fromFile := false
 		if strings.HasSuffix(name, "_file") {
 			if _, ok := find(strings.TrimSuffix(name, "_file")); ok {
@@ -298,6 +367,10 @@ func Resolve(o Options) ([]Entry, error) {
 				errs = append(errs, fmt.Sprintf("%s and %s are both set; use one", envName(name), ev))
 			}
 		}
+		if oldName != "" {
+			setRenamed(oldName, name, v, SrcEnv)
+			continue
+		}
 		set(name, v, SrcEnv)
 	}
 	// flags
@@ -320,6 +393,19 @@ func Resolve(o Options) ([]Entry, error) {
 			continue
 		}
 		name := strings.ReplaceAll(a, "-", "_")
+		oldFlag := ""
+		if _, ok := find(name); !ok {
+			cur, skip := tr(name, SrcFlag)
+			if skip {
+				if !hasV && i+1 < len(o.Args) && !strings.HasPrefix(o.Args[i+1], "--") {
+					i++
+				}
+				continue
+			}
+			if cur != name {
+				oldFlag, name = name, cur
+			}
+		}
 		if _, ok := find(name); !ok {
 			errs = append(errs, unknown("flag", "--"+a).Error())
 			continue
@@ -331,6 +417,10 @@ func Resolve(o Options) ([]Entry, error) {
 			}
 			i++
 			v = o.Args[i]
+		}
+		if oldFlag != "" {
+			setRenamed(oldFlag, name, v, SrcFlag)
+			continue
 		}
 		set(name, v, SrcFlag)
 	}

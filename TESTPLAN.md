@@ -816,6 +816,10 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | PERF (server side) | partial | `Server-Timing` on every response and ETag revalidation (`TestHTTP_ViewETagAndPermissions`); no benchmark yet |
 | PRES-01..04 (HTTP) | partial | `TestHTTP_PresenceAndDrafts` |
 | UPG-01 | partial | `TestUPG01_MigrateIsIdempotentAndRecorded`, `TestUPG01_ConcurrentNodesMigrateOnce`, `TestMigrationsAreNumberedWithoutGaps`; upgrade from the previous release pending (no release yet) |
+| UPG-05 (part) | partial (no floor yet: no release) | `TestUPG05_ADatabaseOlderThanTheFloorIsRefusedWithTheSteppingPath`, `TestUPG05_ContractMigrationsWaitForFinalizeAndKeepTheOrder` (held until finalize, order kept, phase recorded) |
+| UPG-06 | done for a single binary (no pause mode, no real older binary) | `TestUPG06_ANodeOutsideItsSchemaRangeRefusesToStart` (empty, in step, behind, inside the expand-only window, finalized, unclassified), the real binary `TestUPG06_TheServerRefusesToStartOutsideItsSchemaRange` (serve and doctor in each state, `migrate finalize`, `migrate plan`) |
+| UPG-11 | done (nothing renamed yet) | `TestUPG11_RenamedAndRemovedSettingsAreMappedWithAWarning` (file, environment, flag, `*_FILE` secret, new name wins, layers keep their precedence, removed keys, unknown after the window) |
+| UPG-12 (part) | partial | `TestUPG12_AMigrationThatFailsMidwayLeavesNothingBehind` (no partial schema, not recorded, the fix applies, an unreachable database is an error with a reason); a crash during drain is not tested |
 | CFG-01..04, INST-01 | partial | `TestCFG_DoctorReportsBrokenEnvironmentWithoutPanicking`, `TestCFG_DoctorHealthyInstall`; configuration reference document pending |
 | TQL-01 | done | `TestTQL01_GoldenQueries`: about 60 queries over a fixed dataset (fields, operators, `currentUser()`, dates and functions, `ORDER BY`, text, `WAS`, `CHANGED`); `internal/search/tql` grammar tests |
 | TQL-02 | done | `TestFuzzRandomInput` (2 s of random and mutated input, hang detection per input), `FuzzParse` (native fuzzer), `TestLimits` (nesting, clause count, length) |
