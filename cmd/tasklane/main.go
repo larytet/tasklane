@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/larytet/tasklane/internal/egress"
 	"log"
 	"net/http"
 	"net/url"
@@ -223,10 +224,34 @@ func serve(ctx context.Context, cfg config.Config) {
 	ixCtx, stopIx := context.WithCancel(ctx)
 	defer stopIx()
 	go (&search.Indexer{DB: st.Pool}).Run(ixCtx)
+	pgEngine := &search.Postgres{DB: st.Pool}
+	var searcher search.Searcher = pgEngine
+	var searchAdmin *search.Admin
+	if cfg.SearchEngine == "opensearch" {
+		if cfg.OSURL == "" {
+			log.Fatalf("search_engine=opensearch needs opensearch_url")
+		}
+		oc := &search.OSClient{BaseURL: cfg.OSURL, User: cfg.OSUser, Password: cfg.OSPassword, APIKey: cfg.OSAPIKey,
+			HTTP: egress.Policy{AllowPrivate: cfg.OSAllowPrivate}.Client()}
+		oix := &search.OSIndex{DB: st.Pool, C: oc, Alias: cfg.OSIndex, Shards: int(cfg.OSShards), Replicas: int(cfg.OSReplicas)}
+		router := &search.Router{PG: pgEngine, OS: &search.OpenSearch{C: oc, PG: pgEngine, Alias: cfg.OSIndex}, Index: oix}
+		searcher, searchAdmin = router, &search.Admin{Index: oix, Router: router}
+		go func() { // the cluster may come up after us: keep trying, searches fall back to PostgreSQL meanwhile
+			for ixCtx.Err() == nil {
+				if err := oix.Ensure(ixCtx); err != nil {
+					log.Printf("search index: %v (retrying; searches use PostgreSQL meanwhile)", err)
+					time.Sleep(10 * time.Second)
+					continue
+				}
+				oix.Run(ixCtx, log.Printf)
+			}
+		}()
+		go searchAdmin.RunMaintenance(ixCtx, 6*time.Hour, log.Printf)
+	}
 	go sprintJobs(ctx, svc)
 	hub := rt.New(svc)
 	go hub.SweepLoop(ctx)
-	srv := &api.Server{Hub: hub, Svc: svc, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
+	srv := &api.Server{Hub: hub, Svc: svc, Search: searcher, SearchAdmin: searchAdmin, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
 		Ready: func(ctx context.Context) error {
 			if err := st.Pool.Ping(ctx); err != nil {
 				return err

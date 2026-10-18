@@ -276,6 +276,13 @@ func rows() []row {
 		{"DELETE /api/v1/issues/{key}/development/links/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(404), admin: codes(404)}, func(f *fixture) req {
 			return J("DELETE", "/api/v1/issues/"+f.issue()+"/development/links/"+uuid0, nil)
 		}},
+		{"GET /api/v1/admin/search", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/search", nil) }},
+		{"POST /api/v1/admin/search/rebuild", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/search/rebuild", nil) }},
+		{"POST /api/v1/admin/search/reconcile", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/search/reconcile", map[string]any{}) }},
+		{"POST /api/v1/admin/search/reindex", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req {
+			return J("POST", "/api/v1/admin/search/reindex", map[string]any{"project": "ABC"})
+		}},
+		{"POST /api/v1/admin/search/rollback", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/search/rollback", nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

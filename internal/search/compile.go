@@ -18,6 +18,7 @@ type Scope struct {
 	All       bool     // global administrator: every project
 	Readable  []string // project ids the user may read
 	Writable  []string // project ids where internal comments are visible
+	OnlyKeys  []string // when not nil, only these issue keys can match (used for the own-edit overlay)
 	WeekStart time.Weekday
 	Now       func() time.Time
 }
@@ -55,6 +56,9 @@ func compile(q *tql.Query, sc Scope) (*compiled, error) {
 		} else {
 			where = append(where, "i.project_id = ANY("+c.arg(sc.Readable)+"::uuid[])")
 		}
+	}
+	if sc.OnlyKeys != nil {
+		where = append(where, "i.key = ANY("+c.arg(sc.OnlyKeys)+"::text[])")
 	}
 	if q.Where != nil {
 		w, err := c.node(q.Where)

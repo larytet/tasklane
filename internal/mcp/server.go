@@ -30,7 +30,7 @@ var supportedVersions = map[string]bool{"2025-06-18": true, "2025-03-26": true, 
 
 type Server struct {
 	Svc            *domain.Service
-	Search         *search.Postgres
+	Search         search.Searcher
 	CallsPerMinute int // per agent, default 120
 	WritesPerHour  int // per agent, default 200
 	MaxResultChars int // per tool result, default 24000
@@ -55,7 +55,7 @@ type bucket struct {
 	last   time.Time
 }
 
-func New(svc *domain.Service, sp *search.Postgres) *Server {
+func New(svc *domain.Service, sp search.Searcher) *Server {
 	s := &Server{Svc: svc, Search: sp, CallsPerMinute: 120, WritesPerHour: 200, MaxResultChars: 24000, Now: time.Now,
 		sessions: map[string]session{}, calls: map[string]*bucket{}, writes: map[string][]time.Time{}, tools: map[string]*Tool{}}
 	s.registerTools()

@@ -13,6 +13,7 @@ import (
 	"github.com/larytet/tasklane/internal/config"
 	"github.com/larytet/tasklane/internal/doctor"
 	"github.com/larytet/tasklane/internal/testutil"
+	"github.com/larytet/tasklane/internal/testutil/osmock"
 	"github.com/larytet/tasklane/internal/testutil/s3mock"
 	"github.com/larytet/tasklane/internal/testutil/smtpmock"
 )
@@ -178,5 +179,53 @@ func TestCFG_DoctorChecksTheS3Backend(t *testing.T) {
 	missing.S3Bucket = "no-such-bucket"
 	if c := find(doctor.Run(context.Background(), missing), "blob store"); c.OK {
 		t.Fatalf("a missing bucket passed: %+v", c)
+	}
+}
+
+// TQL-18 (doctor part): a misconfigured or unhealthy cluster is named, and PostgreSQL search needs nothing.
+func TestCFG_DoctorChecksOpenSearch(t *testing.T) {
+	m := osmock.New()
+	defer m.Close()
+	base := config.Config{DatabaseURL: "postgres://tl:tl@127.0.0.1:1/none", BlobDir: t.TempDir(), SearchEngine: "opensearch", OSURL: m.URL, OSAllowPrivate: true}
+	if c := find(doctor.Run(context.Background(), base), "search"); !c.OK || !strings.Contains(c.Detail, "green") {
+		t.Fatalf("%+v", c)
+	}
+	m.Health = "yellow"
+	if c := find(doctor.Run(context.Background(), base), "search"); !c.OK || !strings.Contains(c.Detail, "yellow") {
+		t.Fatalf("%+v", c)
+	}
+	m.Health = "red"
+	if c := find(doctor.Run(context.Background(), base), "search"); c.OK || !strings.Contains(c.Detail, "red") {
+		t.Fatalf("%+v", c)
+	}
+	m.Health = "green"
+	m.User, m.Pass = "admin", "secret"
+	if c := find(doctor.Run(context.Background(), base), "search"); c.OK || !strings.Contains(c.Detail, "401") {
+		t.Fatalf("missing credentials passed: %+v", c)
+	}
+	withAuth := base
+	withAuth.OSUser, withAuth.OSPassword = "admin", "secret"
+	if c := find(doctor.Run(context.Background(), withAuth), "search"); !c.OK {
+		t.Fatalf("%+v", c)
+	}
+	// the same cluster is refused when its address is private and the connection does not allow that
+	noPrivate := withAuth
+	noPrivate.OSAllowPrivate = false
+	if c := find(doctor.Run(context.Background(), noPrivate), "search"); c.OK || !strings.Contains(c.Detail, "private") {
+		t.Fatalf("%+v", c)
+	}
+	gone := base
+	gone.OSURL = "http://127.0.0.1:1"
+	if c := find(doctor.Run(context.Background(), gone), "search"); c.OK || !strings.Contains(c.Detail, "fall back to PostgreSQL") {
+		t.Fatalf("%+v", c)
+	}
+	noURL := base
+	noURL.OSURL = ""
+	if c := find(doctor.Run(context.Background(), noURL), "search"); c.OK || !strings.Contains(c.Detail, "opensearch_url") {
+		t.Fatalf("%+v", c)
+	}
+	pg := config.Config{DatabaseURL: "postgres://tl:tl@127.0.0.1:1/none", BlobDir: t.TempDir()}
+	if c := find(doctor.Run(context.Background(), pg), "search"); !c.OK {
+		t.Fatalf("%+v", c)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +13,11 @@ import (
 	"github.com/larytet/tasklane/internal/api"
 
 	"github.com/larytet/tasklane/internal/domain"
+	"github.com/larytet/tasklane/internal/egress"
+	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/testutil"
 	"github.com/larytet/tasklane/internal/testutil/gitmock"
+	"github.com/larytet/tasklane/internal/testutil/osmock"
 )
 
 func rootClient(t *testing.T, e *testutil.Env, like *client) *client {
@@ -261,5 +265,78 @@ func TestHTTP_GitWebhookToPanel(t *testing.T) {
 	// members cannot manage connections
 	if code, _, _ := alice.do("GET", "/api/v1/git/connections", nil); code != 403 {
 		t.Fatalf("%d", code)
+	}
+}
+
+// The index behind the API: search answers come from OpenSearch with PostgreSQL's authorization, the operator endpoints
+// work, and an outage degrades to PostgreSQL with a warning instead of an error.
+func TestHTTP_OpenSearchEngineAndAdminEndpoints(t *testing.T) {
+	e, alice, bob, key := setup(t)
+	m := osmock.New()
+	defer m.Close()
+	c := &search.OSClient{BaseURL: m.URL, HTTP: egress.Policy{AllowPrivate: true}.Client()}
+	ix := &search.OSIndex{DB: e.Store.Pool, C: c, Sleep: func(time.Duration) {}}
+	if err := ix.Ensure(testutil.Ctx()); err != nil {
+		t.Fatal(err)
+	}
+	pg := &search.Postgres{DB: e.Store.Pool}
+	router := &search.Router{PG: pg, OS: &search.OpenSearch{C: c, PG: pg}, Index: ix}
+	admin := &search.Admin{Index: ix, Router: router}
+	ts := httptest.NewServer((&api.Server{Svc: e.Svc, SessionTTL: 3600e9, Search: router, SearchAdmin: admin}).Handler())
+	defer ts.Close()
+	alice.base, bob.base = ts.URL, ts.URL
+	root := rootClient(t, e, alice)
+	root.base = ts.URL
+	sync := func() {
+		for {
+			if n, err := ix.RunOnce(testutil.Ctx()); err != nil || n == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+	}
+	sync()
+	code, out, _ := alice.do("GET", "/api/v1/issues?q="+url.QueryEscape(`text ~ "checkout"`), nil)
+	if code != 200 || out["engine"] != "opensearch" || len(out["issues"].([]any)) != 1 || out["issues"].([]any)[0].(map[string]any)["key"] != key {
+		t.Fatalf("%d %v", code, out)
+	}
+	// operator views are for administrators
+	if code, _, _ := alice.do("GET", "/api/v1/admin/search", nil); code != 403 {
+		t.Fatalf("%d", code)
+	}
+	_, st, _ := root.do("GET", "/api/v1/admin/search", nil)
+	if st["engine"] != "opensearch" || st["health"] != "green" || st["backlog_events"] != float64(0) || st["dead_letters"] != float64(0) {
+		t.Fatalf("%v", st)
+	}
+	code, rep, _ := root.do("POST", "/api/v1/admin/search/reconcile", map[string]any{})
+	if code != 200 || rep["checked"] != float64(1) {
+		t.Fatalf("%d %v", code, rep)
+	}
+	if code, _, _ := root.do("POST", "/api/v1/admin/search/reindex", map[string]any{"project": "ABC"}); code != 200 {
+		t.Fatalf("%d", code)
+	}
+	if code, _, _ := root.do("POST", "/api/v1/admin/search/rebuild", nil); code != 202 {
+		t.Fatalf("%d", code)
+	}
+	for i := 0; i < 100; i++ { // the rebuild runs in the background
+		if _, st, _ := root.do("GET", "/api/v1/admin/search", nil); st["running"] == nil || st["running"] == "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, st, _ = root.do("GET", "/api/v1/admin/search", nil)
+	if st["previous_index"] == nil || st["previous_index"] == "" || st["last_error"] != nil {
+		t.Fatalf("the rebuild did not finish: %v", st)
+	}
+	if code, _, _ := root.do("POST", "/api/v1/admin/search/rollback", nil); code != 200 {
+		t.Fatalf("%d", code)
+	}
+	// an outage is a warning, never an error
+	m.Fail(100000, 503, nil)
+	code, out, _ = bob.do("GET", "/api/v1/issues?q="+url.QueryEscape(`text ~ "checkout"`), nil)
+	if code != 200 || out["engine"] != nil || !strings.Contains(out["warning"].(string), "search is limited") {
+		t.Fatalf("%d %v", code, out)
 	}
 }

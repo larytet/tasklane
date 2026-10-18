@@ -33,7 +33,23 @@ type Result struct {
 	Total       int    `json:"total"`
 	TotalCapped bool   `json:"total_capped"` // true when the real total is at least Total
 	Query       string `json:"query"`
+	// Engine says who answered (postgres or opensearch); LagSeconds is how far behind the index is; Warning explains a
+	// fallback or a limited answer. All three are empty for the PostgreSQL engine.
+	Engine     string  `json:"engine,omitempty"`
+	LagSeconds float64 `json:"lag_seconds,omitempty"`
+	Warning    string  `json:"warning,omitempty"`
 }
+
+// Searcher is what the rest of the application uses: one interface, one query language, either engine behind it.
+// Search, Typeahead are for search boxes and lists and may be answered from an index that is a few seconds behind;
+// Keys is for exact consumers (board filters, reports, bulk targets) and always reads PostgreSQL.
+type Searcher interface {
+	Search(ctx context.Context, sc Scope, src string, pg Page) (*Result, error)
+	Typeahead(ctx context.Context, sc Scope, term string, limit int) ([]Row, error)
+	Keys(ctx context.Context, sc Scope, src string, limit int) ([]string, error)
+}
+
+var _ Searcher = (*Postgres)(nil)
 
 type Page struct{ Limit, Offset int }
 
@@ -182,4 +198,41 @@ func (e *Postgres) Keys(ctx context.Context, sc Scope, src string, limit int) ([
 		keys = append(keys, k)
 	}
 	return keys, rows.Err()
+}
+
+// Hydrate reads the display rows for the given issue ids from PostgreSQL, applying the caller's permission scope and the
+// trash filter again, and returns them in the order of ids. It is the authorization step after an index answered: an id
+// the caller may not see, or that was deleted, moved or re-secured while the index lagged, is dropped here.
+func (e *Postgres) Hydrate(ctx context.Context, sc Scope, ids []string) ([]Row, error) {
+	if len(ids) == 0 {
+		return []Row{}, nil
+	}
+	cq, err := compile(&tql.Query{}, sc)
+	if err != nil {
+		return nil, err
+	}
+	args := append([]any{}, cq.args...)
+	args = append(args, ids)
+	rows, err := e.DB.Query(ctx, `SELECT i.id::text,i.key,i.summary,t.name,st.name,st.category,i.priority,COALESCE(asg.name,''),p.key,i.labels,i.updated_at,
+		(SELECT count(*) FROM comment c WHERE c.issue_id=i.id)`+listFrom+` WHERE `+cq.where+fmt.Sprintf(` AND i.id::text = ANY($%d)`, len(args)), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byID := map[string]Row{}
+	for rows.Next() {
+		var r Row
+		var id string
+		if err := rows.Scan(&id, &r.Key, &r.Summary, &r.Type, &r.Status, &r.StatusCat, &r.Priority, &r.Assignee, &r.Project, &r.Labels, &r.Updated, &r.Comments); err != nil {
+			return nil, err
+		}
+		byID[id] = r
+	}
+	out := make([]Row, 0, len(ids))
+	for _, id := range ids {
+		if r, ok := byID[id]; ok {
+			out = append(out, r)
+		}
+	}
+	return out, rows.Err()
 }

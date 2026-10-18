@@ -22,16 +22,17 @@ import (
 )
 
 type Server struct {
-	Svc        *domain.Service
-	SessionTTL time.Duration
-	Secure     bool // set the Secure flag on the session cookie
-	Extra      func(mux *http.ServeMux, s *Server)
-	Ready      func(ctx context.Context) error
-	Search     *search.Postgres
-	BlobOrigin string // optional separate origin for signed file links
-	Hub        *rt.Hub
-	MCP        *mcp.Server
-	routes     []string
+	Svc         *domain.Service
+	SessionTTL  time.Duration
+	Secure      bool // set the Secure flag on the session cookie
+	Extra       func(mux *http.ServeMux, s *Server)
+	Ready       func(ctx context.Context) error
+	Search      search.Searcher
+	SearchAdmin *search.Admin
+	BlobOrigin  string // optional separate origin for signed file links
+	Hub         *rt.Hub
+	MCP         *mcp.Server
+	routes      []string
 }
 
 // handle registers a route and records its pattern, so a test can prove that every route is covered by the authorization matrix.
@@ -324,6 +325,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerSprints(mux)
 	s.registerReports(mux)
 	s.registerGit(mux)
+	s.registerSearchAdmin(mux)
 	s.registerAttachments(mux)
 	s.registerExchange(mux)
 	if s.Extra != nil {

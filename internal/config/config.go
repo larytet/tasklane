@@ -13,33 +13,42 @@ import (
 )
 
 type Config struct {
-	Listen        string
-	DatabaseURL   string
-	BlobDir       string
-	SecretKey     string
-	BlobBackend   string
-	S3Endpoint    string
-	S3Region      string
-	S3Bucket      string
-	S3Prefix      string
-	S3AccessKey   string
-	S3SecretKey   string
-	S3PathStyle   bool
-	S3SSE         string
-	S3KMSKeyID    string
-	S3PartSizeMB  int64
-	MaxUploadMB   int64
-	SessionTTL    time.Duration
-	BaseURL       string
-	SMTPHost      string
-	SMTPPort      int
-	SMTPFrom      string
-	SMTPTLS       string
-	SMTPUser      string
-	SMTPPass      string
-	AdminEmail    string
-	AdminPassword string
-	PresenceTTL   time.Duration
+	Listen         string
+	DatabaseURL    string
+	BlobDir        string
+	SearchEngine   string
+	OSURL          string
+	OSUser         string
+	OSPassword     string
+	OSAPIKey       string
+	OSAllowPrivate bool
+	OSIndex        string
+	OSShards       int64
+	OSReplicas     int64
+	SecretKey      string
+	BlobBackend    string
+	S3Endpoint     string
+	S3Region       string
+	S3Bucket       string
+	S3Prefix       string
+	S3AccessKey    string
+	S3SecretKey    string
+	S3PathStyle    bool
+	S3SSE          string
+	S3KMSKeyID     string
+	S3PartSizeMB   int64
+	MaxUploadMB    int64
+	SessionTTL     time.Duration
+	BaseURL        string
+	SMTPHost       string
+	SMTPPort       int
+	SMTPFrom       string
+	SMTPTLS        string
+	SMTPUser       string
+	SMTPPass       string
+	AdminEmail     string
+	AdminPassword  string
+	PresenceTTL    time.Duration
 }
 
 // Key is one setting. The environment variable is TASKLANE_ plus the upper-cased name, the flag is --name
@@ -71,6 +80,15 @@ var Schema = []Key{
 	{Name: "s3_kms_key_id", Default: "", Kind: "string", Doc: "KMS key for `s3_sse=aws:kms`; empty uses the bucket default key"},
 	{Name: "s3_part_size_mb", Default: "16", Kind: "int", Doc: "Multipart part size in MiB (at least 5); larger files are uploaded in parts"},
 	{Name: "secret_key", Default: "", Kind: "string", Secret: true, Doc: "64 hexadecimal characters (32 bytes) that encrypt stored credentials such as Git tokens and webhook secrets. Set it (for example from a secret file) so a database dump alone cannot decrypt them; when unset a key kept in the database is used"},
+	{Name: "search_engine", Default: "postgres", Kind: "enum", Enum: []string{"postgres", "opensearch"}, Doc: "`postgres` (built in, designed for up to 100,000 issues) or `opensearch` (a separate cluster you run; PostgreSQL stays the source of truth and answers whenever the cluster is unavailable)"},
+	{Name: "opensearch_url", Default: "", Kind: "string", Doc: "Base URL of the OpenSearch cluster, such as `https://opensearch.internal:9200`. Never expose the cluster publicly"},
+	{Name: "opensearch_user", Default: "", Kind: "string", Doc: "OpenSearch user for basic authentication"},
+	{Name: "opensearch_password", Default: "", Kind: "string", Secret: true, Doc: "OpenSearch password"},
+	{Name: "opensearch_api_key", Default: "", Kind: "string", Secret: true, Doc: "OpenSearch API key (used instead of user and password when set)"},
+	{Name: "opensearch_allow_private", Default: "false", Kind: "enum", Enum: []string{"true", "false"}, Doc: "Allow the cluster to be on a private or loopback address (the usual case in a private network)"},
+	{Name: "opensearch_index", Default: "tasklane-issues", Kind: "string", Doc: "Alias name for the issue index; versioned indexes are created behind it"},
+	{Name: "opensearch_shards", Default: "1", Kind: "int", Doc: "Primary shards for new indexes"},
+	{Name: "opensearch_replicas", Default: "0", Kind: "int", Doc: "Replicas for new indexes (use at least 1 on a multi-node cluster)"},
 	{Name: "max_upload_mb", Default: "100", Kind: "int", Doc: "Largest accepted attachment, in MiB"},
 	{Name: "session_ttl", Default: "336h", Kind: "duration", Doc: "How long a sign-in lasts"},
 	{Name: "presence_ttl", Default: "30s", Kind: "duration", Doc: "How long an editing indicator lives without a heartbeat"},
@@ -350,7 +368,8 @@ func Load(o Options) (Config, error) {
 	}
 	n := func(k string) int64 { v, _ := strconv.ParseInt(m[k], 10, 64); return v }
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
-	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], MaxUploadMB: n("max_upload_mb"),
+	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], SearchEngine: m["search_engine"], OSURL: m["opensearch_url"], OSUser: m["opensearch_user"], OSPassword: m["opensearch_password"],
+		OSAPIKey: m["opensearch_api_key"], OSAllowPrivate: m["opensearch_allow_private"] == "true", OSIndex: m["opensearch_index"], OSShards: n("opensearch_shards"), OSReplicas: n("opensearch_replicas"), MaxUploadMB: n("max_upload_mb"),
 		BlobBackend: m["blob_backend"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
 		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],

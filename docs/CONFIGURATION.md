@@ -23,6 +23,15 @@ Precedence, lowest to highest: built-in default, config file (`--config PATH`, `
 | `s3_kms_key_id` | `TASKLANE_S3_KMS_KEY_ID` | `--s3-kms-key-id` | unset | KMS key for `s3_sse=aws:kms`; empty uses the bucket default key |
 | `s3_part_size_mb` | `TASKLANE_S3_PART_SIZE_MB` | `--s3-part-size-mb` | `16` | Multipart part size in MiB (at least 5); larger files are uploaded in parts |
 | `secret_key` | `TASKLANE_SECRET_KEY`, `TASKLANE_SECRET_KEY_FILE` | `--secret-key` | unset | 64 hexadecimal characters (32 bytes) that encrypt stored credentials such as Git tokens and webhook secrets. Set it (for example from a secret file) so a database dump alone cannot decrypt them; when unset a key kept in the database is used |
+| `search_engine` | `TASKLANE_SEARCH_ENGINE` | `--search-engine` | `postgres` | `postgres` (built in, designed for up to 100,000 issues) or `opensearch` (a separate cluster you run; PostgreSQL stays the source of truth and answers whenever the cluster is unavailable) |
+| `opensearch_url` | `TASKLANE_OPENSEARCH_URL` | `--opensearch-url` | unset | Base URL of the OpenSearch cluster, such as `https://opensearch.internal:9200`. Never expose the cluster publicly |
+| `opensearch_user` | `TASKLANE_OPENSEARCH_USER` | `--opensearch-user` | unset | OpenSearch user for basic authentication |
+| `opensearch_password` | `TASKLANE_OPENSEARCH_PASSWORD`, `TASKLANE_OPENSEARCH_PASSWORD_FILE` | `--opensearch-password` | unset | OpenSearch password |
+| `opensearch_api_key` | `TASKLANE_OPENSEARCH_API_KEY`, `TASKLANE_OPENSEARCH_API_KEY_FILE` | `--opensearch-api-key` | unset | OpenSearch API key (used instead of user and password when set) |
+| `opensearch_allow_private` | `TASKLANE_OPENSEARCH_ALLOW_PRIVATE` | `--opensearch-allow-private` | `false` | Allow the cluster to be on a private or loopback address (the usual case in a private network) |
+| `opensearch_index` | `TASKLANE_OPENSEARCH_INDEX` | `--opensearch-index` | `tasklane-issues` | Alias name for the issue index; versioned indexes are created behind it |
+| `opensearch_shards` | `TASKLANE_OPENSEARCH_SHARDS` | `--opensearch-shards` | `1` | Primary shards for new indexes |
+| `opensearch_replicas` | `TASKLANE_OPENSEARCH_REPLICAS` | `--opensearch-replicas` | `0` | Replicas for new indexes (use at least 1 on a multi-node cluster) |
 | `max_upload_mb` | `TASKLANE_MAX_UPLOAD_MB` | `--max-upload-mb` | `100` | Largest accepted attachment, in MiB |
 | `session_ttl` | `TASKLANE_SESSION_TTL` | `--session-ttl` | `336h` | How long a sign-in lasts |
 | `presence_ttl` | `TASKLANE_PRESENCE_TTL` | `--presence-ttl` | `30s` | How long an editing indicator lives without a heartbeat |

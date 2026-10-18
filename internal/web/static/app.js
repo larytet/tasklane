@@ -115,6 +115,7 @@
     if (r.status === 400) { err.textContent = r.data.error + (r.data.detail && r.data.detail.pos != null ? ' (at position ' + r.data.detail.pos + ')' : ''); return; }
     if (r.status !== 200) { err.textContent = 'Could not load issues'; return; }
     meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues';
+    if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
     if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
     for (const i of r.data.issues) {
       const open = () => { location.hash = '#/issue/' + i.key; };

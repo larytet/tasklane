@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/larytet/tasklane/internal/blob"
+	"github.com/larytet/tasklane/internal/egress"
+	"github.com/larytet/tasklane/internal/search"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,6 +128,25 @@ func Run(ctx context.Context, cfg config.Config) []Check {
 			os.Remove(f)
 			add("blob store", true, "local filesystem at "+cfg.BlobDir+" is writable")
 		}
+	}
+	if cfg.SearchEngine == "opensearch" {
+		if cfg.OSURL == "" {
+			add("search", false, "search_engine is opensearch but opensearch_url is not set")
+		} else {
+			oc := &search.OSClient{BaseURL: cfg.OSURL, User: cfg.OSUser, Password: cfg.OSPassword, APIKey: cfg.OSAPIKey, HTTP: egress.Policy{AllowPrivate: cfg.OSAllowPrivate, Timeout: 5 * time.Second}.Client(), Timeout: 5 * time.Second}
+			switch h, err := oc.Health(ctx); {
+			case err != nil:
+				add("search", false, "cannot use the OpenSearch cluster at "+cfg.OSURL+": "+err.Error()+" (searches fall back to PostgreSQL meanwhile)")
+			case h == "red":
+				add("search", false, "the OpenSearch cluster is red: some shards are unavailable")
+			case h == "yellow":
+				add("search", true, "OpenSearch is reachable; the cluster is yellow (replicas not allocated: expected on a single node)", true)
+			default:
+				add("search", true, "OpenSearch is reachable and green")
+			}
+		}
+	} else {
+		add("search", true, "PostgreSQL full-text search (built in, designed for up to 100,000 issues)", true)
 	}
 	if cfg.SMTPHost == "" {
 		add("mail", true, "outbound email is not configured (account mail and notifications are off); set TASKLANE_SMTP_HOST to turn it on", true)
