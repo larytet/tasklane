@@ -76,24 +76,45 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /api/v1/logout", s.auth(s.logout))
 	s.handle(mux, "GET /api/v1/me", s.auth(func(w http.ResponseWriter, r *http.Request) { s.json(w, 200, actorOf(r)) }))
 	s.handle(mux, "GET /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		us, err := s.Svc.ListUsers(r.Context())
+		us, err := s.Svc.ListUsersFor(r.Context(), actorOf(r))
 		s.reply(w, us, err)
 	}))
 
 	s.handle(mux, "POST /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		if !actorOf(r).Admin {
+		if a := actorOf(r); !a.Admin && !a.OrgAdmin {
 			s.fail(w, 403, "forbidden", "administrators only", nil)
 			return
 		}
 		var in struct {
 			Email, Name, Password string
 			Admin                 bool
+			Org                   string
 		}
 		if !s.decode(w, r, &in) {
 			return
 		}
-		u, err := s.Svc.CreateUser(r.Context(), in.Email, in.Name, in.Password, in.Admin)
+		u, err := s.Svc.CreateUserAs(r.Context(), actorOf(r), in.Email, in.Name, in.Password, in.Admin, in.Org)
 		s.replyStatus(w, 201, u, err)
+	}))
+	s.handle(mux, "GET /api/v1/orgs", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListOrganizations(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/orgs", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name          string `json:"name"`
+			AdminEmail    string `json:"admin_email"`
+			AdminName     string `json:"admin_name"`
+			AdminPassword string `json:"admin_password"`
+		}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.CreateOrganization(r.Context(), actorOf(r), in.Name, in.AdminEmail, in.AdminName, in.AdminPassword)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "GET /api/v1/me/org", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.MyOrganization(r.Context(), actorOf(r))
+		s.reply(w, v, err)
 	}))
 	// agent controls (administrators): the kill switch and per-agent pause take effect on the agent's next call
 	s.handle(mux, "POST /api/v1/agents/kill", s.auth(func(w http.ResponseWriter, r *http.Request) {
@@ -244,7 +265,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	s.handle(mux, "GET /api/v1/bootstrap", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		ps, err1 := s.Svc.ListProjects(r.Context(), actorOf(r))
-		us, err2 := s.Svc.ListUsers(r.Context())
+		us, err2 := s.Svc.ListUsersFor(r.Context(), actorOf(r))
 		if err1 != nil || err2 != nil {
 			s.fail(w, 500, "internal", "internal error", nil)
 			return

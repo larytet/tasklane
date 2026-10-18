@@ -69,8 +69,23 @@ func New(db *pgxpool.Pool) *Service {
 type Actor struct {
 	ID    string `json:"id"`
 	Label string `json:"label"` // shown in history and presence, e.g. "Jana K.", "API: bot", "Agent: claude"
+	// Admin is the instance administrator (and the system itself): global settings, and every organization.
 	Admin bool   `json:"admin"`
 	Kind  string `json:"kind"`
+	// Org is the organization the person belongs to (empty means the Default one) and OrgAdmin that they administer it, and
+	// only it: an organization administrator is not Admin.
+	Org      string `json:"org,omitempty"`
+	OrgAdmin bool   `json:"org_admin,omitempty"`
+}
+
+// DefaultOrg is the organization every installation starts with and the one an actor without an organization belongs to.
+const DefaultOrg = "00000000-0000-0000-0000-0000000000a1"
+
+func (a Actor) OrgID() string {
+	if a.Org == "" {
+		return DefaultOrg
+	}
+	return a.Org
 }
 
 var (

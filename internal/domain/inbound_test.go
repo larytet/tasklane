@@ -701,3 +701,35 @@ func TestMAIL10_DKIMProvesOriginWithoutATrustedReceiver(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// SEC-09: mail from a person of another organization cannot create or comment in this organization's projects, and releasing it does not either.
+func TestSEC09_InboundMailDoesNotCrossOrganizations(t *testing.T) {
+	e := newInbound(t)
+	if _, err := e.Svc.CreateOrganization(ctx, e.Admin, "Globex", "boss@globex.example", "Boss", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	var bid string
+	e.Store.Pool.QueryRow(ctx, `SELECT id FROM app_user WHERE email='boss@globex.example'`).Scan(&bid)
+	boss, _ := e.Svc.ActorFor(ctx, bid)
+	if _, err := e.Svc.CreateUserAs(ctx, boss, "gina@globex.example", "Gina", "password123", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	n := e.issueCount()
+	cs := len(e.comments())
+	for name, raw := range map[string][]byte{
+		"create at the project address": e.eml("gina@globex.example", "ABC@tasklane.example.com", "planted issue", []string{authOK}, "from another organization"),
+		"reply by the subject key":      e.eml("gina@globex.example", "tasklane@example.com", "Re: [ABC-1] x", []string{authOK}, "planted comment"),
+		"reply by the signed address":   e.eml("gina@globex.example", e.replyAddr("bob@example.com"), "Re: x", []string{authOK}, "planted via bob's address"),
+	} {
+		r := e.ingest(true, raw)
+		if r.Outcome != "quarantined" {
+			t.Errorf("%s: %+v", name, r)
+		}
+		if _, err := e.Svc.ReleaseInbound(ctx, e.Admin, r.ID); err == nil {
+			t.Errorf("%s: a release acted across organizations", name)
+		}
+	}
+	if e.issueCount() != n || len(e.comments()) != cs {
+		t.Fatalf("something was planted: %d issues (was %d), %d comments (was %d)", e.issueCount(), n, len(e.comments()), cs)
+	}
+}

@@ -31,7 +31,7 @@ func validScopes(sc []string) error {
 
 // CreateAgent makes a dedicated agent account (a user of type agent, no password), the recommended setup.
 func (s *Service) CreateAgent(ctx context.Context, a Actor, name string) (User, error) {
-	if !a.Admin {
+	if !a.Admin && !a.OrgAdmin { // an organization administrator makes agents for their own organization
 		return User{}, ErrForbidden
 	}
 	name = strings.TrimSpace(name)
@@ -44,8 +44,12 @@ func (s *Service) CreateAgent(ctx context.Context, a Actor, name string) (User, 
 		}
 		return '-'
 	}, name))
-	u := User{Email: "agent-" + slug + "@agents.invalid", Name: name, Kind: "agent"}
-	err := s.DB.QueryRow(ctx, `INSERT INTO app_user(email,name,kind) VALUES($1,$2,'agent') RETURNING id`, u.Email, name).Scan(&u.ID)
+	domainPart := "agents.invalid"
+	if a.OrgID() != DefaultOrg { // names are per organization: another organization's agent of the same name is not a clash
+		domainPart = a.OrgID()[:8] + "." + domainPart
+	}
+	u := User{Email: "agent-" + slug + "@" + domainPart, Name: name, Kind: "agent"}
+	err := s.DB.QueryRow(ctx, `INSERT INTO app_user(email,name,kind,org_id) VALUES($1,$2,'agent',$3) RETURNING id`, u.Email, name, a.OrgID()).Scan(&u.ID)
 	if err != nil && strings.Contains(err.Error(), "app_user_email_key") {
 		return User{}, invalid("an agent with this name already exists")
 	}
@@ -55,7 +59,13 @@ func (s *Service) CreateAgent(ctx context.Context, a Actor, name string) (User, 
 // CreateScopedToken returns a new token for the user; only its hash is stored. A nil scope list is a plain REST token.
 func (s *Service) CreateScopedToken(ctx context.Context, a Actor, userID, name string, scopes []string, ttl time.Duration) (string, error) {
 	if !a.Admin && a.ID != userID {
-		return "", ErrForbidden
+		var same bool // an organization administrator may issue a token for a person or agent of their own organization
+		if a.OrgAdmin {
+			s.DB.QueryRow(ctx, `SELECT org_id::text=$2 FROM app_user WHERE id::text=$1`, userID, a.OrgID()).Scan(&same)
+		}
+		if !same {
+			return "", ErrForbidden
+		}
 	}
 	if err := validScopes(scopes); err != nil {
 		return "", err
@@ -90,8 +100,10 @@ func (s *Service) AuthenticateAgent(ctx context.Context, tok string) (Actor, []s
 	var scopes []string
 	var paused bool
 	var exp, rev *time.Time
-	err := s.DB.QueryRow(ctx, `SELECT u.id,u.name,u.kind,u.is_admin,u.agent_paused,t.name,t.scopes,t.expires_at,t.revoked_at FROM api_token t JOIN app_user u ON u.id=t.user_id WHERE t.token_hash=$1 AND u.active`, hashToken(tok)).
-		Scan(&u.ID, &u.Name, &u.Kind, &u.Admin, &paused, &name, &scopes, &exp, &rev)
+	var inst bool
+	var org string
+	err := s.DB.QueryRow(ctx, `SELECT u.id,u.name,u.kind,u.is_admin,u.instance_admin,u.org_id::text,u.agent_paused,t.name,t.scopes,t.expires_at,t.revoked_at FROM api_token t JOIN app_user u ON u.id=t.user_id WHERE t.token_hash=$1 AND u.active`, hashToken(tok)).
+		Scan(&u.ID, &u.Name, &u.Kind, &u.Admin, &inst, &org, &paused, &name, &scopes, &exp, &rev)
 	if err == pgx.ErrNoRows {
 		return Actor{}, nil, ErrForbidden
 	}
@@ -115,7 +127,7 @@ func (s *Service) AuthenticateAgent(ctx context.Context, tok string) (Actor, []s
 		label = "Agent: " + name + " (via " + u.Name + ")"
 	}
 	// an agent never exceeds the permission scheme, and never gets administrator rights through a token
-	return Actor{ID: u.ID, Label: label, Admin: u.Admin && u.Kind != "agent", Kind: "agent"}, scopes, nil
+	return Actor{ID: u.ID, Label: label, Admin: u.Admin && inst && u.Kind != "agent", OrgAdmin: u.Admin && u.Kind != "agent", Org: org, Kind: "agent"}, scopes, nil
 }
 
 // LeaseHeld is returned when another agent holds a live claim (HTTP-style conflict).

@@ -454,8 +454,11 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 	}
 	v := s.classifyInbound(ctx, p, raw, trusted, from, ferr, id, now, lim)
 	if v.outcome == "accepted" && v.create != nil {
-		act := Actor{ID: v.userID, Label: v.userName, Admin: v.userAdmin && v.userKind != "agent", Kind: v.userKind}
-		key, err := s.createFromMail(ctx, act, *v.create, v.body)
+		act, err := s.actorFor(ctx, v.userID)
+		key := ""
+		if err == nil {
+			key, err = s.createFromMail(ctx, act, *v.create, v.body)
+		}
 		if err != nil {
 			v.outcome, v.reason = "quarantined", "the issue was refused: "+err.Error()
 		} else {
@@ -463,8 +466,11 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 			s.DB.QueryRow(ctx, `SELECT id FROM issue WHERE key=$1`, key).Scan(&v.issueID)
 		}
 	} else if v.outcome == "accepted" {
-		act := Actor{ID: v.userID, Label: v.userName, Admin: v.userAdmin && v.userKind != "agent", Kind: v.userKind}
-		c, err := s.AddComment(ctx, act, v.issueKey, v.body, false)
+		act, aerr := s.actorFor(ctx, v.userID)
+		c, err := Comment{}, aerr
+		if aerr == nil {
+			c, err = s.AddComment(ctx, act, v.issueKey, v.body, false)
+		}
 		if err != nil {
 			v.outcome, v.reason = "quarantined", "the sender may not comment on that issue"
 			if !errors.Is(err, ErrForbidden) && !errors.Is(err, ErrNotFound) {
@@ -763,16 +769,15 @@ func (s *Service) ReleaseInbound(ctx context.Context, a Actor, id int64) (Commen
 	revert := func(reason string) {
 		s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome='quarantined',reason=$2,handled_by=NULL,handled_at=NULL WHERE id=$1`, id, reason)
 	}
-	var name, ukind string
-	var admin bool
+	act, aerr := s.actorFor(ctx, userID)
+	if aerr != nil {
+		revert("the sender no longer exists")
+		return Comment{}, invalid("the sender no longer exists")
+	}
 	if kind == "create" {
-		if err := s.DB.QueryRow(ctx, `SELECT name,kind,is_admin FROM app_user WHERE id=$1 AND active`, userID).Scan(&name, &ukind, &admin); err != nil {
-			revert("the sender no longer exists")
-			return Comment{}, invalid("the sender no longer exists")
-		}
 		var spec createSpec
 		json.Unmarshal(detail, &spec)
-		key, err := s.createFromMail(ctx, Actor{ID: userID, Label: name, Admin: admin && ukind != "agent", Kind: ukind}, spec, body)
+		key, err := s.createFromMail(ctx, act, spec, body)
 		if err != nil {
 			revert("release failed: " + err.Error())
 			return Comment{}, err
@@ -781,11 +786,11 @@ func (s *Service) ReleaseInbound(ctx context.Context, a Actor, id int64) (Commen
 		return Comment{Body: key}, nil // the issue's key is what a release of a new-issue message returns
 	}
 	var key string
-	if err := s.DB.QueryRow(ctx, `SELECT i.key,u.name,u.kind,u.is_admin FROM issue i, app_user u WHERE i.id=$1 AND u.id=$2 AND u.active`, issueID, userID).Scan(&key, &name, &ukind, &admin); err != nil {
-		revert("the sender or the issue no longer exists")
-		return Comment{}, invalid("the sender or the issue no longer exists")
+	if err := s.DB.QueryRow(ctx, `SELECT key FROM issue WHERE id::text=$1`, issueID).Scan(&key); err != nil {
+		revert("the issue no longer exists")
+		return Comment{}, invalid("the issue no longer exists")
 	}
-	c, err := s.AddComment(ctx, Actor{ID: userID, Label: name, Admin: admin && ukind != "agent", Kind: ukind}, key, body, false)
+	c, err := s.AddComment(ctx, act, key, body, false)
 	if err != nil {
 		revert("release failed: the sender may not comment on that issue")
 		return Comment{}, err
@@ -930,10 +935,8 @@ func (s *Service) createFromMail(ctx context.Context, a Actor, c createSpec, bod
 		return "", err
 	}
 	for _, uid := range c.CC {
-		var name, kind string
-		var admin bool
-		if s.DB.QueryRow(ctx, `SELECT name,kind,is_admin FROM app_user WHERE id=$1 AND active`, uid).Scan(&name, &kind, &admin) == nil {
-			s.SetWatch(ctx, Actor{ID: uid, Label: name, Admin: admin && kind != "agent", Kind: kind}, is.Key, true)
+		if w, err := s.actorFor(ctx, uid); err == nil {
+			s.SetWatch(ctx, w, is.Key, true)
 		}
 	}
 	return is.Key, nil

@@ -453,3 +453,45 @@ func TestPRES_HTTPFallbackPresenceReachesSocketClients(t *testing.T) {
 		t.Fatal("leave over HTTP not broadcast")
 	}
 }
+
+// SEC-09: realtime does not cross organizations, for a member or for the administrator of another organization.
+func TestSEC09_WebSocketsDoNotCrossOrganizations(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	if _, err := e.Svc.CreateOrganization(ctx, e.Admin, "Globex", "boss@globex.example", "Boss", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	e.Store.Pool.QueryRow(ctx, `SELECT id FROM app_user WHERE email='boss@globex.example'`).Scan(&id)
+	boss, _ := e.Svc.ActorFor(ctx, id)
+	if !boss.OrgAdmin || boss.Admin {
+		t.Fatalf("%+v", boss)
+	}
+	gu, _ := e.Svc.CreateUserAs(ctx, boss, "gina@globex.example", "Gina", "password123", false, "")
+	gina, _ := e.Svc.ActorFor(ctx, gu.ID)
+	for name, who := range map[string]domain.Actor{"member of org B": gina, "administrator of org B": boss} {
+		s := e.dial(who)
+		s.send(map[string]any{"op": "sub", "channel": "issue:" + e.key})
+		if m, ok := s.next(2*time.Second, typ("error")); !ok || m["code"] != "denied" {
+			t.Fatalf("%s: %v", name, m)
+		}
+		s.send(map[string]any{"op": "presence", "channel": "issue:" + e.key, "field": "description"})
+		if m, _ := s.next(2*time.Second, typ("error")); m["code"] != "denied" {
+			t.Fatalf("%s: presence %v", name, m)
+		}
+		e.Svc.AddComment(ctx, e.Alice, e.key, "organization A only: "+name, false)
+		if m, ok := s.next(500*time.Millisecond, typ("event")); ok {
+			t.Fatalf("%s received an event from another organization: %v", name, m)
+		}
+	}
+	if len(e.Svc.Presence.List(e.key, "")) != 0 {
+		t.Fatal("a person of another organization appeared in presence")
+	}
+	// the instance administrator, the operator, still sees everything
+	op := e.dial(e.Admin)
+	op.sub(e.key)
+	e.Svc.AddComment(ctx, e.Alice, e.key, "the operator sees this", false)
+	if _, ok := op.next(2*time.Second, typ("event")); !ok {
+		t.Fatal("the instance administrator lost access")
+	}
+}

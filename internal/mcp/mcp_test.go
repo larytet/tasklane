@@ -1000,3 +1000,69 @@ func TestMCP_MirroredIssuesAreReadOnlyForAgents(t *testing.T) {
 		}
 	}
 }
+
+// SEC-09: an agent of another organization sees none of this organization's issues, by any tool.
+func TestSEC09_MCPAgentsDoNotCrossOrganizations(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.Svc.CreateOrganization(ctx, e.Admin, "Globex", "boss@globex.example", "Boss", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	e.Store.Pool.QueryRow(ctx, `SELECT id FROM app_user WHERE email='boss@globex.example'`).Scan(&id)
+	boss, _ := e.Svc.ActorFor(ctx, id)
+	if _, err := e.Svc.CreateProject(ctx, boss, "GLX", "Globex"); err != nil {
+		t.Fatal(err)
+	}
+	u, err := e.Svc.CreateAgent(ctx, boss, "claude") // the name is also free in the other organization
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Svc.CreateAgent(ctx, e.Alice, "x"); err == nil {
+		t.Fatal("a member created an agent")
+	}
+	if err := e.Svc.AddMember(ctx, boss, "GLX", u.ID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := e.Svc.CreateScopedToken(ctx, boss, u.ID, "t", nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Svc.CreateScopedToken(ctx, boss, e.Alice.ID, "t", nil, time.Hour); err == nil {
+		t.Fatal("an organization administrator issued a token for a person of another organization")
+	}
+	if _, err := e.newAgent("claude", "member", nil), error(nil); err != nil { // the same name in the Default organization
+		t.Fatal(err)
+	}
+	ag := &agent{t: t, e: e, user: u, token: tok}
+	ag.init()
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"get_issue", map[string]any{"key": e.key}},
+		{"get_issue_context", map[string]any{"key": e.key}},
+		{"list_comments", map[string]any{"key": e.key}},
+		{"list_transitions", map[string]any{"key": e.key}},
+		{"add_comment", map[string]any{"key": e.key, "body": "planted"}},
+		{"update_fields", map[string]any{"key": e.key, "fields": map[string]any{"priority": "high"}}},
+		{"claim_issue", map[string]any{"key": e.key}},
+		{"create_issue", map[string]any{"project": "ABC", "type": "Task", "summary": "planted"}},
+	} {
+		r := ag.call(c.tool, c.args)
+		if !r.Err || strings.Contains(r.Text, "realtime") {
+			t.Errorf("%s: an agent of another organization got %q", c.tool, r.Text)
+		}
+	}
+	for _, q := range []string{"", "text ~ realtime", "project = ABC"} {
+		r := ag.ok("search_issues", map[string]any{"query": q})
+		if strings.Contains(r.Text, e.key) || strings.Contains(r.Text, "realtime") {
+			t.Errorf("search %q leaks: %s", q, r.Text)
+		}
+	}
+	if r := ag.ok("list_projects", nil); strings.Contains(r.Text, "ABC") || !strings.Contains(r.Text, "GLX") {
+		t.Errorf("list_projects: %s", r.Text)
+	}
+	if v, _ := e.Svc.View(ctx, e.Alice, e.key); len(v.Comments) != 0 {
+		t.Fatal("a comment was planted")
+	}
+}

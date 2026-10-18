@@ -716,6 +716,12 @@ func rows() []row {
 		{"POST /api/v1/admin/mail/imap/{id}/check", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
 			return J("POST", "/api/v1/admin/mail/imap/00000000-0000-0000-0000-000000000000/check", nil)
 		}},
+		{"GET /api/v1/orgs", adminer, func(f *fixture) req { return J("GET", "/api/v1/orgs", nil) }},
+		{"POST /api/v1/orgs", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/orgs", map[string]any{"name": fmt.Sprint("Org ", f.n), "admin_email": fmt.Sprint("boss", f.n, "@org.example"), "admin_name": "Boss", "admin_password": "password123"})
+		}},
+		{"GET /api/v1/me/org", authed, func(f *fixture) req { return J("GET", "/api/v1/me/org", nil) }},
 		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
 		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
 		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},
