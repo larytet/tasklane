@@ -213,6 +213,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	ixCtx, stopIx := context.WithCancel(ctx)
 	defer stopIx()
 	go (&search.Indexer{DB: st.Pool}).Run(ixCtx)
+	go sprintJobs(ctx, svc)
 	hub := rt.New(svc)
 	go hub.SweepLoop(ctx)
 	srv := &api.Server{Hub: hub, Svc: svc, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
@@ -230,4 +231,22 @@ func serve(ctx context.Context, cfg config.Config) {
 	shutdown, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	hs.Shutdown(shutdown)
+}
+
+// sprintJobs is the scheduler for auto-sprints and auto-rollover. Every node runs it: each step re-checks state under a lock.
+func sprintJobs(ctx context.Context, svc *domain.Service) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		if rolled, created, err := svc.RunSprintJobs(ctx); err != nil {
+			log.Printf("sprint jobs: %v", err)
+		} else if rolled+created > 0 {
+			log.Printf("sprint jobs: rolled over %d, created %d", rolled, created)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }

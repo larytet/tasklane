@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type Issue struct {
 	Created     time.Time  `json:"created"`
 	Updated     time.Time  `json:"updated"`
 	Resolved    *time.Time `json:"resolved,omitempty"`
+	Estimate    *float64   `json:"estimate,omitempty"` // points, hours or nothing, by the board's estimation setting
 }
 
 type TransitionOpt struct {
@@ -226,7 +228,7 @@ func (s *Service) checkAssignable(ctx context.Context, tx pgx.Tx, pid, userID st
 }
 
 const issueSelect = `SELECT i.id,i.key,p.key,t.name,i.summary,i.summary_seq,COALESCE(d.body,''),COALESCE(d.text_seq,1),st.name,st.category,i.priority,
-	i.reporter_id,rp.name,rp.email,i.assignee_id,asg.name,asg.email,i.labels,COALESCE(par.key,''),i.version,i.created_at,i.updated_at,i.resolved_at
+	i.reporter_id,rp.name,rp.email,i.assignee_id,asg.name,asg.email,i.labels,COALESCE(par.key,''),i.version,i.created_at,i.updated_at,i.resolved_at,i.estimate
 	FROM issue i JOIN project p ON p.id=i.project_id JOIN issue_type t ON t.id=i.issue_type_id JOIN status st ON st.id=i.status_id
 	LEFT JOIN issue_text d ON d.issue_id=i.id AND d.field='description' JOIN app_user rp ON rp.id=i.reporter_id
 	LEFT JOIN app_user asg ON asg.id=i.assignee_id LEFT JOIN issue par ON par.id=i.parent_id `
@@ -236,7 +238,7 @@ func scanIssue(row pgx.Row) (Issue, error) {
 	var rid, rname, remail string
 	var aid, aname, aemail *string
 	err := row.Scan(&i.ID, &i.Key, &i.Project, &i.Type, &i.Summary, &i.SummarySeq, &i.Description, &i.DescSeq, &i.Status, &i.StatusCat, &i.Priority,
-		&rid, &rname, &remail, &aid, &aname, &aemail, &i.Labels, &i.Parent, &i.Version, &i.Created, &i.Updated, &i.Resolved)
+		&rid, &rname, &remail, &aid, &aname, &aemail, &i.Labels, &i.Parent, &i.Version, &i.Created, &i.Updated, &i.Resolved, &i.Estimate)
 	if err == pgx.ErrNoRows {
 		return i, ErrNotFound
 	}
@@ -336,6 +338,9 @@ type Changes struct {
 	Priority *string   `json:"priority,omitempty"`
 	Assignee *string   `json:"assignee,omitempty"` // "" clears
 	Labels   *[]string `json:"labels,omitempty"`
+	// Estimate sets the estimate (not negative); ClearEstimate removes it
+	Estimate      *float64 `json:"estimate,omitempty"`
+	ClearEstimate bool     `json:"clear_estimate,omitempty"`
 }
 
 // UpdateFields applies scalar changes. baseVersion is the issue version the caller last saw
@@ -374,6 +379,14 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	}
 	if ch.Assignee != nil {
 		changed["assignee"] = *ch.Assignee
+	}
+	if ch.Estimate != nil {
+		if *ch.Estimate < 0 || *ch.Estimate > 99999 {
+			return is, invalid("an estimate is between 0 and 99999")
+		}
+		changed["estimate"] = fmt.Sprint(*ch.Estimate)
+	} else if ch.ClearEstimate {
+		changed["estimate"] = ""
 	}
 	if len(changed) == 0 {
 		return is, invalid("no changes")
@@ -441,6 +454,21 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 				add("assignee_id", val)
 				s.hist(ctx, tx, is.ID, a, "assignee", &oldName, &newName)
 				fv["assignee"] = next
+			}
+		}
+		if es, ok := changed["estimate"]; ok {
+			old := ""
+			if is.Estimate != nil {
+				old = fmt.Sprint(*is.Estimate)
+			}
+			if es != old {
+				var val any
+				if es != "" {
+					val = *ch.Estimate
+				}
+				add("estimate", val)
+				s.hist(ctx, tx, is.ID, a, "estimate", &old, &es)
+				fv["estimate"] = next
 			}
 		}
 		fvj, _ := json.Marshal(fv)

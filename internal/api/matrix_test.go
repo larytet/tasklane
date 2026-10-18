@@ -81,6 +81,33 @@ func (f *fixture) board() string {
 	return b.ID
 }
 
+func (f *fixture) sprintBoard() string {
+	f.n++
+	b, err := f.e.Svc.CreateBoard(testutil.Ctx(), f.e.Admin, "ABC", fmt.Sprint("scrum ", f.n), "scrum")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return b.ID
+}
+
+func (f *fixture) sprint() string {
+	b := f.sprintBoard()
+	f.e.Svc.EnsureSprints(testutil.Ctx(), b)
+	v, err := f.e.Svc.Backlog(testutil.Ctx(), f.e.Admin, b)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return v.Sprints[0].ID
+}
+
+func (f *fixture) activeSprint() string {
+	id := f.sprint()
+	if _, err := f.e.Svc.StartSprint(testutil.Ctx(), f.e.Admin, id); err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
 func (f *fixture) attachment(key string) string {
 	a, err := f.e.Svc.AttachStream(testutil.Ctx(), f.e.Alice, key, "n.txt", "text/plain", strings.NewReader("hello matrix"))
 	if err != nil {
@@ -141,6 +168,34 @@ func rows() []row {
 		}},
 		{"POST /api/v1/boards/{id}/move", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
 			return J("POST", "/api/v1/boards/"+f.board()+"/move", map[string]any{"key": f.issue(), "column": "In Progress"})
+		}},
+		{"GET /api/v1/boards/{id}/backlog", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.sprintBoard()+"/backlog", nil) }},
+		{"POST /api/v1/boards/{id}/sprints", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/boards/"+f.sprintBoard()+"/sprints", map[string]any{"goal": "g"})
+		}},
+		{"POST /api/v1/boards/{id}/plan", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/boards/"+f.sprintBoard()+"/plan", map[string]any{"sprint": "", "keys": []string{f.issue()}})
+		}},
+		{"POST /api/v1/boards/{id}/rank", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/boards/"+f.sprintBoard()+"/rank", map[string]any{"key": f.issue(), "top": true})
+		}},
+		{"GET /api/v1/sprints/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/sprints/"+f.sprint(), nil) }},
+		{"PATCH /api/v1/sprints/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PATCH", "/api/v1/sprints/"+f.sprint(), map[string]any{"goal": "ship it"})
+		}},
+		{"POST /api/v1/sprints/{id}/start", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("POST", "/api/v1/sprints/"+f.sprint()+"/start", nil) }},
+		{"POST /api/v1/sprints/{id}/complete", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/sprints/"+f.activeSprint()+"/complete", map[string]any{"destination": "backlog", "dry_run": true})
+		}},
+		{"POST /api/v1/sprints/{id}/recompute", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("POST", "/api/v1/sprints/"+f.sprint()+"/recompute", nil) }},
+		{"PUT /api/v1/sprints/{id}/retro", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/sprints/"+f.sprint()+"/retro", map[string]any{"text": "went well"})
+		}},
+		{"PUT /api/v1/sprints/{id}/capacity/{user}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/sprints/"+f.sprint()+"/capacity/"+f.spare.ID, map[string]any{"off_hours": 4})
+		}},
+		{"PUT /api/v1/users/{id}/calendar", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/users/"+f.spare.ID+"/calendar", map[string]any{"calendar": nil})
 		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {

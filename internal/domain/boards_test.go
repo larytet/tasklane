@@ -48,7 +48,7 @@ func TestBOARD_CreateColumnsAndPermissions(t *testing.T) {
 	if _, err := e.Svc.CreateBoard(ctx, e.Admin, "ABC", "x", "nonsense"); err == nil {
 		t.Fatal("a bad kind was accepted")
 	}
-	b := newBoard(t, e, "scrum")
+	b := newBoard(t, e, "kanban")
 	if _, err := e.Svc.CreateBoard(ctx, e.Admin, "ABC", "Team board", "kanban"); err == nil || !strings.Contains(err.Error(), "already has a board") {
 		t.Fatalf("duplicate name: %v", err)
 	}

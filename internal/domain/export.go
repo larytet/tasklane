@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -245,7 +246,7 @@ func (s *Service) Export(ctx context.Context, a Actor, w io.Writer, o ExportOpts
 		if o.Trash || o.Full {
 			trashCond = ""
 		}
-		ir, err := tx.Query(ctx, `SELECT i.id,i.key,t.name,st.name,i.priority,i.reporter_id,i.assignee_id,i.labels,i.parent_id,i.rank,i.summary,COALESCE(d.body,''),i.created_at,i.updated_at,i.resolved_at,i.deleted_at,i.purge_after,i.version
+		ir, err := tx.Query(ctx, `SELECT i.id,i.key,t.name,st.name,i.priority,i.reporter_id,i.assignee_id,i.labels,i.parent_id,i.rank,i.summary,COALESCE(d.body,''),i.created_at,i.updated_at,i.resolved_at,i.deleted_at,i.purge_after,i.version,i.estimate
 			FROM issue i JOIN issue_type t ON t.id=i.issue_type_id JOIN status st ON st.id=i.status_id LEFT JOIN issue_text d ON d.issue_id=i.id AND d.field='description'
 			WHERE i.project_id=$1`+trashCond+` ORDER BY i.number`, p.id)
 		if err != nil {
@@ -259,7 +260,7 @@ func (s *Service) Export(ctx context.Context, a Actor, w io.Writer, o ExportOpts
 		for ir.Next() {
 			var r rawI
 			r.bi.Project = p.key
-			ir.Scan(&r.bi.ID, &r.bi.Key, &r.bi.Type, &r.bi.Status, &r.bi.Priority, &r.rep, &r.asg, &r.bi.Labels, &r.par, &r.bi.Rank, &r.bi.Summary, &r.bi.Description, &r.bi.Created, &r.bi.Updated, &r.bi.Resolved, &r.bi.DeletedAt, &r.bi.PurgeAfter, &r.bi.Version)
+			ir.Scan(&r.bi.ID, &r.bi.Key, &r.bi.Type, &r.bi.Status, &r.bi.Priority, &r.rep, &r.asg, &r.bi.Labels, &r.par, &r.bi.Rank, &r.bi.Summary, &r.bi.Description, &r.bi.Created, &r.bi.Updated, &r.bi.Resolved, &r.bi.DeletedAt, &r.bi.PurgeAfter, &r.bi.Version, &r.bi.Estimate)
 			raws = append(raws, r)
 		}
 		ir.Close()
@@ -514,9 +515,9 @@ func writeCSVBundle(bw *bundleWriter, d *BundleData, o ExportOpts) error {
 	rows := [][]string{}
 	for _, i := range d.Issues {
 		rows = append(rows, []string{i.ExternalID, i.Key, i.Project, i.Type, i.Status, i.Priority, i.Reporter, i.Assignee, strings.Join(i.Labels, ";"), i.Parent, i.Rank, i.Summary, i.Description,
-			i.Created.UTC().Format(time.RFC3339Nano), i.Updated.UTC().Format(time.RFC3339Nano), ts(i.Resolved), fmt.Sprint(i.Deleted), ts(i.DeletedAt), fmt.Sprint(i.Version)})
+			i.Created.UTC().Format(time.RFC3339Nano), i.Updated.UTC().Format(time.RFC3339Nano), ts(i.Resolved), fmt.Sprint(i.Deleted), ts(i.DeletedAt), fmt.Sprint(i.Version), estStr(i.Estimate)})
 	}
-	if err := bw.csvFile("issues.csv", []string{"external_id", "key", "project", "type", "status", "priority", "reporter", "assignee", "labels", "parent", "rank", "summary", "description", "created", "updated", "resolved", "deleted", "deleted_at", "version"}, rows); err != nil {
+	if err := bw.csvFile("issues.csv", []string{"external_id", "key", "project", "type", "status", "priority", "reporter", "assignee", "labels", "parent", "rank", "summary", "description", "created", "updated", "resolved", "deleted", "deleted_at", "version", "estimate"}, rows); err != nil {
 		return err
 	}
 	rows = nil
@@ -602,4 +603,11 @@ func writeCSVBundle(bw *bundleWriter, d *BundleData, o ExportOpts) error {
 		}
 	}
 	return nil
+}
+
+func estStr(e *float64) string {
+	if e == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*e, 'f', -1, 64)
 }

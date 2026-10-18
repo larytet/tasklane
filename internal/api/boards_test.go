@@ -94,3 +94,61 @@ func TestHTTP_BoardFilterQuickFiltersAndMove(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestHTTP_SprintFlow(t *testing.T) {
+	e, alice, bob, k1 := setup(t)
+	root := rootClient(t, e, alice)
+	_, b, _ := root.do("POST", "/api/v1/projects/ABC/boards", map[string]any{"name": "Scrum", "kind": "scrum"})
+	id := b["id"].(string)
+	if code, _, _ := alice.do("POST", "/api/v1/boards/"+id+"/sprints", map[string]any{}); code != 403 {
+		t.Fatalf("a member made a sprint: %d", code)
+	}
+	code, sp, _ := root.do("POST", "/api/v1/boards/"+id+"/sprints", map[string]any{"name": "Sprint one", "goal": "ship checkout"})
+	if code != 201 || sp["state"] != "future" {
+		t.Fatalf("%d %v", code, sp)
+	}
+	sid := sp["id"].(string)
+	// estimates ride on the ordinary issue patch
+	if code, out, _ := alice.do("PATCH", "/api/v1/issues/"+k1, map[string]any{"estimate": 5}); code != 200 || out["estimate"] != float64(5) {
+		t.Fatalf("%d %v", code, out)
+	}
+	if code, _, _ := alice.do("POST", "/api/v1/boards/"+id+"/plan", map[string]any{"sprint": sid, "keys": []string{k1}}); code != 200 {
+		t.Fatalf("plan: %d", code)
+	}
+	_, bl, _ := bob.do("GET", "/api/v1/boards/"+id+"/backlog", nil)
+	sprints := bl["sprints"].([]any)
+	first := sprints[0].(map[string]any)
+	if first["name"] != "Sprint one" || len(first["issues"].([]any)) != 1 || first["totals"].(map[string]any)["todo"].(map[string]any)["estimate"] != float64(5) {
+		t.Fatalf("%v", first)
+	}
+	// complete preview over HTTP, then start, then complete for real
+	if code, _, _ := root.do("POST", "/api/v1/sprints/"+sid+"/complete", map[string]any{"destination": "backlog"}); code != 400 {
+		t.Fatalf("completing a future sprint: %d", code)
+	}
+	if code, _, _ := root.do("POST", "/api/v1/sprints/"+sid+"/start", nil); code != 200 {
+		t.Fatalf("start %d", code)
+	}
+	code, plan, _ := root.do("POST", "/api/v1/sprints/"+sid+"/complete", map[string]any{"destination": "backlog", "dry_run": true})
+	if code != 200 || plan["dry_run"] != true || len(plan["moved"].([]any)) != 1 {
+		t.Fatalf("%d %v", code, plan)
+	}
+	if _, v, _ := alice.do("GET", "/api/v1/sprints/"+sid, nil); v["state"] != "active" {
+		t.Fatalf("the preview closed the sprint: %v", v["state"])
+	}
+	_, board, _ := alice.do("GET", "/api/v1/boards/"+id, nil)
+	if got := cardKeys(board, "To Do"); len(got) != 1 || got[0] != k1 { // the active sprint feeds the scrum board
+		t.Fatalf("%v", got)
+	}
+	if code, _, _ := root.do("POST", "/api/v1/sprints/"+sid+"/complete", map[string]any{"destination": "backlog"}); code != 200 {
+		t.Fatalf("complete %d", code)
+	}
+	_, bl, _ = alice.do("GET", "/api/v1/boards/"+id+"/backlog", nil)
+	if len(bl["backlog"].([]any)) != 1 || bl["backlog"].([]any)[0].(map[string]any)["carried_over"] != float64(1) {
+		t.Fatalf("%v", bl["backlog"])
+	}
+	// a kanban board has no backlog endpoint content
+	_, kb, _ := root.do("POST", "/api/v1/projects/ABC/boards", map[string]any{"name": "Flow", "kind": "kanban"})
+	if code, _, _ := alice.do("GET", "/api/v1/boards/"+kb["id"].(string)+"/backlog", nil); code != 400 {
+		t.Fatalf("%d", code)
+	}
+}

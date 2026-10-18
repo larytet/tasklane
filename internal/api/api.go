@@ -321,6 +321,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	s.registerSearch(mux)
 	s.registerBoards(mux)
+	s.registerSprints(mux)
 	s.registerAttachments(mux)
 	s.registerExchange(mux)
 	if s.Extra != nil {

@@ -91,6 +91,7 @@ type BIssue struct {
 	DeletedAt   *time.Time `json:"deleted_at"`
 	PurgeAfter  *time.Time `json:"purge_after"`
 	Version     int64      `json:"version"`
+	Estimate    *float64   `json:"estimate,omitempty"`
 }
 
 type BComment struct {

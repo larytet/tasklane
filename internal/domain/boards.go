@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/larytet/tasklane/internal/calendar"
 )
 
 // QuickFilter is a named TQL clause toggled as a chip on the board (SPEC 6).
@@ -26,6 +27,13 @@ type Board struct {
 	QuickFilters []QuickFilter `json:"quick_filters"`
 	SprintWeeks  int           `json:"sprint_weeks"`
 	DoneDays     int           `json:"done_days"`
+	// sprint settings (scrum boards)
+	Calendar     *calendar.Calendar `json:"calendar,omitempty"` // nil: the default work week
+	AutoSprints  int                `json:"auto_sprints"`       // future sprints kept ready
+	Rollover     string             `json:"rollover"`           // where unfinished work goes at sprint end: next or backlog
+	AutoRollover bool               `json:"auto_rollover"`
+	Parallel     bool               `json:"parallel_sprints"`
+	NamePattern  string             `json:"name_pattern"`
 }
 
 type Column struct {
@@ -49,6 +57,9 @@ type Card struct {
 	Subtasks     int      `json:"subtasks,omitempty"`
 	SubtasksDone int      `json:"subtasks_done,omitempty"`
 	Parent       string   `json:"parent,omitempty"`
+	Category     string   `json:"category"` // todo, in_progress or done
+	Estimate     *float64 `json:"estimate,omitempty"`
+	CarriedOver  int      `json:"carried_over,omitempty"` // sprints this card was left unfinished in
 }
 
 type ColumnView struct {
@@ -79,13 +90,19 @@ type ColumnIn struct {
 }
 
 type BoardPatch struct {
-	Name         *string        `json:"name"`
-	Filter       *string        `json:"filter"`
-	Estimation   *string        `json:"estimation"`
-	Swimlane     *string        `json:"swimlane"`
-	QuickFilters *[]QuickFilter `json:"quick_filters"`
-	SprintWeeks  *int           `json:"sprint_weeks"`
-	DoneDays     *int           `json:"done_days"`
+	Name         *string            `json:"name"`
+	Filter       *string            `json:"filter"`
+	Estimation   *string            `json:"estimation"`
+	Swimlane     *string            `json:"swimlane"`
+	QuickFilters *[]QuickFilter     `json:"quick_filters"`
+	SprintWeeks  *int               `json:"sprint_weeks"`
+	DoneDays     *int               `json:"done_days"`
+	Calendar     *calendar.Calendar `json:"calendar"`
+	AutoSprints  *int               `json:"auto_sprints"`
+	Rollover     *string            `json:"rollover"`
+	AutoRollover *bool              `json:"auto_rollover"`
+	Parallel     *bool              `json:"parallel_sprints"`
+	NamePattern  *string            `json:"name_pattern"`
 }
 
 func (s *Service) boardRow(ctx context.Context, q interface {
@@ -93,14 +110,22 @@ func (s *Service) boardRow(ctx context.Context, q interface {
 }, id string) (Board, string, error) {
 	var b Board
 	var pid string
-	var qf []byte
-	err := q.QueryRow(ctx, `SELECT b.id,b.project_id,p.key,b.name,b.kind,b.filter,b.estimation,b.swimlane,b.quick_filters,b.sprint_weeks,b.done_days FROM board b JOIN project p ON p.id=b.project_id WHERE b.id::text=$1`, id).
-		Scan(&b.ID, &pid, &b.Project, &b.Name, &b.Kind, &b.Filter, &b.Estimation, &b.Swimlane, &qf, &b.SprintWeeks, &b.DoneDays)
+	var qf, cal []byte
+	err := q.QueryRow(ctx, `SELECT b.id,b.project_id,p.key,b.name,b.kind,b.filter,b.estimation,b.swimlane,b.quick_filters,b.sprint_weeks,b.done_days,
+			b.calendar,b.auto_sprints,b.rollover,b.auto_rollover,b.parallel_sprints,b.name_pattern FROM board b JOIN project p ON p.id=b.project_id WHERE b.id::text=$1`, id).
+		Scan(&b.ID, &pid, &b.Project, &b.Name, &b.Kind, &b.Filter, &b.Estimation, &b.Swimlane, &qf, &b.SprintWeeks, &b.DoneDays,
+			&cal, &b.AutoSprints, &b.Rollover, &b.AutoRollover, &b.Parallel, &b.NamePattern)
 	if err == pgx.ErrNoRows || (err != nil && strings.Contains(err.Error(), "invalid input syntax for type uuid")) {
 		return b, "", ErrNotFound
 	}
 	if err != nil {
 		return b, "", err
+	}
+	if len(cal) > 0 {
+		var c calendar.Calendar
+		if json.Unmarshal(cal, &c) == nil {
+			b.Calendar = &c
+		}
 	}
 	json.Unmarshal(qf, &b.QuickFilters)
 	if b.QuickFilters == nil {
@@ -158,7 +183,7 @@ func (s *Service) CreateBoard(ctx context.Context, a Actor, projectKey, name, ki
 	if kind != "scrum" && kind != "kanban" {
 		return Board{}, invalid("a board is scrum or kanban")
 	}
-	b := Board{Name: strings.TrimSpace(name), Kind: kind, Project: strings.ToUpper(projectKey), Estimation: "count", Swimlane: "none", SprintWeeks: 1, DoneDays: 14, QuickFilters: []QuickFilter{}}
+	b := Board{Name: strings.TrimSpace(name), Kind: kind, Project: strings.ToUpper(projectKey), Estimation: "count", Swimlane: "none", SprintWeeks: 1, DoneDays: 14, QuickFilters: []QuickFilter{}, AutoSprints: 2, Rollover: "next", AutoRollover: true}
 	if err := validBoardFields(b); err != nil {
 		return b, err
 	}
@@ -271,13 +296,53 @@ func (s *Service) UpdateBoard(ctx context.Context, a Actor, id string, p BoardPa
 		}
 		b.DoneDays = *p.DoneDays
 	}
+	calChanged := false
+	if p.Calendar != nil {
+		c := p.Calendar.Normalize()
+		if err := c.Validate(); err != nil {
+			return b, invalid("calendar: %v", err)
+		}
+		b.Calendar, calChanged = &c, true
+	}
+	if p.AutoSprints != nil {
+		if *p.AutoSprints < 0 || *p.AutoSprints > 12 {
+			return b, invalid("auto_sprints is 0 to 12")
+		}
+		b.AutoSprints = *p.AutoSprints
+	}
+	if p.Rollover != nil {
+		if *p.Rollover != "next" && *p.Rollover != "backlog" {
+			return b, invalid("rollover is next or backlog")
+		}
+		b.Rollover = *p.Rollover
+	}
+	if p.AutoRollover != nil {
+		b.AutoRollover = *p.AutoRollover
+	}
+	if p.Parallel != nil {
+		b.Parallel = *p.Parallel
+	}
+	if p.NamePattern != nil {
+		b.NamePattern = strings.TrimSpace(*p.NamePattern)
+		if len(b.NamePattern) > 100 {
+			return b, invalid("the name pattern is at most 100 characters")
+		}
+	}
 	if err := validBoardFields(b); err != nil {
 		return b, err
 	}
 	qf, _ := json.Marshal(b.QuickFilters)
-	_, err = s.DB.Exec(ctx, `UPDATE board SET name=$2,filter=$3,estimation=$4,swimlane=$5,quick_filters=$6,sprint_weeks=$7,done_days=$8 WHERE id::text=$1`, id, b.Name, b.Filter, b.Estimation, b.Swimlane, qf, b.SprintWeeks, b.DoneDays)
+	var cal any
+	if b.Calendar != nil {
+		cal, _ = json.Marshal(b.Calendar)
+	}
+	_, err = s.DB.Exec(ctx, `UPDATE board SET name=$2,filter=$3,estimation=$4,swimlane=$5,quick_filters=$6,sprint_weeks=$7,done_days=$8,calendar=$9,auto_sprints=$10,rollover=$11,auto_rollover=$12,parallel_sprints=$13,name_pattern=$14 WHERE id::text=$1`,
+		id, b.Name, b.Filter, b.Estimation, b.Swimlane, qf, b.SprintWeeks, b.DoneDays, cal, b.AutoSprints, b.Rollover, b.AutoRollover, b.Parallel, b.NamePattern)
 	if err != nil && strings.Contains(err.Error(), "board_project_id_name_key") {
 		return b, invalid("this project already has a board called %q", b.Name)
+	}
+	if err == nil && (calChanged || p.SprintWeeks != nil || p.NamePattern != nil) {
+		err = s.recomputeFuture(ctx, b) // a calendar change applies from the next sprint: sprints not yet started follow it
 	}
 	return b, err
 }
@@ -396,15 +461,11 @@ func (s *Service) GetBoard(ctx context.Context, a Actor, id string, restrict []s
 	for i, c := range cols {
 		v.Columns[i] = ColumnView{Column: c, Cards: []Card{}}
 	}
-	q := `SELECT i.key,i.summary,t.name,st.name,i.priority,COALESCE(asg.name,''),i.labels,COALESCE(br.rank,i.rank),i.status_id::text,i.input_requested_at IS NOT NULL,
-			COALESCE(sub.total,0),COALESCE(sub.done,0),COALESCE(par.key,'')
-		FROM issue i JOIN issue_type t ON t.id=i.issue_type_id JOIN status st ON st.id=i.status_id
-		LEFT JOIN app_user asg ON asg.id=i.assignee_id
-		LEFT JOIN issue par ON par.id=i.parent_id
-		LEFT JOIN board_rank br ON br.board_id=$1::uuid AND br.issue_id=i.id
-		LEFT JOIN LATERAL (SELECT count(*) AS total, count(*) FILTER (WHERE s2.category='done') AS done FROM issue c JOIN status s2 ON s2.id=c.status_id WHERE c.parent_id=i.id AND c.deleted_at IS NULL) sub ON true
-		WHERE i.project_id=$2 AND i.deleted_at IS NULL AND (st.category<>'done' OR i.resolved_at IS NULL OR i.resolved_at > $3)`
+	q := cardSQL + ` WHERE i.project_id=$2 AND i.deleted_at IS NULL AND (st.category<>'done' OR i.resolved_at IS NULL OR i.resolved_at > $3)`
 	args := []any{b.ID, pid, s.Now().AddDate(0, 0, -b.DoneDays)}
+	if b.Kind == "scrum" { // a scrum board shows the active sprint(s) only
+		q += ` AND i.id IN (SELECT si.issue_id FROM sprint_issue si JOIN sprint sp ON sp.id=si.sprint_id WHERE sp.board_id=$1::uuid AND sp.state='active' AND si.removed_at IS NULL)`
+	}
 	if restrict != nil {
 		q += ` AND i.key = ANY($4)`
 		args = append(args, restrict)
@@ -416,13 +477,9 @@ func (s *Service) GetBoard(ctx context.Context, a Actor, id string, restrict []s
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var c Card
-		var sid string
-		if err := rows.Scan(&c.Key, &c.Summary, &c.Type, &c.Status, &c.Priority, &c.Assignee, &c.Labels, &c.Rank, &sid, &c.NeedsInput, &c.Subtasks, &c.SubtasksDone, &c.Parent); err != nil {
+		c, sid, err := scanCard(rows)
+		if err != nil {
 			return v, err
-		}
-		if c.Labels == nil {
-			c.Labels = []string{}
 		}
 		if i, ok := byStatus[sid]; ok {
 			v.Columns[i].Cards = append(v.Columns[i].Cards, c)
@@ -441,6 +498,25 @@ func (s *Service) GetBoard(ctx context.Context, a Actor, id string, restrict []s
 	}
 	v.Lanes = lanes(b.Swimlane, v)
 	return v, rows.Err()
+}
+
+// cardSQL is the card query every list of cards uses; $1 is the board id, and callers add their own WHERE.
+const cardSQL = `SELECT i.key,i.summary,t.name,st.name,st.category,i.priority,COALESCE(asg.name,''),i.labels,COALESCE(br.rank,i.rank),i.status_id::text,i.input_requested_at IS NOT NULL,
+		COALESCE(sub.total,0),COALESCE(sub.done,0),COALESCE(par.key,''),i.estimate,(SELECT count(*) FROM sprint_issue x WHERE x.issue_id=i.id AND x.outcome='not_done')
+	FROM issue i JOIN issue_type t ON t.id=i.issue_type_id JOIN status st ON st.id=i.status_id
+	LEFT JOIN app_user asg ON asg.id=i.assignee_id
+	LEFT JOIN issue par ON par.id=i.parent_id
+	LEFT JOIN board_rank br ON br.board_id=$1::uuid AND br.issue_id=i.id
+	LEFT JOIN LATERAL (SELECT count(*) AS total, count(*) FILTER (WHERE s2.category='done') AS done FROM issue c JOIN status s2 ON s2.id=c.status_id WHERE c.parent_id=i.id AND c.deleted_at IS NULL) sub ON true`
+
+func scanCard(rows pgx.Rows) (Card, string, error) {
+	var c Card
+	var sid string
+	err := rows.Scan(&c.Key, &c.Summary, &c.Type, &c.Status, &c.Category, &c.Priority, &c.Assignee, &c.Labels, &c.Rank, &sid, &c.NeedsInput, &c.Subtasks, &c.SubtasksDone, &c.Parent, &c.Estimate, &c.CarriedOver)
+	if c.Labels == nil {
+		c.Labels = []string{}
+	}
+	return c, sid, err
 }
 
 func lanes(kind string, v BoardView) []Lane {
@@ -486,6 +562,7 @@ type MoveIn struct {
 	Column string `json:"column"` // id or name
 	After  string `json:"after"`  // place the card right after this card (key)
 	Before string `json:"before"` // or right before this one
+	Top    bool   `json:"top"`    // or at the top (backlog and sprint lists)
 }
 
 type MoveResult struct {
