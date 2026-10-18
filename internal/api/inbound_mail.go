@@ -74,4 +74,16 @@ func (s *Server) registerInboundMail(mux *http.ServeMux) {
 		kid, _ := strconv.Atoi(r.PathValue("kid"))
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.RevokeReplyKey(r.Context(), actorOf(r), kid))
 	}))
+	s.handle(mux, "GET /api/v1/projects/{key}/mail", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ProjectMail(r.Context(), actorOf(r), r.PathValue("key"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "PUT /api/v1/projects/{key}/mail-policy", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Policy string `json:"policy"`
+		}
+		if s.decode(w, r, &in) {
+			s.reply(w, map[string]bool{"ok": true}, s.Svc.SetMailPolicy(r.Context(), actorOf(r), r.PathValue("key"), in.Policy))
+		}
+	}))
 }

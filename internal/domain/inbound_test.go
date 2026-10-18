@@ -489,3 +489,135 @@ func TestMAIL09_WebhookTransportVerifiesTheSignature(t *testing.T) {
 		t.Fatalf("a deleted source still delivers: %v", err)
 	}
 }
+
+func (e *inboundEnv) issueCount() (n int) {
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE project_id=(SELECT id FROM project WHERE key='ABC')`).Scan(&n)
+	return
+}
+
+func TestMAIL08_CreateIssueByEmail(t *testing.T) {
+	e := newInbound(t)
+	before := e.issueCount()
+	// Alice writes to the project address, copying Bob and someone who is not a user
+	raw := e.eml("Alice K. <alice@example.com>", "ABC@tasklane.example.com", "Re: Fwd: Login page broken on Safari",
+		[]string{authOK, "Cc: Bob R. <bob@example.com>, outsider@example.org"}, "Steps:\r\n1. open the page\r\n2. click Sign in\r\n")
+	r := e.ingest(true, raw)
+	if r.Outcome != "accepted" {
+		t.Fatalf("%+v", r)
+	}
+	if e.issueCount() != before+1 {
+		t.Fatal("no issue was created")
+	}
+	var key, summary, desc, typ, reporter string
+	e.Store.Pool.QueryRow(ctx, `SELECT i.key,i.summary,(SELECT body FROM issue_text WHERE issue_id=i.id AND field='description'),t.name,u.email FROM issue i JOIN issue_type t ON t.id=i.issue_type_id JOIN app_user u ON u.id=i.reporter_id
+		WHERE i.id=(SELECT issue_id FROM mail_inbound WHERE id=$1)`, r.ID).Scan(&key, &summary, &desc, &typ, &reporter)
+	if summary != "Login page broken on Safari" || typ != "Task" || reporter != "alice@example.com" || !strings.Contains(desc, "click Sign in") {
+		t.Fatalf("%q %q %q %q", summary, typ, reporter, desc)
+	}
+	// the Cc'd user watches it, the outsider is nothing
+	if w, _ := e.Svc.WatchState(ctx, e.Bob, key); !w.Watching || !w.Explicit {
+		t.Fatalf("%+v", w)
+	}
+	// a plus-tag names the type, the rest are labels
+	r = e.ingest(true, e.eml("alice@example.com", "ABC+bug+urgent+safari@tasklane.example.com", "Crash on save", []string{authOK}, "it crashes"))
+	var typ2 string
+	var labels []string
+	e.Store.Pool.QueryRow(ctx, `SELECT t.name,i.labels FROM issue i JOIN issue_type t ON t.id=i.issue_type_id WHERE i.id=(SELECT issue_id FROM mail_inbound WHERE id=$1)`, r.ID).Scan(&typ2, &labels)
+	if r.Outcome != "accepted" || typ2 != "Bug" || strings.Join(labels, ",") != "safari,urgent" {
+		t.Fatalf("%+v %q %v", r, typ2, labels)
+	}
+	// a reply to the message that created an issue continues there
+	cs0 := len(e.comments())
+	first := e.eml("alice@example.com", "ABC@tasklane.example.com", "Thread root", []string{authOK}, "root")
+	r = e.ingest(true, first)
+	mid := regexp.MustCompile(`Message-ID: (<[^>]+>)`).FindSubmatch(first)[1]
+	r2 := e.ingest(true, e.eml("bob@example.com", "ABC@tasklane.example.com", "Re: Thread root", []string{authOK, "In-Reply-To: " + string(mid)}, "a follow-up"))
+	var cnt int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM comment c WHERE c.mail_inbound_id=$1 AND c.issue_id=(SELECT issue_id FROM mail_inbound WHERE id=$2)`, r2.ID, r.ID).Scan(&cnt)
+	if r2.Outcome != "accepted" || cnt != 1 {
+		t.Fatalf("%+v %d", r2, cnt)
+	}
+	_ = cs0
+	// an empty subject and a very long one
+	r = e.ingest(true, e.eml("alice@example.com", "ABC@tasklane.example.com", "", []string{authOK}, "no subject"))
+	var sum string
+	e.Store.Pool.QueryRow(ctx, `SELECT summary FROM issue WHERE id=(SELECT issue_id FROM mail_inbound WHERE id=$1)`, r.ID).Scan(&sum)
+	if sum != "(no subject)" {
+		t.Fatalf("%q", sum)
+	}
+	r = e.ingest(true, e.eml("alice@example.com", "ABC@tasklane.example.com", strings.Repeat("long ", 100), []string{authOK}, "x"))
+	e.Store.Pool.QueryRow(ctx, `SELECT summary FROM issue WHERE id=(SELECT issue_id FROM mail_inbound WHERE id=$1)`, r.ID).Scan(&sum)
+	if len([]rune(sum)) > 200 || r.Outcome != "accepted" {
+		t.Fatalf("%d %+v", len(sum), r)
+	}
+	// an address that is no project creates nothing
+	n := e.issueCount()
+	if r := e.ingest(true, e.eml("alice@example.com", "NOPE@tasklane.example.com", "hello", []string{authOK}, "x")); r.Outcome != "ignored" {
+		t.Fatalf("%+v", r)
+	}
+	if e.issueCount() != n {
+		t.Fatal("an issue appeared")
+	}
+	// the project shows its address
+	pm, err := e.Svc.ProjectMail(ctx, e.Alice, "ABC")
+	if err != nil || pm.Address != "abc@tasklane.example.com" || pm.Policy != "quarantine" {
+		t.Fatalf("%+v %v", pm, err)
+	}
+}
+
+func TestMAIL08_16_UnknownSendersAndPermissionsForNewIssues(t *testing.T) {
+	e := newInbound(t)
+	stranger := func(subj string) domain.InboundResult {
+		return e.ingest(true, e.eml("customer@example.org", "ABC@tasklane.example.com", subj, []string{"Authentication-Results: mx; dkim=pass header.d=example.org"}, "please help"))
+	}
+	n := e.issueCount()
+	if r := stranger("a"); r.Outcome != "quarantined" || !strings.Contains(r.Reason, "not a known user") {
+		t.Fatalf("%+v", r)
+	}
+	if err := e.Svc.SetMailPolicy(ctx, e.Alice, "ABC", "reject"); err == nil {
+		t.Fatal("a non-administrator changed the policy")
+	}
+	if err := e.Svc.SetMailPolicy(ctx, e.Admin, "ABC", "accept-all"); err == nil {
+		t.Fatal("an unknown policy was accepted")
+	}
+	if err := e.Svc.SetMailPolicy(ctx, e.Admin, "ABC", "reject"); err != nil {
+		t.Fatal(err)
+	}
+	if r := stranger("b"); r.Outcome != "rejected" || !strings.Contains(r.Reason, "rejects mail from unknown senders") {
+		t.Fatalf("%+v", r)
+	}
+	if e.issueCount() != n {
+		t.Fatal("an unknown sender created an issue")
+	}
+	// the policy does not apply to a known user, and a reply to a notification is not affected by it
+	if r := e.ingest(true, e.eml("alice@example.com", "ABC@tasklane.example.com", "known", []string{authOK}, "x")); r.Outcome != "accepted" {
+		t.Fatalf("%+v", r)
+	}
+	// a viewer cannot create: quarantined, and a release does not create either
+	e.Svc.AddMember(ctx, e.Admin, "ABC", e.Bob.ID, "viewer")
+	n = e.issueCount()
+	r := e.ingest(true, e.eml("bob@example.com", "ABC@tasklane.example.com", "viewer tries", []string{authOK}, "x"))
+	if r.Outcome != "quarantined" || !strings.Contains(r.Reason, "refused") {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := e.Svc.ReleaseInbound(ctx, e.Admin, r.ID); err == nil || e.issueCount() != n {
+		t.Fatalf("a release created an issue for a viewer: %v", err)
+	}
+	// unproven mail to a project address waits; releasing opens the issue once, as the sender
+	e.Svc.AddMember(ctx, e.Admin, "ABC", e.Bob.ID, "member")
+	r = e.ingest(false, e.eml("bob@example.com", "ABC+bug@tasklane.example.com", "unproven report", []string{authOK}, "details"))
+	if r.Outcome != "quarantined" || !strings.Contains(r.Reason, "proof of origin") || e.issueCount() != n {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := e.Svc.ReleaseInbound(ctx, e.Admin, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	var typ, rep string
+	e.Store.Pool.QueryRow(ctx, `SELECT t.name,u.email FROM issue i JOIN issue_type t ON t.id=i.issue_type_id JOIN app_user u ON u.id=i.reporter_id WHERE i.summary='unproven report'`).Scan(&typ, &rep)
+	if typ != "Bug" || rep != "bob@example.com" || e.issueCount() != n+1 {
+		t.Fatalf("%q %q %d", typ, rep, e.issueCount())
+	}
+	if _, err := e.Svc.ReleaseInbound(ctx, e.Admin, r.ID); err == nil || e.issueCount() != n+1 {
+		t.Fatal("released twice")
+	}
+}

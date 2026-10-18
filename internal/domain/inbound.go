@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -358,6 +359,16 @@ type verdict struct {
 	issueKey, userName string
 	userKind           string
 	userAdmin          bool
+	create             *createSpec // set when the message would open a new issue instead of commenting
+}
+
+// createSpec is what a message addressed to a project would create. It is kept with a quarantined message so a release does the same.
+type createSpec struct {
+	Project string   `json:"project"`
+	Type    string   `json:"type"`
+	Labels  []string `json:"labels,omitempty"`
+	Summary string   `json:"summary"`
+	CC      []string `json:"cc,omitempty"` // user ids who will watch the new issue
 }
 
 var (
@@ -442,7 +453,16 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 		s.DB.Exec(ctx, `UPDATE mail_inbound SET raw_sha256=$2 WHERE id=$1`, id, sha)
 	}
 	v := s.classifyInbound(ctx, p, trusted, from, ferr, id, now, lim)
-	if v.outcome == "accepted" {
+	if v.outcome == "accepted" && v.create != nil {
+		act := Actor{ID: v.userID, Label: v.userName, Admin: v.userAdmin && v.userKind != "agent", Kind: v.userKind}
+		key, err := s.createFromMail(ctx, act, *v.create, v.body)
+		if err != nil {
+			v.outcome, v.reason = "quarantined", "the issue was refused: "+err.Error()
+		} else {
+			v.issueKey = key
+			s.DB.QueryRow(ctx, `SELECT id FROM issue WHERE key=$1`, key).Scan(&v.issueID)
+		}
+	} else if v.outcome == "accepted" {
 		act := Actor{ID: v.userID, Label: v.userName, Admin: v.userAdmin && v.userKind != "agent", Kind: v.userKind}
 		c, err := s.AddComment(ctx, act, v.issueKey, v.body, false)
 		if err != nil {
@@ -466,7 +486,12 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 	if v.outcome == "quarantined" {
 		keep = v.body
 	}
-	_, err := s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome=$2,reason=$3,issue_id=$4,user_id=$5,body=$6 WHERE id=$1`, id, v.outcome, v.reason, iss, usr, keep)
+	kind, detail := "reply", []byte("{}")
+	if v.create != nil {
+		kind = "create"
+		detail, _ = json.Marshal(v.create)
+	}
+	_, err := s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome=$2,reason=$3,issue_id=$4,user_id=$5,body=$6,kind=$7,detail=$8 WHERE id=$1`, id, v.outcome, v.reason, iss, usr, keep, kind, detail)
 	return InboundResult{ID: id, Outcome: v.outcome, Reason: v.reason}, err
 }
 
@@ -526,6 +551,9 @@ func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, trusted b
 	var v verdict
 	err := s.DB.QueryRow(ctx, `SELECT id,name,kind,is_admin FROM app_user WHERE lower(email)=$1 AND active AND kind<>'agent'`, addr).Scan(&v.userID, &v.userName, &v.userKind, &v.userAdmin)
 	if err != nil {
+		if pk, policy := s.projectAddressed(ctx, h); pk != "" && policy == "reject" {
+			return verdict{outcome: "rejected", reason: "the sender is not a known user and project " + pk + " rejects mail from unknown senders"}
+		}
 		return verdict{outcome: "quarantined", reason: "the sender is not a known user"}
 	}
 	v.body = body
@@ -533,6 +561,9 @@ func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, trusted b
 	if !trusted || !authenticated(h, domain) {
 		v.outcome, v.reason = "quarantined", "no proof of origin: the sender's domain was not verified by a trusted receiver"
 		s.locateIssue(ctx, p, &v, false)
+		if v.issueID == "" {
+			s.locateCreate(ctx, p, &v)
+		}
 		return v
 	}
 	if why := s.locateIssue(ctx, p, &v, true); why != "" {
@@ -540,7 +571,17 @@ func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, trusted b
 		return v
 	}
 	if v.issueID == "" {
-		return ignore("not a reply to a notification, and the subject names no issue")
+		if !s.locateCreate(ctx, p, &v) {
+			return ignore("not a reply to a notification, the subject names no issue and no project address was used")
+		}
+		var mirrored bool
+		s.DB.QueryRow(ctx, `SELECT mirror_of IS NOT NULL FROM project WHERE key=$1`, v.create.Project).Scan(&mirrored)
+		if mirrored {
+			v.outcome, v.reason = "quarantined", "mirrored project"
+			return v
+		}
+		v.outcome = "accepted"
+		return v
 	}
 	var mirrored bool
 	s.DB.QueryRow(ctx, `SELECT p.mirror_of IS NOT NULL FROM project p JOIN issue i ON i.project_id=p.id WHERE i.id=$1`, v.issueID).Scan(&mirrored)
@@ -591,6 +632,10 @@ func (s *Service) locateIssue(ctx context.Context, p *mail.Parsed, v *verdict, s
 	for i := len(ids) - 1; i >= 0; i-- {
 		var issue *string
 		if s.DB.QueryRow(ctx, `SELECT issue_id FROM mail_message WHERE message_id=$1 AND issue_id IS NOT NULL LIMIT 1`, ids[i]).Scan(&issue) == nil && issue != nil && set(*issue) {
+			return ""
+		}
+		issue = nil // a message that created an issue is the root of its thread: replies to it continue there
+		if s.DB.QueryRow(ctx, `SELECT issue_id FROM mail_inbound WHERE message_id=$1 AND issue_id IS NOT NULL AND kind='create' AND outcome='accepted'`, ids[i]).Scan(&issue) == nil && issue != nil && set(*issue) {
 			return ""
 		}
 	}
@@ -689,10 +734,12 @@ func (s *Service) ReleaseInbound(ctx context.Context, a Actor, id int64) (Commen
 	if !a.Admin {
 		return Comment{}, ErrForbidden
 	}
-	var issueID, userID, body string
+	var issueID, userID, body, kind string
+	var detail []byte
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `UPDATE mail_inbound SET outcome='accepted',reason='released by an administrator',handled_by=$2,handled_at=$3
-			WHERE id=$1 AND outcome='quarantined' AND issue_id IS NOT NULL AND user_id IS NOT NULL AND body<>'' RETURNING issue_id,user_id,body`, id, a.ID, s.Now()).Scan(&issueID, &userID, &body)
+			WHERE id=$1 AND outcome='quarantined' AND user_id IS NOT NULL AND ((kind='reply' AND issue_id IS NOT NULL AND body<>'') OR (kind='create' AND detail<>'{}'))
+			RETURNING COALESCE(issue_id::text,''),user_id,body,kind,detail`, id, a.ID, s.Now()).Scan(&issueID, &userID, &body, &kind, &detail)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return invalid("only a quarantined message with a known sender, an issue and some text can be released")
 		}
@@ -707,13 +754,29 @@ func (s *Service) ReleaseInbound(ctx context.Context, a Actor, id int64) (Commen
 	revert := func(reason string) {
 		s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome='quarantined',reason=$2,handled_by=NULL,handled_at=NULL WHERE id=$1`, id, reason)
 	}
-	var key, name, kind string
+	var name, ukind string
 	var admin bool
-	if err := s.DB.QueryRow(ctx, `SELECT i.key,u.name,u.kind,u.is_admin FROM issue i, app_user u WHERE i.id=$1 AND u.id=$2 AND u.active`, issueID, userID).Scan(&key, &name, &kind, &admin); err != nil {
+	if kind == "create" {
+		if err := s.DB.QueryRow(ctx, `SELECT name,kind,is_admin FROM app_user WHERE id=$1 AND active`, userID).Scan(&name, &ukind, &admin); err != nil {
+			revert("the sender no longer exists")
+			return Comment{}, invalid("the sender no longer exists")
+		}
+		var spec createSpec
+		json.Unmarshal(detail, &spec)
+		key, err := s.createFromMail(ctx, Actor{ID: userID, Label: name, Admin: admin && ukind != "agent", Kind: ukind}, spec, body)
+		if err != nil {
+			revert("release failed: " + err.Error())
+			return Comment{}, err
+		}
+		s.DB.Exec(ctx, `UPDATE mail_inbound SET issue_id=(SELECT id FROM issue WHERE key=$2) WHERE id=$1`, id, key)
+		return Comment{Body: key}, nil // the issue's key is what a release of a new-issue message returns
+	}
+	var key string
+	if err := s.DB.QueryRow(ctx, `SELECT i.key,u.name,u.kind,u.is_admin FROM issue i, app_user u WHERE i.id=$1 AND u.id=$2 AND u.active`, issueID, userID).Scan(&key, &name, &ukind, &admin); err != nil {
 		revert("the sender or the issue no longer exists")
 		return Comment{}, invalid("the sender or the issue no longer exists")
 	}
-	c, err := s.AddComment(ctx, Actor{ID: userID, Label: name, Admin: admin && kind != "agent", Kind: kind}, key, body, false)
+	c, err := s.AddComment(ctx, Actor{ID: userID, Label: name, Admin: admin && ukind != "agent", Kind: ukind}, key, body, false)
 	if err != nil {
 		revert("release failed: the sender may not comment on that issue")
 		return Comment{}, err
@@ -745,4 +808,172 @@ func SignInbound(secret string, body []byte) string {
 	m := hmac.New(sha256.New, []byte(secret))
 	m.Write(body)
 	return "sha256=" + hex.EncodeToString(m.Sum(nil))
+}
+
+// ---------- create issue by email ----------
+
+var reAddrLocal = regexp.MustCompile(`(?i)([A-Za-z][A-Za-z0-9]{0,9})((?:\+[A-Za-z0-9_-]+)*)@`)
+
+// projectAddressed finds the project a message is addressed to ("KEY@domain", "KEY+tag@domain") and its policy for unknown senders.
+func (s *Service) projectAddressed(ctx context.Context, h netmail.Header) (key, policy string) {
+	k, _, _, pol := s.projectAddress(ctx, h)
+	return k, pol
+}
+
+func (s *Service) projectAddress(ctx context.Context, h netmail.Header) (key string, tags []string, cc []string, policy string) {
+	dom := s.mailDomain()
+	var addrs []*netmail.Address
+	for _, f := range []string{"To", "Cc", "Delivered-To", "X-Original-To", "Envelope-To"} {
+		for _, v := range h[netmailCanon(f)] {
+			if l, err := netmail.ParseAddressList(v); err == nil {
+				addrs = append(addrs, l...)
+			}
+		}
+	}
+	for _, a := range addrs {
+		local, d, ok := strings.Cut(a.Address, "@")
+		if !ok || !strings.EqualFold(d, dom) {
+			continue
+		}
+		m := reAddrLocal.FindStringSubmatch(local + "@")
+		if m == nil || strings.EqualFold(m[1], "reply") {
+			continue
+		}
+		var pk, pol string
+		if s.DB.QueryRow(ctx, `SELECT key,mail_policy FROM project WHERE key=$1 AND NOT archived`, strings.ToUpper(m[1])).Scan(&pk, &pol) != nil {
+			continue
+		}
+		for _, t := range strings.Split(strings.TrimPrefix(m[2], "+"), "+") {
+			if t != "" {
+				tags = append(tags, t)
+			}
+		}
+		return pk, tags, nil, pol
+	}
+	return "", nil, nil, ""
+}
+
+// locateCreate decides, for a message that is not a reply, whether it opens an issue: the plus-tags give the type (the first one that
+// names an issue type) and the labels (the rest), the subject is the summary, and the Cc addresses that are users become watchers.
+func (s *Service) locateCreate(ctx context.Context, p *mail.Parsed, v *verdict) bool {
+	pk, tags, _, _ := s.projectAddress(ctx, p.Header)
+	if pk == "" {
+		return false
+	}
+	spec := &createSpec{Project: pk, Type: "Task"}
+	typed := false
+	for _, t := range tags {
+		var name string
+		if !typed && s.DB.QueryRow(ctx, `SELECT name FROM issue_type WHERE lower(name)=lower($1)`, t).Scan(&name) == nil {
+			spec.Type, typed = name, true
+			continue
+		}
+		spec.Labels = append(spec.Labels, strings.ToLower(t))
+	}
+	sub := strings.TrimSpace(p.Header.Get("Subject"))
+	if d, err := (&mime.WordDecoder{}).DecodeHeader(sub); err == nil {
+		sub = d
+	}
+	sub = strings.Join(strings.Fields(sub), " ")
+	for { // "Fwd: Re: x" opens an issue called x
+		l := strings.ToLower(sub)
+		if strings.HasPrefix(l, "re:") || strings.HasPrefix(l, "fw:") {
+			sub = strings.TrimSpace(sub[3:])
+		} else if strings.HasPrefix(l, "fwd:") {
+			sub = strings.TrimSpace(sub[4:])
+		} else {
+			break
+		}
+	}
+	if sub == "" {
+		sub = "(no subject)"
+	}
+	if r := []rune(sub); len(r) > 200 {
+		sub = string(r[:200])
+	}
+	spec.Summary = sub
+	seen := map[string]bool{v.userID: true}
+	for _, f := range []string{"To", "Cc"} {
+		for _, hv := range p.Header[netmailCanon(f)] {
+			l, err := netmail.ParseAddressList(hv)
+			if err != nil {
+				continue
+			}
+			for _, a := range l {
+				var uid string
+				if s.DB.QueryRow(ctx, `SELECT id FROM app_user WHERE lower(email)=lower($1) AND active AND kind<>'agent'`, a.Address).Scan(&uid) == nil && !seen[uid] {
+					seen[uid] = true
+					spec.CC = append(spec.CC, uid)
+				}
+			}
+		}
+	}
+	v.create = spec
+	v.body = strings.TrimSpace(p.Text) // a new message is kept whole: there is no history to strip
+	return true
+}
+
+// createFromMail opens the issue as the sender (their Create Issues permission applies), makes the Cc'd users watchers (each only if
+// they can see the issue) and returns its key.
+func (s *Service) createFromMail(ctx context.Context, a Actor, c createSpec, body string) (string, error) {
+	is, err := s.CreateIssue(ctx, a, CreateIn{Project: c.Project, Type: c.Type, Summary: c.Summary, Description: body, Labels: c.Labels})
+	if err != nil {
+		return "", err
+	}
+	for _, uid := range c.CC {
+		var name, kind string
+		var admin bool
+		if s.DB.QueryRow(ctx, `SELECT name,kind,is_admin FROM app_user WHERE id=$1 AND active`, uid).Scan(&name, &kind, &admin) == nil {
+			s.SetWatch(ctx, Actor{ID: uid, Label: name, Admin: admin && kind != "agent", Kind: kind}, is.Key, true)
+		}
+	}
+	return is.Key, nil
+}
+
+// ---------- project mail settings ----------
+
+type ProjectMail struct {
+	Address string `json:"address"`
+	Policy  string `json:"unknown_sender_policy"`
+}
+
+// ProjectMail is the address that opens issues in a project and what happens to mail from people who are not users.
+func (s *Service) ProjectMail(ctx context.Context, a Actor, key string) (ProjectMail, error) {
+	pid, err := s.projectID(ctx, key)
+	if err != nil {
+		return ProjectMail{}, ErrNotFound
+	}
+	if s.role(ctx, a, pid) == "" {
+		return ProjectMail{}, ErrNotFound
+	}
+	var pm ProjectMail
+	if err := s.DB.QueryRow(ctx, `SELECT key,mail_policy FROM project WHERE id::text=$1`, pid).Scan(&pm.Address, &pm.Policy); err != nil {
+		return pm, err
+	}
+	if d := s.mailDomain(); d != "" {
+		pm.Address = strings.ToLower(pm.Address) + "@" + d
+	} else {
+		pm.Address = ""
+	}
+	return pm, nil
+}
+
+// SetMailPolicy chooses what mail from an unknown sender does: "quarantine" (an administrator decides) or "reject".
+func (s *Service) SetMailPolicy(ctx context.Context, a Actor, key, policy string) error {
+	if err := adminOnly(a); err != nil {
+		return err
+	}
+	if policy != "quarantine" && policy != "reject" {
+		return invalid("the policy for unknown senders is quarantine or reject")
+	}
+	pid, err := s.projectID(ctx, key)
+	if err != nil {
+		return err
+	}
+	return s.tx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE project SET mail_policy=$2 WHERE id::text=$1`, pid, policy); err != nil {
+			return err
+		}
+		return s.audit(ctx, tx, a, "project.mail_policy", strings.ToUpper(key), map[string]any{"policy": policy})
+	})
 }

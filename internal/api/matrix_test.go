@@ -696,6 +696,10 @@ func rows() []row {
 		{"POST /api/v1/mail/inbound/{id}", exp{anon: codes(403), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req {
 			return J("POST", "/api/v1/mail/inbound/00000000-0000-0000-0000-000000000000", map[string]any{"x": 1})
 		}}, // a source proves itself with a signature, never with a session
+		{"GET /api/v1/projects/{key}/mail", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/mail", nil) }},
+		{"PUT /api/v1/projects/{key}/mail-policy", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/mail-policy", map[string]any{"policy": "reject"})
+		}},
 		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
 		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
 		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},
