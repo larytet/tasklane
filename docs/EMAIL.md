@@ -1,6 +1,6 @@
 # Inbound email
 
-People reply to a notification to comment on the issue. This page covers what is built: reply by email and create an issue by email, over a webhook source. IMAP polling is built too; the SMTP listener is not yet.
+People reply to a notification to comment on the issue. This page covers what is built: reply by email and create an issue by email, over a webhook source. IMAP polling and a built-in SMTP receiver are built too.
 
 ## Sources
 
@@ -9,6 +9,10 @@ People reply to a notification to comment on the issue. This page covers what is
   - With **IDLE** the server tells Tasklane about new mail at once (a delivery takes well under a second in tests); without it the folder is polled every 30 seconds. A connection that fails is retried after 10 seconds, doubling to 5 minutes; the last error shows next to the mailbox.
   - Connections are TLS (certificates always verified) or, for a server on this machine only, plain text; a password is never sent without TLS to another host. Mailboxes on loopback or private addresses need `imap_allow_private`; cloud metadata addresses are always blocked. The password is sealed at rest and never shown. Only one node reads a mailbox at a time.
   - Mark a mailbox **trusted** only if mail reaches it through a server you run whose `Authentication-Results` header you believe; otherwise Tasklane relies on its own DKIM check.
+
+- **Built-in SMTP receiver** (`smtp_listen`, for direct MX delivery; optional STARTTLS with `smtp_listen_tls_cert` and `smtp_listen_tls_key`). It accepts mail **only** for the installation's mail domain (the host of `base_url`) and only for addresses it would act on: `reply+…`, `bounce+…`, and the key of an existing, unarchived project (with plus-tags). Everything else is refused during the conversation (`550 5.7.1` relaying denied, `550 5.1.1` no such mailbox), so it is not an open relay and it never generates a bounce of its own: no backscatter. `250` is sent only after the raw message was stored; if it could not be, the answer is `451` and the sending server retries. A message is limited to 25 MiB (declared `SIZE` is refused early; an over-long body is read through and refused so the conversation stays in step), 50 recipients, 100 connections and 10 per address at once, 60 seconds idle, 10 errors per connection, command lines of up to 1,000 bytes. No AUTH is offered and `VRFY` confirms nothing.
+  - The envelope is written into the stored message ahead of whatever the sender wrote: `Return-Path` (none for a bounce), one `X-Original-To` per recipient, and a `Received` line with the sender's address and whether TLS was used.
+  - Mail received this way is never *trusted*: nothing before the listener gave a verdict, so a message needs its own **DKIM** proof (any `Authentication-Results` header the sender wrote is ignored). If you want a receiver's verdict believed, run that receiver and forward to the webhook or IMAP source marked trusted.
 
 ## How a message is handled
 

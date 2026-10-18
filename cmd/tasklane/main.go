@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"github.com/larytet/tasklane/internal/egress"
@@ -237,6 +238,21 @@ func serve(ctx context.Context, cfg config.Config) {
 	}
 	svc.IMAPAllowPrivate = cfg.IMAPAllowPrivate
 	go svc.RunIMAP(ctx, log.Printf)
+	if cfg.SMTPListen != "" {
+		var tc *tls.Config
+		if cfg.SMTPListenCert != "" || cfg.SMTPListenKey != "" {
+			cert, err := tls.LoadX509KeyPair(cfg.SMTPListenCert, cfg.SMTPListenKey)
+			if err != nil {
+				log.Fatalf("smtp_listen_tls_cert and smtp_listen_tls_key: %v", err)
+			}
+			tc = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+		}
+		go func() {
+			if err := svc.RunSMTPListener(ctx, cfg.SMTPListen, tc, log.Printf); err != nil {
+				log.Printf("smtp listener: %v", err)
+			}
+		}()
+	}
 	svc.DNS = net.DefaultResolver // DKIM keys are looked up in DNS
 	svc.InboundDomain = dom       // mail can be received (a webhook source) without this server sending any
 	if cfg.SMTPHost != "" {
