@@ -88,6 +88,21 @@ func (s *Server) Handler() http.Handler {
 		u, err := s.Svc.CreateUser(r.Context(), in.Email, in.Name, in.Password, in.Admin)
 		s.replyStatus(w, 201, u, err)
 	}))
+	// agent controls (administrators): the kill switch and per-agent pause take effect on the agent's next call
+	s.handle(mux, "POST /api/v1/agents/kill", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ On bool }
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"killed": in.On}, s.Svc.KillAgents(r.Context(), actorOf(r), in.On))
+	}))
+	s.handle(mux, "POST /api/v1/agents/{id}/pause", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Paused bool }
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"paused": in.Paused}, s.Svc.PauseAgent(r.Context(), actorOf(r), r.PathValue("id"), in.Paused))
+	}))
 	s.handle(mux, "GET /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		ps, err := s.Svc.ListProjects(r.Context(), actorOf(r))
 		s.reply(w, ps, err)

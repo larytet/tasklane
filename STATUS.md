@@ -13,7 +13,7 @@ this file is updated, and the work is committed and pushed.
 |---|---|---|
 | M1a Tracker | **built, exit gate not passed** | milestones M1a.1 to M1a.9 below; see the exit gate audit for what is still open |
 | M1b Lifecycle and exchange | built, gate to be audited | milestones M1b.1 to M1b.3 below |
-| M1c Agents | **MCP server built** | milestone M1c.1 below; human gates, input requests, resource subscriptions, kill switch, OAuth and bulk tools are open |
+| M1c Agents | **MCP server, gates, kill switch built** | milestones M1c.1 and M1c.2 below; OAuth, subscriptions and bulk tools are open |
 | M2 to M5 | not started | |
 
 ## M1c milestones
@@ -22,7 +22,9 @@ this file is updated, and the work is committed and pushed.
 |---|---|---|
 | M1c.1 MCP server | Streamable HTTP at `/mcp` and a stdio proxy (`tasklane mcp`), pinned revision 2025-06-18, 15 tools and the issue resource, scoped expiring revocable tokens, agent accounts (never administrators, never purge), claim leases with stalled display, anchored `edit_issue_text` through the same merge as the browser, compact context with provenance on every text block, rate limit, hourly write budget, result caps and cursors, append-only redacted call log | done |
 
-Open in M1c: MCP-04 (OAuth 2.1 and PKCE; bearer tokens only for now), MCP-07 and 08 (human gates, input requests), MCP-12 (bulk dry run), MCP-14 (kill switch), MCP-15 (subscriptions), MCP-16, 18, 19, 20.
+| M1c.2 Human gates and control | transitions marked human-only (agents refused, shown as `requires_human`), `request_human_input` (flag, comment, `inputrequested` TQL field, cleared by a person's reply), per-agent pause and instance kill switch that release claims and end access on the next call, admin routes | done |
+
+Open in M1c: MCP-04 (OAuth 2.1 and PKCE; bearer tokens only for now), MCP-12 (bulk dry run), MCP-15 (subscriptions), MCP-16, 18, 19, 20. There is no admin screen for gates, pause or kill yet, and no workflow editor to mark a gate (it is `SetTransitionHuman`).
 
 | # | Where | Problem | How it was addressed |
 |---|---|---|---|

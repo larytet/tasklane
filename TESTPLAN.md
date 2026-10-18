@@ -879,6 +879,7 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | MCP-06 | done | `TestMCP06_EditIssueTextWhileAHumanTypes` (presence display not covered) |
 | MCP-10, 11, 13 | done | `TestMCP10_SecretsAndSensitiveFields`, `TestMCP11_LimitsBudgetsAndCaps`, `TestMCP13_AuditCompletenessAndImmutability` |
 | MCP-17 | done | `TestMCP17_ContextLatency` (p95 under 100 ms including HTTP) |
-| MCP-04, 07, 08, 12, 14, 15, 16, 18, 19, 20 | open | not built |
+| MCP-07, 08, 14 | done | `TestMCP07_HumanGates`, `TestMCP08_RequestHumanInput` (board visibility is search only; no board yet), `TestMCP14_KillSwitchAndAgentPause` |
+| MCP-04, 12, 15, 16, 18, 19, 20 | open | not built |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

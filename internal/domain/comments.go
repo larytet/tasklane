@@ -59,6 +59,11 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 			return err
 		}
 		tx.Exec(ctx, `DELETE FROM draft WHERE user_id=$1 AND issue_id=$2 AND field='comment'`, a.ID, is.ID)
+		if a.Kind != "agent" { // a person's reply answers an agent's question and lets the agent carry on
+			if _, err := tx.Exec(ctx, `UPDATE issue SET input_requested_at=NULL,input_requested_by=NULL,input_question=NULL WHERE id=$1 AND input_requested_at IS NOT NULL`, is.ID); err != nil {
+				return err
+			}
+		}
 		return outbox(ctx, tx, "issue:"+is.Key, "comment.added", map[string]any{"key": is.Key, "comment": c.ID, "actor": a.Label, "actor_id": a.ID})
 	})
 	s.touchLease(ctx, a, is.ID)

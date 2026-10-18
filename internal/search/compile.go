@@ -226,6 +226,14 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 			return "(cardinality(i.labels)>0)", nil
 		}
 		return "", errAt(x.Pos, "operator %s cannot be used with labels", opName(x.Op))
+	case "inputrequested":
+		switch x.Op {
+		case "is":
+			return "(i.input_requested_at IS NULL)", nil
+		case "isnot":
+			return "(i.input_requested_at IS NOT NULL)", nil
+		}
+		return "", errAt(x.Pos, "use inputrequested is EMPTY or inputrequested is not EMPTY")
 	case "created", "updated", "resolved", "resolutiondate":
 		col := map[string]string{"created": "i.created_at", "updated": "i.updated_at", "resolved": "i.resolved_at", "resolutiondate": "i.resolved_at"}[x.Field]
 		switch x.Op {

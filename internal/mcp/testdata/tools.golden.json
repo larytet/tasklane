@@ -361,6 +361,34 @@
   {
     "annotations": {
       "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Ask a person a question and wait: the issue is flagged on lists and boards, the question is posted as a comment that notifies the usual recipients, and a person's next comment clears the flag. Use it for review requests and anything you must not decide alone.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        },
+        "question": {
+          "description": "What you need from the person",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "question"
+      ],
+      "type": "object"
+    },
+    "name": "request_human_input"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true

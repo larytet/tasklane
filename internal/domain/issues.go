@@ -37,6 +37,15 @@ type TransitionOpt struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	To   string `json:"to"`
+	// RequiresHuman: the workflow lets only a person take this transition (agents are refused)
+	RequiresHuman bool `json:"requires_human,omitempty"`
+}
+
+// InputRequest is an agent's open question for a person.
+type InputRequest struct {
+	By       string    `json:"by"`
+	Question string    `json:"question"`
+	At       time.Time `json:"at"`
 }
 
 type IssueView struct {
@@ -48,6 +57,7 @@ type IssueView struct {
 	Alias       string          `json:"alias,omitempty"` // the old key the caller used, when it differs from the current one
 	Role        string          `json:"role"`
 	Presence    []PresenceEntry `json:"presence"`
+	Input       *InputRequest   `json:"input_requested,omitempty"`
 }
 
 var priorities = map[string]bool{"lowest": true, "low": true, "medium": true, "high": true, "highest": true}
@@ -293,7 +303,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 		return IssueView{}, err
 	}
 	v := IssueView{Issue: is, Role: role, Transitions: []TransitionOpt{}}
-	rows, err := s.DB.Query(ctx, `SELECT t.id,t.name,st.name FROM issue i JOIN project p ON p.id=i.project_id
+	rows, err := s.DB.Query(ctx, `SELECT t.id,t.name,st.name,t.requires_human FROM issue i JOIN project p ON p.id=i.project_id
 		JOIN transition t ON t.workflow_id=p.workflow_id AND (t.from_status IS NULL OR t.from_status=i.status_id) JOIN status st ON st.id=t.to_status
 		WHERE i.id=$1 ORDER BY st.position, t.name`, is.ID)
 	if err != nil {
@@ -301,7 +311,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 	}
 	for rows.Next() {
 		var t TransitionOpt
-		rows.Scan(&t.ID, &t.Name, &t.To)
+		rows.Scan(&t.ID, &t.Name, &t.To, &t.RequiresHuman)
 		v.Transitions = append(v.Transitions, t)
 	}
 	rows.Close()
@@ -318,6 +328,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 		v.Alias = strings.ToUpper(key)
 	}
 	v.Presence = s.Presence.List(is.Key, a.ID)
+	v.Input = s.inputRequest(ctx, is.ID)
 	return v, nil
 }
 
@@ -489,14 +500,18 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 			return &VersionConflict{CurrentVersion: cur, Fields: []string{"status"}}
 		}
 		var to, toName, cat, fromName string
-		err := tx.QueryRow(ctx, `SELECT t.to_status,st.name,st.category,(SELECT name FROM status WHERE id=$3) FROM transition t JOIN status st ON st.id=t.to_status
+		var human bool
+		err := tx.QueryRow(ctx, `SELECT t.to_status,st.name,st.category,(SELECT name FROM status WHERE id=$3),t.requires_human FROM transition t JOIN status st ON st.id=t.to_status
 			WHERE t.id=$1 AND (t.from_status IS NULL OR t.from_status=$2) AND t.workflow_id=(SELECT p.workflow_id FROM issue i JOIN project p ON p.id=i.project_id WHERE i.id=$4)`,
-			transitionID, statusID, statusID, is.ID).Scan(&to, &toName, &cat, &fromName)
+			transitionID, statusID, statusID, is.ID).Scan(&to, &toName, &cat, &fromName, &human)
 		if err == pgx.ErrNoRows {
 			return invalid("transition is not available from status %q", is.Status)
 		}
 		if err != nil {
 			return err
+		}
+		if human && a.Kind == "agent" {
+			return invalid("%q needs a person: agents cannot take this transition (use request_human_input to ask for review)", toName)
 		}
 		next := cur + 1
 		fv["status"] = next

@@ -826,3 +826,139 @@ func TestMCP17_ContextLatency(t *testing.T) {
 		t.Fatalf("p95 %v exceeds 100 ms", p95)
 	}
 }
+
+// MCP-07: a transition marked as human-only is refused for agents with a clear reason; other transitions still work.
+func TestMCP07_HumanGates(t *testing.T) {
+	e := newEnv(t)
+	ag := e.newAgent("gated", "member", nil)
+	ag.init()
+	var tid string
+	if err := e.Store.Pool.QueryRow(ctx, `SELECT t.id FROM transition t JOIN status s ON s.id=t.to_status WHERE s.name='Done' AND t.workflow_id=(SELECT workflow_id FROM project WHERE key='ABC') LIMIT 1`).Scan(&tid); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Svc.SetTransitionHuman(ctx, e.Alice, tid, true); err == nil {
+		t.Fatal("a member set a gate")
+	}
+	if err := e.Svc.SetTransitionHuman(ctx, e.Admin, tid, true); err != nil {
+		t.Fatal(err)
+	}
+	ag.ok("claim_issue", map[string]any{"key": e.key})
+	r := ag.call("transition_issue", map[string]any{"key": e.key, "transition": "Done"})
+	if !r.Err || !strings.Contains(r.Text, "needs a person") {
+		t.Fatalf("%+v", r)
+	}
+	flagged := false
+	for _, x := range ag.ok("list_transitions", map[string]any{"key": e.key}).Data["transitions"].([]any) {
+		m := x.(map[string]any)
+		flagged = flagged || (m["name"] == "Done" && m["requires_human"] == true)
+	}
+	if !flagged {
+		t.Fatal("the gate is not shown to the agent")
+	}
+	if v, _ := e.Svc.View(ctx, e.Admin, e.key); v.Issue.Status == "Done" {
+		t.Fatal("the gated transition happened")
+	}
+	// a person may take it
+	v, _ := e.Svc.View(ctx, e.Alice, e.key)
+	for _, tr := range v.Transitions {
+		if tr.ID == tid {
+			if _, err := e.Svc.Transition(ctx, e.Alice, e.key, tid, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if v, _ := e.Svc.View(ctx, e.Admin, e.key); v.Issue.Status != "Done" {
+		t.Fatalf("%s", v.Issue.Status)
+	}
+}
+
+// MCP-08: request_human_input flags the issue, tells people, shows in search, and a person's reply clears it.
+func TestMCP08_RequestHumanInput(t *testing.T) {
+	e := newEnv(t)
+	ag := e.newAgent("asker", "member", nil)
+	ag.init()
+	ag.ok("request_human_input", map[string]any{"key": e.key, "question": "Which payment provider should I target?"})
+	v, _ := e.Svc.View(ctx, e.Alice, e.key)
+	if v.Input == nil || !strings.Contains(v.Input.Question, "payment provider") || v.Input.By != "asker" {
+		t.Fatalf("%+v", v.Input)
+	}
+	found := false
+	for _, c := range v.Comments {
+		found = found || strings.Contains(c.Body, "Input needed: Which payment provider")
+	}
+	if !found {
+		t.Fatal("the question was not posted as a comment")
+	}
+	if r := ag.ok("search_issues", map[string]any{"q": "inputrequested is not EMPTY"}); !strings.Contains(r.Text, e.key) {
+		t.Fatalf("the flagged issue is not found by search: %s", r.Text)
+	}
+	if r := ag.ok("search_issues", map[string]any{"q": "inputrequested is EMPTY"}); strings.Contains(r.Text, e.key) {
+		t.Fatal("the flagged issue matches the unflagged query")
+	}
+	if ctxr := ag.ok("get_issue_context", map[string]any{"key": e.key}); ctxr.Data["input_requested"] == nil {
+		t.Fatal("the agent cannot see its own open request")
+	}
+	// an agent's other comment does not clear it; a person's reply does
+	ag.ok("add_comment", map[string]any{"key": e.key, "body": "waiting"})
+	if v, _ := e.Svc.View(ctx, e.Alice, e.key); v.Input == nil {
+		t.Fatal("the agent cleared its own flag")
+	}
+	e.Svc.AddComment(ctx, e.Alice, e.key, "Use Stripe.", false)
+	if v, _ := e.Svc.View(ctx, e.Alice, e.key); v.Input != nil {
+		t.Fatal("a reply did not clear the flag")
+	}
+	if r := ag.call("request_human_input", map[string]any{"key": e.key, "question": "  "}); !r.Err {
+		t.Fatal("an empty question was accepted")
+	}
+}
+
+// MCP-14: the kill switch and per-agent pause take effect on the next call and release live claims.
+func TestMCP14_KillSwitchAndAgentPause(t *testing.T) {
+	e := newEnv(t)
+	a1 := e.newAgent("one", "member", nil)
+	a2 := e.newAgent("two", "member", nil)
+	a1.init()
+	a2.init()
+	a1.ok("claim_issue", map[string]any{"key": e.key})
+	if err := e.Svc.PauseAgent(ctx, e.Alice, a1.user.ID, true); err == nil {
+		t.Fatal("a member paused an agent")
+	}
+	if err := e.Svc.PauseAgent(ctx, e.Admin, a1.user.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := a1.post(a1.token, map[string]any{"jsonrpc": "2.0", "id": 5, "method": "ping"}, nil); code != 401 {
+		t.Fatalf("a paused agent was served: %d", code)
+	}
+	if v, _ := e.Svc.View(ctx, e.Admin, e.key); v.Issue.Assignee != nil || v.Issue.Status != "To Do" {
+		t.Fatalf("the paused agent's claim was not released: %+v", v.Issue)
+	}
+	if r := a2.call("claim_issue", map[string]any{"key": e.key}); r.Err {
+		t.Fatalf("another agent is unaffected: %s", r.Text)
+	}
+	e.Svc.PauseAgent(ctx, e.Admin, a1.user.ID, false)
+	if code, _, _ := a1.post(a1.token, map[string]any{"jsonrpc": "2.0", "id": 6, "method": "ping"}, nil); code != 200 {
+		t.Fatalf("resume: %d", code)
+	}
+	// the instance-wide switch stops everyone, leaves people alone, and is reversible
+	if err := e.Svc.KillAgents(ctx, e.Alice, true); err == nil {
+		t.Fatal("a member used the kill switch")
+	}
+	if err := e.Svc.KillAgents(ctx, e.Admin, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []*agent{a1, a2} {
+		if code, _, _ := a.post(a.token, map[string]any{"jsonrpc": "2.0", "id": 7, "method": "ping"}, nil); code != 401 {
+			t.Fatalf("killed: %d", code)
+		}
+	}
+	if v, _ := e.Svc.View(ctx, e.Admin, e.key); v.Issue.Assignee != nil {
+		t.Fatal("claims survived the kill switch")
+	}
+	if _, err := e.Svc.AddComment(ctx, e.Alice, e.key, "people carry on", false); err != nil {
+		t.Fatal(err)
+	}
+	e.Svc.KillAgents(ctx, e.Admin, false)
+	if code, _, _ := a2.post(a2.token, map[string]any{"jsonrpc": "2.0", "id": 8, "method": "ping"}, nil); code != 200 {
+		t.Fatalf("after the switch is off: %d", code)
+	}
+}

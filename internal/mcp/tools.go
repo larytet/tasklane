@@ -218,9 +218,12 @@ func (s *Server) registerTools() {
 			m["comments"] = cl
 			ts := []any{}
 			for _, t := range v.Transitions {
-				ts = append(ts, map[string]any{"name": t.Name, "to": t.To})
+				ts = append(ts, map[string]any{"name": t.Name, "to": t.To, "requires_human": t.RequiresHuman})
 			}
 			m["transitions"] = ts
+			if v.Input != nil {
+				m["input_requested"] = map[string]any{"by": v.Input.By, "question": block(v.Input.By, "agent", false, v.Input.At, v.Input.Question), "at": v.Input.At}
+			}
 			ls := []any{}
 			for _, l := range v.Links {
 				e := map[string]any{"type": l.Type, "direction": l.Dir, "key": l.Key}
@@ -293,7 +296,7 @@ func (s *Server) registerTools() {
 			}
 			ts := []any{}
 			for _, t := range v.Transitions {
-				ts = append(ts, map[string]any{"name": t.Name, "to": t.To})
+				ts = append(ts, map[string]any{"name": t.Name, "to": t.To, "requires_human": t.RequiresHuman})
 			}
 			return toolResult{Data: map[string]any{"status": v.Issue.Status, "transitions": ts}}, nil
 		}})
@@ -431,6 +434,17 @@ func (s *Server) registerTools() {
 				return toolResult{}, err
 			}
 			return toolResult{Data: map[string]any{"key": is.Key, "status": is.Status, "lease_minutes": m}}, nil
+		}})
+	s.add(&Tool{Name: "request_human_input", Description: "Ask a person a question and wait: the issue is flagged on lists and boards, the question is posted as a comment that notifies the usual recipients, and a person's next comment clears the flag. Use it for review requests and anything you must not decide alone.", Scope: "comment", Write: true,
+		Props: []Prop{key, {"question", "string", "What you need from the person", true, nil}},
+		Handler: func(ctx context.Context, s *Server, a domain.Actor, args map[string]any) (toolResult, error) {
+			if err := need(args, "key", "question"); err != nil {
+				return toolResult{}, err
+			}
+			if err := s.Svc.RequestHumanInput(ctx, a, str(args, "key"), str(args, "question")); err != nil {
+				return toolResult{}, err
+			}
+			return toolResult{Data: map[string]any{"key": str(args, "key"), "waiting_for_human": true}}, nil
 		}})
 	s.add(&Tool{Name: "release_issue", Description: "Give up your claim: the lease ends, you are unassigned, and an in-progress issue returns to To Do.", Scope: "claim", Write: true,
 		Props: []Prop{key},

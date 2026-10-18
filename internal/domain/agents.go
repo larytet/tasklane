@@ -88,14 +88,21 @@ func (s *Service) AuthenticateAgent(ctx context.Context, tok string) (Actor, []s
 	var u User
 	var name string
 	var scopes []string
+	var paused bool
 	var exp, rev *time.Time
-	err := s.DB.QueryRow(ctx, `SELECT u.id,u.name,u.kind,u.is_admin,t.name,t.scopes,t.expires_at,t.revoked_at FROM api_token t JOIN app_user u ON u.id=t.user_id WHERE t.token_hash=$1 AND u.active`, hashToken(tok)).
-		Scan(&u.ID, &u.Name, &u.Kind, &u.Admin, &name, &scopes, &exp, &rev)
+	err := s.DB.QueryRow(ctx, `SELECT u.id,u.name,u.kind,u.is_admin,u.agent_paused,t.name,t.scopes,t.expires_at,t.revoked_at FROM api_token t JOIN app_user u ON u.id=t.user_id WHERE t.token_hash=$1 AND u.active`, hashToken(tok)).
+		Scan(&u.ID, &u.Name, &u.Kind, &u.Admin, &paused, &name, &scopes, &exp, &rev)
 	if err == pgx.ErrNoRows {
 		return Actor{}, nil, ErrForbidden
 	}
 	if err != nil {
 		return Actor{}, nil, err
+	}
+	if killed, _ := s.AgentsKilled(ctx); killed && u.Kind == "agent" {
+		return Actor{}, nil, ErrForbidden
+	}
+	if paused && u.Kind == "agent" {
+		return Actor{}, nil, ErrForbidden
 	}
 	if rev != nil || (exp != nil && !exp.After(s.Now())) {
 		return Actor{}, nil, ErrForbidden
@@ -296,4 +303,130 @@ func (s *Service) ReleaseIssue(ctx context.Context, a Actor, key string) (Issue,
 		return is, err
 	}
 	return s.getIssue(ctx, key)
+}
+
+// SetTransitionHuman marks a workflow transition as one only a person may take (administrators).
+func (s *Service) SetTransitionHuman(ctx context.Context, a Actor, transitionID string, human bool) error {
+	if !a.Admin {
+		return ErrForbidden
+	}
+	tag, err := s.DB.Exec(ctx, `UPDATE transition SET requires_human=$2 WHERE id=$1`, transitionID, human)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Service) inputRequest(ctx context.Context, issueID string) *InputRequest {
+	var r InputRequest
+	var q *string
+	if s.DB.QueryRow(ctx, `SELECT COALESCE(u.name,''),COALESCE(i.input_question,''),i.input_requested_at FROM issue i LEFT JOIN app_user u ON u.id=i.input_requested_by WHERE i.id=$1 AND i.input_requested_at IS NOT NULL`, issueID).Scan(&r.By, &r.Question, &r.At) != nil {
+		return nil
+	}
+	_ = q
+	return &r
+}
+
+// RequestHumanInput flags an issue as waiting for a person, with the question as a comment (which notifies the
+// usual recipients). A person's next comment clears the flag; so does ClearHumanInput.
+func (s *Service) RequestHumanInput(ctx context.Context, a Actor, key, question string) error {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return invalid("say what you need from the person")
+	}
+	is, role, err := s.access(ctx, a, key)
+	if err != nil {
+		return err
+	}
+	if !canWrite(role) {
+		return ErrForbidden
+	}
+	if _, err := s.AddComment(ctx, a, key, "Input needed: "+question, false); err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(ctx, `UPDATE issue SET input_requested_at=now(),input_requested_by=$2,input_question=$3 WHERE id=$1`, is.ID, a.ID, question)
+	if err == nil {
+		s.emit(Event{Type: "issue.updated", Issue: is.Key, Actor: a.Label, ActorID: a.ID})
+	}
+	return err
+}
+
+// ClearHumanInput removes the flag without a comment.
+func (s *Service) ClearHumanInput(ctx context.Context, a Actor, key string) error {
+	is, role, err := s.access(ctx, a, key)
+	if err != nil {
+		return err
+	}
+	if !canWrite(role) {
+		return ErrForbidden
+	}
+	_, err = s.DB.Exec(ctx, `UPDATE issue SET input_requested_at=NULL,input_requested_by=NULL,input_question=NULL WHERE id=$1`, is.ID)
+	return err
+}
+
+// AgentsKilled reports the instance-wide kill switch.
+func (s *Service) AgentsKilled(ctx context.Context) (bool, error) {
+	var k bool
+	err := s.DB.QueryRow(ctx, `SELECT killed FROM agent_switch WHERE id=1`).Scan(&k)
+	return k, err
+}
+
+// KillAgents turns every agent off at once (administrators): tokens stop working on the next call and live claims
+// are released. Turning it off again restores access; claims are not restored.
+func (s *Service) KillAgents(ctx context.Context, a Actor, on bool) error {
+	if !a.Admin {
+		return ErrForbidden
+	}
+	if _, err := s.DB.Exec(ctx, `UPDATE agent_switch SET killed=$1,by_id=$2,at=now() WHERE id=1`, on, a.ID); err != nil {
+		return err
+	}
+	if on {
+		return s.releaseLeases(ctx, a, "")
+	}
+	return nil
+}
+
+// PauseAgent stops one agent account and releases its claims.
+func (s *Service) PauseAgent(ctx context.Context, a Actor, agentID string, paused bool) error {
+	if !a.Admin {
+		return ErrForbidden
+	}
+	tag, err := s.DB.Exec(ctx, `UPDATE app_user SET agent_paused=$2 WHERE id=$1 AND kind='agent'`, agentID, paused)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if paused {
+		return s.releaseLeases(ctx, a, agentID)
+	}
+	return nil
+}
+
+// releaseLeases frees live claims (of one holder, or all), unassigning and returning the issue to To Do, as a release does.
+func (s *Service) releaseLeases(ctx context.Context, admin Actor, holder string) error {
+	rows, err := s.DB.Query(ctx, `SELECT p.key||'-'||i.number, l.holder_id::text FROM issue_lease l JOIN issue i ON i.id=l.issue_id JOIN project p ON p.id=i.project_id WHERE $1='' OR l.holder_id::text=$1`, holder)
+	if err != nil {
+		return err
+	}
+	type lease struct{ key, holder string }
+	var ls []lease
+	for rows.Next() {
+		var l lease
+		rows.Scan(&l.key, &l.holder)
+		ls = append(ls, l)
+	}
+	rows.Close()
+	for _, l := range ls {
+		var name string
+		s.DB.QueryRow(ctx, `SELECT name FROM app_user WHERE id=$1`, l.holder).Scan(&name)
+		if _, err := s.ReleaseIssue(ctx, Actor{ID: l.holder, Label: "Agent: " + name, Kind: "agent", Admin: true}, l.key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
