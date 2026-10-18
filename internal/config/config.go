@@ -16,6 +16,7 @@ type Config struct {
 	Listen        string
 	DatabaseURL   string
 	BlobDir       string
+	SecretKey     string
 	BlobBackend   string
 	S3Endpoint    string
 	S3Region      string
@@ -69,6 +70,7 @@ var Schema = []Key{
 	{Name: "s3_sse", Default: "", Kind: "enum", Enum: []string{"", "AES256", "aws:kms"}, Doc: "Server-side encryption requested on every write"},
 	{Name: "s3_kms_key_id", Default: "", Kind: "string", Doc: "KMS key for `s3_sse=aws:kms`; empty uses the bucket default key"},
 	{Name: "s3_part_size_mb", Default: "16", Kind: "int", Doc: "Multipart part size in MiB (at least 5); larger files are uploaded in parts"},
+	{Name: "secret_key", Default: "", Kind: "string", Secret: true, Doc: "64 hexadecimal characters (32 bytes) that encrypt stored credentials such as Git tokens and webhook secrets. Set it (for example from a secret file) so a database dump alone cannot decrypt them; when unset a key kept in the database is used"},
 	{Name: "max_upload_mb", Default: "100", Kind: "int", Doc: "Largest accepted attachment, in MiB"},
 	{Name: "session_ttl", Default: "336h", Kind: "duration", Doc: "How long a sign-in lasts"},
 	{Name: "presence_ttl", Default: "30s", Kind: "duration", Doc: "How long an editing indicator lives without a heartbeat"},
@@ -348,7 +350,7 @@ func Load(o Options) (Config, error) {
 	}
 	n := func(k string) int64 { v, _ := strconv.ParseInt(m[k], 10, 64); return v }
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
-	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], MaxUploadMB: n("max_upload_mb"),
+	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], MaxUploadMB: n("max_upload_mb"),
 		BlobBackend: m["blob_backend"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
 		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],

@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -181,6 +182,13 @@ func serve(ctx context.Context, cfg config.Config) {
 		}
 	}
 	svc := domain.New(st.Pool)
+	if cfg.SecretKey != "" {
+		k, err := hex.DecodeString(cfg.SecretKey)
+		if err != nil || len(k) != 32 {
+			log.Fatalf("secret_key must be 64 hexadecimal characters (32 bytes)")
+		}
+		svc.SecretKey = k
+	}
 	if err := svc.EnsureDefaults(ctx); err != nil {
 		log.Fatalf("defaults: %v", err)
 	}
@@ -193,6 +201,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	}
 	go svc.RunBlobWorkers(ctx, log.Printf)
 	go svc.RunLifecycle(ctx, log.Printf)
+	go svc.RunGitWorkers(ctx, log.Printf)
 	if cfg.SMTPHost != "" {
 		dom := "tasklane.local"
 		if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {

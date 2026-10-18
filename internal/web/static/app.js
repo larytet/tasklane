@@ -229,6 +229,7 @@
       root.append(chipLine(is));
       root.append(descriptionEl(is));
       root.append(attachmentsEl());
+      root.append(developmentEl());
       root.append(threadEl());
       root.append(replyEl());
     }
@@ -567,6 +568,28 @@
     root.addEventListener('paste', e => { const fs = [...(e.clipboardData ? e.clipboardData.files : [])]; if (fs.length && canEdit()) { e.preventDefault(); uploadFiles(fs); } });
     root.addEventListener('dragover', e => e.preventDefault());
     root.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length && canEdit()) { e.preventDefault(); uploadFiles([...e.dataTransfer.files]); } });
+
+    // ----- development (Git): collapsed, filled from Tasklane's own store; the provider is never asked from here
+    function developmentEl() {
+      const body = h('div', { class: 'dev-body' });
+      const sum = h('summary', {}, 'Development');
+      const box = h('details', { class: 'dev', hidden: true }, sum, body);
+      api('GET', '/api/v1/issues/' + key + '/development').then(r => {
+        if (r.status !== 200 || !r.data.summary) return;
+        box.hidden = false;
+        sum.textContent = 'Development · ' + r.data.summary;
+        const d = r.data;
+        const group = (label, items, line) => items.length ? h('div', {}, h('strong', {}, label), h('ul', { class: 'dev-list' }, items.map(i => h('li', {}, line(i))))) : null;
+        const link = (i, text) => i.url ? h('a', { href: i.url, rel: 'noopener noreferrer', target: '_blank' }, text) : text;
+        body.append(
+          group('Pull requests', d.pull_requests, i => [link(i, i.title), ' ', h('span', { class: 'loz ' + (i.state === 'merged' ? 'done' : 'todo') }, i.state + (i.review ? ', ' + i.review.replace('_', ' ') : '')), ' ', h('span', { class: 'muted' }, i.author)]),
+          group('Branches', d.branches, i => link(i, i.title)),
+          group('Commits', d.commits, i => [h('code', {}, i.sha.slice(0, 7)), ' ', link(i, i.title), ' ', h('span', { class: 'muted' }, i.author)]),
+          group('Builds', d.builds, i => [i.title, ' ', h('span', { class: 'loz ' + (i.state === 'passing' ? 'done' : i.state === 'failing' ? 'blocked' : 'in_progress') }, i.state)]),
+          group('Deployments', d.deployments, i => [i.environment, ' ', h('span', { class: 'muted' }, i.state)]));
+      });
+      return box;
+    }
 
     // ----- comments and activity
     function threadEl() {

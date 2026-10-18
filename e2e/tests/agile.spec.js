@@ -216,3 +216,36 @@ test('BLOB-03 client: large files use presigned parts and fall back to the serve
   await p.locator('#file').setInputFiles({ name: 'ten.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(10 << 20, 3) });
   await expect(p.getByText('ten.bin')).toBeVisible();
 });
+
+// GIT-UI: a signed webhook reaches the ticket's Development section, collapsed with a one-line summary; the page never
+// talks to the provider.
+test('GIT: a signed webhook shows on the ticket as a one-line summary that expands', async ({ browser }) => {
+  const { createHmac } = await import('node:crypto');
+  const adm = await admin(browser);
+  const conn = (await adm.call('POST', '/api/v1/git/connections', { name: 'gh-' + uniq(), provider: 'github' })).body;
+  await adm.call('POST', `/api/v1/git/connections/${conn.connection.id}/repos`, { full_name: 'acme/shop', projects: ['ABC'] });
+  const key = (await adm.call('POST', '/api/v1/issues', { project: 'ABC', type: 'Task', summary: 'git ui ' + uniq() })).body.key;
+  const send = async (event, id, payload) => {
+    const body = JSON.stringify(payload);
+    const sig = 'sha256=' + createHmac('sha256', conn.webhook_secret).update(body).digest('hex');
+    const r = await adm.ctx.request.post('/api/v1/git/webhooks/' + conn.connection.id, { headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': sig, 'X-GitHub-Event': event, 'X-GitHub-Delivery': id }, data: body });
+    expect(r.status()).toBe(200);
+  };
+  const now = new Date().toISOString();
+  await send('pull_request', 'd-' + uniq(), { action: 'opened', repository: { full_name: 'acme/shop' }, pull_request: { number: 5, title: `${key} add the thing`, body: '', state: 'open', draft: false, merged: false, html_url: 'https://github.com/acme/shop/pull/5', user: { login: 'octo' }, head: { ref: 'thing', sha: 'abc1234' }, base: { ref: 'main' }, updated_at: now } });
+  await send('check_run', 'c-' + uniq(), { repository: { full_name: 'acme/shop' }, check_run: { name: 'ci', head_sha: 'abc1234', status: 'completed', conclusion: 'success', html_url: 'https://github.com/acme/shop/runs/1', completed_at: now } });
+  const jana = await newUser(browser, 'jana@example.com');
+  const p = jana.page;
+  await p.goto(`/#/issue/${key}`);
+  const dev = p.locator('details.dev');
+  await expect(dev.locator('summary')).toContainText('1 PR open, build passing'); // the processor runs once a second
+  await expect(dev.getByText(`${key} add the thing`)).toBeHidden(); // collapsed by default
+  await dev.locator('summary').click();
+  await expect(dev.getByRole('link', { name: `${key} add the thing` })).toBeVisible();
+  await expect(dev).toContainText('ci');
+  // a person with no link to code sees no section at all
+  const other = (await adm.call('POST', '/api/v1/issues', { project: 'ABC', type: 'Task', summary: 'no code ' + uniq() })).body.key;
+  await p.goto(`/#/issue/${other}`);
+  await expect(p.getByRole('heading', { level: 1 })).toBeVisible();
+  await expect(p.locator('details.dev')).toBeHidden();
+});

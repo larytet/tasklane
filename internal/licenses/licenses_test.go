@@ -75,7 +75,7 @@ func TestLIC02_NoticeIsCurrent(t *testing.T) {
 // LIC-05: a self-hosted build has no licence key, no seat check and no phone-home: no HTTP client in production code,
 // and the only outbound network call is the configured SMTP relay.
 func TestLIC05_NoPhoneHome(t *testing.T) {
-	forbidden := regexp.MustCompile(`http\.(Get|Post|Head|PostForm|DefaultClient|NewRequest|Client\{)|net\.Dial|tls\.Dial|net/rpc|telemetry|analytics|licen[sc]e[_ ]?key|seat`)
+	forbidden := regexp.MustCompile(`http\.(?:Get|Post|Head|PostForm)\b|http\.(?:DefaultClient|NewRequest|Client\{)|net\.Dial|tls\.Dial|net/rpc|telemetry|analytics|licen[sc]e[_ ]?key|seat`)
 	var offenders []string
 	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
@@ -92,6 +92,10 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 			if m := forbidden.FindString(line); m != "" {
 				// the SMTP transport dials the configured relay; that is the one allowed outbound call
 				if strings.HasSuffix(p, "internal/mail/mail.go") && (strings.Contains(m, "net.Dial") || strings.Contains(m, "tls.Dial")) {
+					continue
+				}
+				// the Git client talks to the provider the administrator connected, through the egress policy
+				if strings.HasSuffix(p, "internal/git/client.go") || strings.HasSuffix(p, "internal/egress/egress.go") {
 					continue
 				}
 				// the S3 backend talks to the bucket the operator configured and nothing else

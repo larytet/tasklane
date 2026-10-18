@@ -16,6 +16,7 @@ import (
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/testutil"
+	"github.com/larytet/tasklane/internal/testutil/gitmock"
 	"github.com/larytet/tasklane/internal/testutil/s3mock"
 )
 
@@ -63,6 +64,7 @@ type fixture struct {
 	n     int
 	spare domain.User
 	mock  *s3mock.Server
+	git   *gitmock.API
 }
 
 func (f *fixture) issue() string {
@@ -123,6 +125,24 @@ func (f *fixture) direct() string {
 	}
 	resp.Body.Close()
 	return du.ID
+}
+
+// gitConn creates a Git connection pointing at the in-process provider double, with one mapped repository.
+func (f *fixture) gitConn() (conn, repo string) {
+	f.n++
+	if f.git == nil {
+		f.git = gitmock.New("github", "t")
+		f.t.Cleanup(f.git.Close)
+	}
+	c, _, err := f.e.Svc.CreateGitConnection(testutil.Ctx(), f.e.Admin, domain.GitConnIn{Name: fmt.Sprint("conn", f.n), Provider: "github", BaseURL: f.git.URL, Token: "t", AllowPrivate: true})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	r, err := f.e.Svc.MapGitRepo(testutil.Ctx(), f.e.Admin, c.ID, "acme/shop", []string{"ABC"})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return c.ID, r.ID
 }
 
 func (f *fixture) attachment(key string) string {
@@ -233,6 +253,29 @@ func rows() []row {
 			return J("POST", "/api/v1/uploads/direct/"+f.direct()+"/complete", map[string]any{})
 		}},
 		{"DELETE /api/v1/uploads/direct/{id}", owner(204), func(f *fixture) req { return J("DELETE", "/api/v1/uploads/direct/"+f.direct(), nil) }},
+		{"POST /api/v1/git/webhooks/{id}", exp{anon: codes(403), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req {
+			c, _ := f.gitConn()
+			return J("POST", "/api/v1/git/webhooks/"+c, map[string]any{"zen": "x"})
+		}}, // proves itself with a signature, never with a session
+		{"GET /api/v1/git/connections", adminer, func(f *fixture) req { return J("GET", "/api/v1/git/connections", nil) }},
+		{"POST /api/v1/git/connections", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/git/connections", map[string]any{"name": fmt.Sprint("c", f.n), "provider": "github"})
+		}},
+		{"DELETE /api/v1/git/connections/{id}", adminer, func(f *fixture) req { c, _ := f.gitConn(); return J("DELETE", "/api/v1/git/connections/"+c, nil) }},
+		{"POST /api/v1/git/connections/{id}/repos", adminer, func(f *fixture) req {
+			c, _ := f.gitConn()
+			return J("POST", "/api/v1/git/connections/"+c+"/repos", map[string]any{"full_name": "acme/other", "projects": []string{"ABC"}})
+		}},
+		{"GET /api/v1/git/repos", adminer, func(f *fixture) req { return J("GET", "/api/v1/git/repos", nil) }},
+		{"POST /api/v1/git/repos/{id}/sync", adminer, func(f *fixture) req { _, r := f.gitConn(); return J("POST", "/api/v1/git/repos/"+r+"/sync", nil) }},
+		{"GET /api/v1/issues/{key}/development", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/issues/"+f.issue()+"/development", nil) }},
+		{"POST /api/v1/issues/{key}/development/links", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(400), admin: codes(400)}, func(f *fixture) req {
+			return J("POST", "/api/v1/issues/"+f.issue()+"/development/links", map[string]any{"url": "https://github.com/acme/shop/pull/1"})
+		}},
+		{"DELETE /api/v1/issues/{key}/development/links/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/issues/"+f.issue()+"/development/links/"+uuid0, nil)
+		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

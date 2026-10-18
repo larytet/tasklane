@@ -1,15 +1,19 @@
 package api_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/larytet/tasklane/internal/api"
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/testutil"
+	"github.com/larytet/tasklane/internal/testutil/gitmock"
 )
 
 func rootClient(t *testing.T, e *testutil.Env, like *client) *client {
@@ -201,5 +205,61 @@ func TestHTTP_CSPAllowsOnlyTheBucketOrigin(t *testing.T) {
 	resp, _ = http.Get(ts2.URL + "/healthz")
 	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self';") {
 		t.Fatalf("%s", csp)
+	}
+}
+
+func TestHTTP_GitWebhookToPanel(t *testing.T) {
+	e, alice, bob, key := setup(t)
+	root := rootClient(t, e, alice)
+	code, out, _ := root.do("POST", "/api/v1/git/connections", map[string]any{"name": "gh", "provider": "github", "token": "ghp_secret_token"})
+	if code != 201 || out["webhook_secret"] == nil || out["webhook_url"] == nil {
+		t.Fatalf("%d %v", code, out)
+	}
+	secret := out["webhook_secret"].(string)
+	connID := out["connection"].(map[string]any)["id"].(string)
+	if s, _ := json.Marshal(out); strings.Contains(string(s), "ghp_secret_token") {
+		t.Fatal("the token came back in a response")
+	}
+	// the secret is shown once: the list has only fingerprints
+	_, raw, _ := root.do("GET", "/api/v1/git/connections", nil)
+	if s, _ := json.Marshal(raw); strings.Contains(string(s), secret) || strings.Contains(string(s), "ghp_secret_token") {
+		t.Fatalf("a credential was listed: %s", s)
+	}
+	if code, _, _ := root.do("POST", "/api/v1/git/connections/"+connID+"/repos", map[string]any{"full_name": "acme/shop", "projects": []string{"ABC"}}); code != 201 {
+		t.Fatalf("%d", code)
+	}
+	send := func(h gitmock.Hook, withToken string) int {
+		req, _ := http.NewRequest("POST", alice.base+"/api/v1/git/webhooks/"+connID, bytes.NewReader(h.Body))
+		for k, v := range h.Header {
+			req.Header[k] = v
+		}
+		if withToken != "" {
+			req.Header.Set("Authorization", "Bearer "+withToken) // a session or token does not stand in for a signature
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	pr := gitmock.GHPR("acme/shop", 3, key+" webhook", "", "feat", "1a2b3c4d", "open", false, time.Now())
+	if c := send(gitmock.GitHubHook("wrong", "pull_request", "w1", pr), alice.token); c != 403 {
+		t.Fatalf("a bad signature with a valid token: %d", c)
+	}
+	if c := send(gitmock.GitHubHook(secret, "pull_request", "w1", pr), ""); c != 200 { // anonymous, but signed
+		t.Fatalf("%d", c)
+	}
+	if n, err := e.Svc.ProcessGitInbox(testutil.Ctx(), 10); err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	_, panel, _ := bob.do("GET", "/api/v1/issues/"+key+"/development", nil)
+	prs := panel["pull_requests"].([]any)
+	if len(prs) != 1 || prs[0].(map[string]any)["state"] != "open" || panel["summary"] != "1 PR open" {
+		t.Fatalf("%v", panel)
+	}
+	// members cannot manage connections
+	if code, _, _ := alice.do("GET", "/api/v1/git/connections", nil); code != 403 {
+		t.Fatalf("%d", code)
 	}
 }

@@ -22,6 +22,7 @@ Precedence, lowest to highest: built-in default, config file (`--config PATH`, `
 | `s3_sse` | `TASKLANE_S3_SSE` | `--s3-sse` | unset | Server-side encryption requested on every write |
 | `s3_kms_key_id` | `TASKLANE_S3_KMS_KEY_ID` | `--s3-kms-key-id` | unset | KMS key for `s3_sse=aws:kms`; empty uses the bucket default key |
 | `s3_part_size_mb` | `TASKLANE_S3_PART_SIZE_MB` | `--s3-part-size-mb` | `16` | Multipart part size in MiB (at least 5); larger files are uploaded in parts |
+| `secret_key` | `TASKLANE_SECRET_KEY`, `TASKLANE_SECRET_KEY_FILE` | `--secret-key` | unset | 64 hexadecimal characters (32 bytes) that encrypt stored credentials such as Git tokens and webhook secrets. Set it (for example from a secret file) so a database dump alone cannot decrypt them; when unset a key kept in the database is used |
 | `max_upload_mb` | `TASKLANE_MAX_UPLOAD_MB` | `--max-upload-mb` | `100` | Largest accepted attachment, in MiB |
 | `session_ttl` | `TASKLANE_SESSION_TTL` | `--session-ttl` | `336h` | How long a sign-in lasts |
 | `presence_ttl` | `TASKLANE_PRESENCE_TTL` | `--presence-ttl` | `30s` | How long an editing indicator lives without a heartbeat |

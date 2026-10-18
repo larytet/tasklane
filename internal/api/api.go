@@ -323,6 +323,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerBoards(mux)
 	s.registerSprints(mux)
 	s.registerReports(mux)
+	s.registerGit(mux)
 	s.registerAttachments(mux)
 	s.registerExchange(mux)
 	if s.Extra != nil {
@@ -609,3 +610,5 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.fail(w, 500, "internal", "internal error", nil)
 	}
 }
+
+func asErr[T any](err error, target *T) bool { return errors.As(err, target) }
