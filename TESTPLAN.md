@@ -593,7 +593,7 @@ Mail, Yahoo, Thunderbird, plain text, in several languages, top- and bottom-post
 | MAIL-15 | Encodings: UTF-8, ISO-8859-x, Shift-JIS, GBK, RFC 2047 headers, quoted-printable, base64, malformed MIME, huge headers | Correct text or a clean rejection; no crash or unbounded memory |
 | MAIL-16 | Permissions: inbound comment as a user without Add Comments, issue invisible to the sender, closed or archived project, security level | Refused or quarantined; never widens access |
 | MAIL-17 | Latency: outbound leaves within 30 s of the event; inbound visible within 10 s p95 (IDLE, webhook) | Meets targets under mixed load; request path never waits on SMTP |
-| MAIL-18 | Retention and GDPR: raw message purge, user erase, suppression retention | Removed from blob store and indexes; audit kept |
+| MAIL-18 | Retention and GDPR: raw message purge, user erase, suppression retention | Removed from blob store and indexes; audit kept | **covered** `TestMAIL18_*` (purge after the period and not before, blob removed, row keeps recognising a redelivery, quarantine and legal hold exempt, bounce and suppression expiry with active ones kept, erase at once with originals removed and the audit kept, export, erase refused under hold) |
 | MAIL-19 | Mirror mode: Tasklane email off for mirrored projects; inbound mail to a mirrored project | Works; warning shown when Jira email is also on |
 | MAIL-20 | Deliverability: DNS checker for SPF, DKIM, DMARC; Tasklane DKIM signing verified by an independent verifier | Checker correct on valid and broken records; signatures verify |
 | MAIL-21 | Quarantine and admin: review, release, delete, audit, outcome log | Release creates the comment or issue once; deletion audited |

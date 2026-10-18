@@ -87,3 +87,10 @@ Admin, Email lists the messages by outcome. An administrator can open the origin
 ## Configuration
 
 The reply domain is the host of `base_url`. Limits (`InboundLimits`) have fixed defaults for now. Receiving mail does not need outbound mail to be configured.
+
+## Retention and erase (MAIL-18)
+
+- **Inbound messages.** `mail_raw_retention_days` (default 90, 0 keeps them) limits how long the original message, its text, its subject and its sender are kept. After that the row stays without them and its Message-ID is replaced by a hash, so a redelivery of the same message is still recognised as a duplicate and does nothing. Comments and issues the message created are the issue's own history and are not touched. Mail waiting for a decision is never purged (the decision needs the text); mail on an issue under legal hold is kept until the hold is released.
+- **Bounces.** `mail_bounce_retention_days` (default 365, 0 keeps them) removes old bounce records and suppressions that an administrator cleared. An address that is still suppressed is never removed by age.
+- **Erasing a person** removes at once, whatever the periods are: the messages they sent or that were matched to them (rows purged as above, the originals removed from the blob store), their bounce records and their suppression entry. It is refused while their mail is on an issue under legal hold. The personal-data export lists their inbound mail and bounce records.
+- Each automatic run is audited with counts only (`mail.retention`), never with content. **Apply retention now** in Administration → Email runs it on demand. The worker runs hourly.

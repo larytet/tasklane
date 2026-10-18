@@ -457,6 +457,7 @@
       } }, 'Add mailbox')), bmsg,
       h('h3', { style: 'margin-top:16px' }, 'Suppressed addresses'), h('p', { class: 'muted' }, 'Email stops after a hard bounce, a complaint, or three soft bounces in a week. The in-app inbox is never affected.'), supp,
       h('div', { class: 'chips', style: 'margin-top:16px' }, h('h3', { style: 'margin:0' }, 'Messages'), outcome, h('span', { class: 'grow' }),
+        h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/admin/mail/retention/run'); toast(r.status === 200 ? 'Retention applied: ' + r.data.messages_purged + ' message(s) purged, ' + r.data.originals_removed + ' original(s) removed, ' + r.data.bounce_records_removed + ' bounce record(s) removed' : errText(r)); loadQueue(); } }, 'Apply retention now'),
         h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/admin/mail/reply-keys'); toast(r.status === 201 ? 'New reply-address key ' + r.data.kid + ' is signing. Older addresses keep working until their key is revoked.' : errText(r)); } }, 'Rotate reply key')),
       queue));
     await Promise.all([loadSources(), loadQueue(), loadSupp(), loadBoxes()]);

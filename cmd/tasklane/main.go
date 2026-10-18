@@ -258,6 +258,8 @@ func serve(ctx context.Context, cfg config.Config) {
 		dom = u.Hostname()
 	}
 	svc.IMAPAllowPrivate = cfg.IMAPAllowPrivate
+	svc.MailRawDays, svc.MailBounceDays, svc.MailRetentionSet = cfg.MailRawDays, cfg.MailBounceDays, true
+	go svc.RunMailRetentionWorker(ctx, time.Hour, log.Printf)
 	go svc.RunIMAP(ctx, log.Printf)
 	if cfg.SMTPListen != "" {
 		var tc *tls.Config

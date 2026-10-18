@@ -703,6 +703,7 @@ func rows() []row {
 		{"POST /api/v1/mail/bounces/{id}", exp{anon: codes(403), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req {
 			return J("POST", "/api/v1/mail/bounces/00000000-0000-0000-0000-000000000000", map[string]any{"events": []any{}})
 		}},
+		{"POST /api/v1/admin/mail/retention/run", adminer, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/retention/run", nil) }},
 		{"GET /api/v1/admin/mail/suppressions", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/suppressions", nil) }},
 		{"DELETE /api/v1/admin/mail/suppressions/{email}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/admin/mail/suppressions/nobody@example.org", nil) }},
 		{"GET /api/v1/admin/mail/imap", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/imap", nil) }},

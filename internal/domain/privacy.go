@@ -75,6 +75,8 @@ func (s *Service) ExportPersonalData(ctx context.Context, a Actor, userID string
 		{"sessions", `SELECT created_at, last_seen_at, ip, user_agent FROM session WHERE user_id::text=$1 ORDER BY id`},
 		{"api_tokens", `SELECT name, created_at, expires_at, revoked_at, last_used_at FROM api_token WHERE user_id::text=$1`},
 		{"connected_apps", `SELECT c.name AS client, g.scopes, g.created_at, g.revoked_at FROM oauth_grant g JOIN oauth_client c ON c.id=g.client_id WHERE g.user_id::text=$1`},
+		{"inbound_mail", `SELECT m.kind, m.subject, m.received_at, m.outcome, m.reason FROM mail_inbound m WHERE m.purged_at IS NULL AND (m.user_id::text=$1 OR lower(m.sender)=(SELECT lower(email) FROM app_user WHERE id::text=$1)) ORDER BY m.id`},
+		{"bounce_records", `SELECT b.kind, b.status, b.source, b.at FROM mail_bounce b WHERE lower(b.email)=(SELECT lower(email) FROM app_user WHERE id::text=$1) ORDER BY b.id`},
 		{"mail_sent_to_them", `SELECT subject, kind, status, created_at FROM mail_message WHERE recipient_id::text=$1 ORDER BY id`},
 		{"git_accounts", `SELECT provider, login, created_at FROM git_identity WHERE user_id::text=$1 ORDER BY id`},
 		{"git_activity", `SELECT o.kind, r.full_name AS repo, o.title, o.state, o.provider_at FROM git_object o JOIN git_repo r ON r.id=o.repo_id WHERE o.author_user::text=$1 ORDER BY o.provider_at`},
@@ -127,7 +129,8 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 	rows, err := s.DB.Query(ctx, `SELECT DISTINCT i.key FROM issue i WHERE i.legal_hold AND (i.reporter_id::text=$1 OR i.assignee_id::text=$1
 		OR EXISTS (SELECT 1 FROM comment c WHERE c.issue_id=i.id AND c.author_id::text=$1)
 		OR EXISTS (SELECT 1 FROM attachment at WHERE at.issue_id=i.id AND at.uploader_id::text=$1)
-		OR EXISTS (SELECT 1 FROM issue_history h WHERE h.issue_id=i.id AND h.actor_id::text=$1)) ORDER BY 1`, userID)
+		OR EXISTS (SELECT 1 FROM issue_history h WHERE h.issue_id=i.id AND h.actor_id::text=$1)
+		OR EXISTS (SELECT 1 FROM mail_inbound m WHERE m.issue_id=i.id AND m.purged_at IS NULL AND (m.user_id::text=$1 OR lower(m.sender)=lower($2)))) ORDER BY 1`, userID, email)
 	if err != nil {
 		return res, err
 	}
@@ -146,6 +149,7 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 		short = short[:8]
 	}
 	newEmail := "erased-" + short + "@erased.invalid"
+	needSweep := false   // originals of mail from this person were let go: their bytes are removed after the commit
 	touched := map[string]bool{} // issues whose text or participants changed: their derived data is rebuilt
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		mark := func(q string, args ...any) error {
@@ -269,6 +273,11 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 				return err
 			}
 		}
+		if purged, err := s.erasePersonMail(ctx, tx, userID, email, res.Counts); err != nil {
+			return err
+		} else if purged {
+			needSweep = true
+		}
 		if err := exec("sign_in_records_removed", `DELETE FROM login_attempt WHERE email=$1`, strings.ToLower(email)); err != nil {
 			return err
 		}
@@ -290,6 +299,9 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 	})
 	if err != nil {
 		return EraseResult{Counts: map[string]int{}}, err
+	}
+	if needSweep {
+		res.Counts["originals_removed"] = s.dropOriginals(ctx)
 	}
 	res.Erased = true
 	return res, nil

@@ -432,6 +432,11 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 	if len(subject) > 500 {
 		subject = subject[:500]
 	}
+	// a message whose personal content was purged is still recognised by the hash its Message-ID was replaced with
+	var purgedID int64
+	if s.DB.QueryRow(ctx, `UPDATE mail_inbound SET dupes=dupes+1 WHERE message_id=$1 RETURNING id`, forgetMessageID(mid)).Scan(&purgedID) == nil {
+		return InboundResult{ID: purgedID, Outcome: "ignored", Reason: "duplicate of a message already received", Duplicate: true}, nil
+	}
 	// claim: the first delivery of a Message-ID processes it; a repeat is counted and ignored, unless the first one died
 	// half way (still pending after two minutes), when the repeat finishes the job
 	var id int64

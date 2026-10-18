@@ -54,6 +54,10 @@ type Service struct {
 	gate            *gate
 	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
 	TrashRetention time.Duration
+	// MailRawDays and MailBounceDays are the retention of inbound mail and of bounce records, in days (0 keeps them, once
+	// MailRetentionSet says the values were chosen; unset, the defaults apply).
+	MailRawDays, MailBounceDays int
+	MailRetentionSet            bool
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:
 	// a lost event is repaired by a refetch, and nothing depends on delivery.
 	Publish func(Event)
