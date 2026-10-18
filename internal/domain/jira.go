@@ -28,6 +28,16 @@ func (e *ReadOnlyMirror) Error() string {
 	return fmt.Sprintf("project %s is mirrored from Jira and is read-only here: make the change in Jira (%s)", e.Project, e.SiteURL)
 }
 
+// MirrorRefusal is the typed refusal for a write to a mirrored project, or nil for a native one. Entry points that look things up
+// before they write (an agent tool resolving a transition by name) call it first, so the answer is the reason and the Jira address, not
+// a symptom of the mirror (an empty list of transitions).
+func (s *Service) MirrorRefusal(ctx context.Context, projectKey string) error {
+	if site := s.mirrorSite(ctx, projectKey); site != "" {
+		return &ReadOnlyMirror{Project: strings.ToUpper(projectKey), SiteURL: site}
+	}
+	return nil
+}
+
 // mirrorSite returns the Jira site of a mirrored project ("" for native projects).
 func (s *Service) mirrorSite(ctx context.Context, projectKey string) string {
 	var site string

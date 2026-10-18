@@ -334,11 +334,13 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request, req rpcReq, ac
 			b, _ := json.Marshal(res.Data)
 			text = string(b)
 		}
+		overCap := false
 		if max := s.MaxResultChars; max > 0 && len(text) > max {
+			overCap = true
 			text = text[:max] + fmt.Sprintf(`... [truncated: the result was cut at %d characters; use a smaller limit or the cursor]`, max)
 		}
 		result := map[string]any{"content": []any{map[string]any{"type": "text", "text": text}}, "isError": res.IsError}
-		if m, ok := res.Data.(map[string]any); ok && !res.IsError {
+		if m, ok := res.Data.(map[string]any); ok && !res.IsError && !overCap { // the structured copy is the same data: a result over the cap is not sent whole by the back door
 			result["structuredContent"] = m
 		}
 		s.writeJSON(w, 200, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})

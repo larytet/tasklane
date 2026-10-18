@@ -717,6 +717,11 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 			return err
 		}
 		s.hist(ctx, tx, is.ID, a, "status", &fromName, &toName)
+		if cat == "done" { // nobody is working on finished work: an agent's claim ends with it, not at its expiry
+			if _, err := tx.Exec(ctx, `DELETE FROM issue_lease WHERE issue_id=$1`, is.ID); err != nil {
+				return err
+			}
+		}
 		if tc != nil && len(rules.PostFunctions) > 0 {
 			if err := s.runPostFunctions(ctx, tx, a, tc, rules.PostFunctions, fromName, toName, next); err != nil {
 				return err

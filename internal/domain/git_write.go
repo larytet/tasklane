@@ -184,10 +184,9 @@ func (s *Service) CreateGitBranch(ctx context.Context, a Actor, key string, in B
 		return BranchOut{}, ErrForbidden
 	}
 	var projectID, summary string
-	var mirrored bool
-	s.DB.QueryRow(ctx, `SELECT p.id::text,i.summary,p.mirror_of IS NOT NULL FROM issue i JOIN project p ON p.id=i.project_id WHERE i.id::text=$1`, is.ID).Scan(&projectID, &summary, &mirrored)
-	if mirrored {
-		return BranchOut{}, invalid("a mirrored issue is read-only here")
+	s.DB.QueryRow(ctx, `SELECT p.id::text,i.summary FROM issue i JOIN project p ON p.id=i.project_id WHERE i.id::text=$1`, is.ID).Scan(&projectID, &summary)
+	if err := s.MirrorRefusal(ctx, is.Project); err != nil { // the same typed refusal as every other write, with the Jira address
+		return BranchOut{}, err
 	}
 	repos, err := s.writableRepos(ctx, projectID)
 	if err != nil {

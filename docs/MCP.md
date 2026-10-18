@@ -53,3 +53,43 @@ A client subscribes with `resources/subscribe` to:
 Notifications are `notifications/resources/updated` with the resource's `uri`, sent on the session's **event stream**: a `GET` of the endpoint with `Mcp-Session-Id` and `Accept: text/event-stream` (one stream per session; a second gets `409`, a missing session id `400`, someone else's session `404`). Over stdio the proxy opens the stream itself and writes the notifications as lines. A notification says that something changed, not what: the client reads the resource again, and that read is authorized like any other. Typical delivery is well under a second.
 
 Authorization is checked **at every notification**: the token must still work (a revoked, expired, paused or killed agent's stream ends), and the person must still be able to see the issue (otherwise nothing is said, and the stream stays quiet). A session holds at most 100 subscriptions. Notifications are queued without waiting and dropped if the client does not keep up, so a slow subscriber never slows anyone saving; the client finds out when it next reads.
+
+## Mirrored (Jira) projects
+
+A project mirrored from Jira is read-only in Tasklane (SPEC 18.1). For an agent that means: every **read** tool, resource and prompt works on mirrored data (the same visibility rules apply, and a mirrored project whose Jira permissions were not refreshed in the last fifteen minutes is invisible to everyone), and every **write** tool is refused with the same typed error that names the project and the Jira address: *project WEB is mirrored from Jira and is read-only here: make the change in Jira (https://…)*. Bulk tools report that refusal for each issue and change nothing. A subscriber to a mirrored issue is notified when the mirror brings a change in from Jira.
+
+Every tool is classified in the tests, so a new tool cannot reach mirrored data without saying how it behaves there. The table is checked against the tool list:
+
+<!-- mirror-table:begin -->
+| Tool | Kind | On a mirrored project |
+|---|---|---|
+| `add_comment` | write | refused with the Jira address |
+| `bulk_transition` | write | refused with the Jira address |
+| `bulk_update_fields` | write | refused with the Jira address |
+| `claim_issue` | write | refused with the Jira address |
+| `create_branch` | write | refused with the Jira address |
+| `create_issue` | write | refused with the Jira address |
+| `create_subtask` | write | refused with the Jira address |
+| `edit_issue_text` | write | refused with the Jira address |
+| `get_issue_context` | read | works |
+| `get_issue` | read | works |
+| `list_comments` | read | works |
+| `list_development` | read | works |
+| `list_projects` | read | works |
+| `list_transitions` | read | works |
+| `release_issue` | write | refused with the Jira address |
+| `report_progress` | write | refused with the Jira address |
+| `request_human_input` | write | refused with the Jira address |
+| `search_issues` | read | works |
+| `transition_issue` | write | refused with the Jira address |
+| `update_fields` | write | refused with the Jira address |
+<!-- mirror-table:end -->
+
+## Keeping results small
+
+An agent's context is its scarcest resource, so results are bounded:
+
+- **Collapse.** `get_issue_context` returns the newest comments in full (10 by default, up to 30) and counts the earlier ones (`earlier_comments`), which `list_comments` pages through with a cursor.
+- **Text blocks are cut.** Any one description or comment longer than `max_text` characters (default 1500; a description gets twice that; up to 20000) is cut on a character boundary and marked `truncated` with its `full_chars` and a hint. Pass a larger `max_text` to `get_issue_context`, `get_issue` or `list_comments` for the one text that matters.
+- **The cap fits, it does not cut.** A result is at most `MaxResultChars` (24,000) long. When the newest comments do not all fit, the oldest of them are collapsed too and counted (a `list_comments` page ends early and its cursor continues from there), so the answer is always valid JSON. If a result still has to be cut, its structured copy is not sent either.
+- **Budget (tested).** On a team-shaped dataset (mostly short threads, some busy, some very long, one with a 40,000-character pasted log) `get_issue_context` stays within a median of ~3,000 characters (~750 tokens) and 10,000 at most (~2,500 tokens); `search_issues` pages are 20 compact rows. A whole scripted piece of work, from picking the issue to the approval, takes about 14 calls and about 1,100 tokens of results.

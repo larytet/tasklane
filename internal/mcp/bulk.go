@@ -251,6 +251,10 @@ func (s *Server) registerBulk() {
 				var tid, to string
 				var human bool
 				var names []string
+				if merr := s.Svc.MirrorRefusal(ctx, v.Issue.Project); merr != nil {
+					it.OK, it.Err = false, merr.Error() // the reason, not a list of transitions that is empty because of it
+					return it
+				}
 				for _, t := range v.Transitions {
 					names = append(names, t.Name)
 					if strings.EqualFold(t.Name, name) {
