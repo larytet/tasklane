@@ -174,6 +174,12 @@ func rows() []row {
 			return J("PUT", "/api/v1/admin/fields/priority/history", map[string]any{"track": true})
 		}},
 		{"POST /api/v1/ws/ticket", authed, func(f *fixture) req { return J("POST", "/api/v1/ws/ticket", nil) }},
+		// /mcp takes bearer tokens only (a personal token acts as its owner); anonymous callers get 401. Tool-level scope x role checks live in MCP-03.
+		{"POST /mcp", exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/mcp", map[string]any{"jsonrpc": "2.0", "id": 1, "method": "ping"})
+		}},
+		{"GET /mcp", exp{anon: codes(401), outsider: codes(405), viewer: codes(405), member: codes(405), admin: codes(405)}, func(f *fixture) req { return J("GET", "/mcp", nil) }},
+		{"DELETE /mcp", exp{anon: codes(401), outsider: codes(204), viewer: codes(204), member: codes(204), admin: codes(204)}, func(f *fixture) req { return J("DELETE", "/mcp", nil) }},
 		{"GET /api/v1/ws", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/ws", nil) }},
 		{"GET /api/v1/issues", authed, func(f *fixture) req { return J("GET", "/api/v1/issues?q=", nil) }},
 		{"GET /api/v1/search/typeahead", authed, func(f *fixture) req { return J("GET", "/api/v1/search/typeahead?q=mat", nil) }},

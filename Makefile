@@ -27,6 +27,6 @@ dist:
 
 # browser end-to-end suite (system Chrome, real binary, fresh database): conflicts, drafts, presence, axe, responsive, visual
 e2e:
-	cd e2e && npm ci --no-audit --no-fund && PATH=$$PATH:/usr/local/go/bin npx playwright test
+	cd e2e && npm ci --no-audit --no-fund && env -u TASKLANE_TEST_DATABASE_URL PATH=$$PATH:/usr/local/go/bin npx playwright test
 e2e-update:
-	cd e2e && PATH=$$PATH:/usr/local/go/bin npx playwright test --update-snapshots
+	cd e2e && env -u TASKLANE_TEST_DATABASE_URL PATH=$$PATH:/usr/local/go/bin npx playwright test --update-snapshots

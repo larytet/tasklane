@@ -305,7 +305,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 		v.Transitions = append(v.Transitions, t)
 	}
 	rows.Close()
-	if v.Comments, err = s.listComments(ctx, is.ID); err != nil {
+	if v.Comments, err = s.listComments(ctx, is.ID, canWrite(role)); err != nil {
 		return v, err
 	}
 	if v.Attachments, err = s.listAttachments(ctx, is.ID); err != nil {
@@ -442,6 +442,7 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	if err != nil {
 		return is, err
 	}
+	s.touchLease(ctx, a, is.ID)
 	out, gerr := s.getIssue(ctx, key)
 	if gerr == nil {
 		s.emit(Event{Type: "issue.updated", Issue: key, Fields: keys(changed), Version: out.Version, Actor: a.Label, ActorID: a.ID})
@@ -513,6 +514,7 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 	if err != nil {
 		return is, err
 	}
+	s.touchLease(ctx, a, is.ID)
 	out, gerr := s.getIssue(ctx, key)
 	if gerr == nil {
 		s.emit(Event{Type: "issue.transitioned", Issue: key, Fields: []string{"status"}, Version: out.Version, Actor: a.Label, ActorID: a.ID})

@@ -13,8 +13,22 @@ this file is updated, and the work is committed and pushed.
 |---|---|---|
 | M1a Tracker | **built, exit gate not passed** | milestones M1a.1 to M1a.9 below; see the exit gate audit for what is still open |
 | M1b Lifecycle and exchange | built, gate to be audited | milestones M1b.1 to M1b.3 below |
-| M1c Agents | not started | |
+| M1c Agents | **MCP server built** | milestone M1c.1 below; human gates, input requests, resource subscriptions, kill switch, OAuth and bulk tools are open |
 | M2 to M5 | not started | |
+
+## M1c milestones
+
+| Milestone | Scope | State |
+|---|---|---|
+| M1c.1 MCP server | Streamable HTTP at `/mcp` and a stdio proxy (`tasklane mcp`), pinned revision 2025-06-18, 15 tools and the issue resource, scoped expiring revocable tokens, agent accounts (never administrators, never purge), claim leases with stalled display, anchored `edit_issue_text` through the same merge as the browser, compact context with provenance on every text block, rate limit, hourly write budget, result caps and cursors, append-only redacted call log | done |
+
+Open in M1c: MCP-04 (OAuth 2.1 and PKCE; bearer tokens only for now), MCP-07 and 08 (human gates, input requests), MCP-12 (bulk dry run), MCP-14 (kill switch), MCP-15 (subscriptions), MCP-16, 18, 19, 20.
+
+| # | Where | Problem | How it was addressed |
+|---|---|---|---|
+| 46 | M1c.1 | Found before the MCP work: `View` returned internal comments to viewers | Comments are filtered by role; `TestSEC03_InternalCommentsHiddenFromViewers` |
+| 47 | M1c.1 | The licence scan flagged the stdio proxy's HTTP client | Allowed for that one file: it only calls the endpoint the operator names |
+| 48 | M1c.1 | `make e2e` failed with ECONNREFUSED: the Makefile exports the test database variable and the server's strict config check rejects unknown `TASKLANE_` variables | The e2e targets unset it; the strict check stays |
 
 ## M1b milestones
 

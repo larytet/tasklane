@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/larytet/tasklane/internal/domain"
+	"github.com/larytet/tasklane/internal/mcp"
 	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/web"
@@ -29,6 +30,7 @@ type Server struct {
 	Search     *search.Postgres
 	BlobOrigin string // optional separate origin for signed file links
 	Hub        *rt.Hub
+	MCP        *mcp.Server
 	routes     []string
 }
 
@@ -296,6 +298,12 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.SetLegalHold(r.Context(), actorOf(r), r.PathValue("key"), in.Hold))
 	}))
+	if s.MCP == nil {
+		s.MCP = mcp.New(s.Svc, s.Search)
+	}
+	for _, m := range []string{"POST", "GET", "DELETE"} {
+		s.handle(mux, m+" /mcp", s.MCP.Handler())
+	}
 	s.registerSearch(mux)
 	s.registerAttachments(mux)
 	s.registerExchange(mux)

@@ -19,6 +19,7 @@ import (
 	"github.com/larytet/tasklane/internal/doctor"
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/mail"
+	"github.com/larytet/tasklane/internal/mcp"
 	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/store"
@@ -97,6 +98,19 @@ func main() {
 		}
 		if doctor.Failed(cs) {
 			os.Exit(1)
+		}
+	case "mcp": // stdio transport: proxies JSON-RPC lines to the server with the user's token
+		url := os.Getenv("TASKLANE_URL")
+		if url == "" {
+			url = "http://localhost:8080"
+		}
+		tok := os.Getenv("TASKLANE_TOKEN")
+		if tok == "" {
+			fmt.Fprintln(os.Stderr, "set TASKLANE_TOKEN to an agent token (and TASKLANE_URL to the server)")
+			os.Exit(2)
+		}
+		if err := mcp.ServeStdio(os.Stdin, os.Stdout, strings.TrimRight(url, "/")+"/mcp", tok); err != nil {
+			log.Fatal(err)
 		}
 	case "reindex":
 		st := mustOpen(ctx, cfg)

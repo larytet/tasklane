@@ -16,8 +16,9 @@ type Comment struct {
 	Edited   *time.Time `json:"edited,omitempty"`
 }
 
-func (s *Service) listComments(ctx context.Context, issueID string) ([]Comment, error) {
-	rows, err := s.DB.Query(ctx, `SELECT c.id,u.id,u.name,u.email,c.body,c.internal,c.created_at,c.edited_at FROM comment c JOIN app_user u ON u.id=c.author_id WHERE c.issue_id=$1 ORDER BY c.created_at,c.id`, issueID)
+// listComments returns the thread; internal comments only for people who may see them (write access), so a viewer never reads them.
+func (s *Service) listComments(ctx context.Context, issueID string, internalToo bool) ([]Comment, error) {
+	rows, err := s.DB.Query(ctx, `SELECT c.id,u.id,u.name,u.email,c.body,c.internal,c.created_at,c.edited_at FROM comment c JOIN app_user u ON u.id=c.author_id WHERE c.issue_id=$1 AND ($2 OR NOT c.internal) ORDER BY c.created_at,c.id`, issueID, internalToo)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +61,7 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 		tx.Exec(ctx, `DELETE FROM draft WHERE user_id=$1 AND issue_id=$2 AND field='comment'`, a.ID, is.ID)
 		return outbox(ctx, tx, "issue:"+is.Key, "comment.added", map[string]any{"key": is.Key, "comment": c.ID, "actor": a.Label, "actor_id": a.ID})
 	})
+	s.touchLease(ctx, a, is.ID)
 	c.Author = User{ID: a.ID, Name: a.Label}
 	c.Body, c.Internal = body, internal
 	if err == nil {

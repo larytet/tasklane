@@ -1,0 +1,456 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Add a comment. Comments never conflict with other comments.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "The comment text",
+          "type": "string"
+        },
+        "internal": {
+          "description": "Visible only to people who can edit the issue",
+          "type": "boolean"
+        },
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "body"
+      ],
+      "type": "object"
+    },
+    "name": "add_comment"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Claim an issue: it is assigned to you and moved to an in-progress status in one step, and you hold a lease (default 30 minutes, renewed by any write you make on it or by claiming again). While the lease is live no one else can claim it.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        },
+        "lease_minutes": {
+          "description": "Lease length, 5 to 240 (default 30)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "name": "claim_issue"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Create an issue.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "description": "Description text",
+          "type": "string"
+        },
+        "labels": {
+          "description": "Labels",
+          "type": "array"
+        },
+        "priority": {
+          "description": "lowest, low, medium, high, highest",
+          "type": "string"
+        },
+        "project": {
+          "description": "Project key",
+          "type": "string"
+        },
+        "summary": {
+          "description": "One-line summary",
+          "type": "string"
+        },
+        "type": {
+          "description": "Epic, Story, Task, Bug (default Task)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "create_issue"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Create a subtask under an issue.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "description": "Description text",
+          "type": "string"
+        },
+        "parent": {
+          "description": "Key of the parent issue",
+          "type": "string"
+        },
+        "summary": {
+          "description": "One-line summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parent",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "name": "create_subtask"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Edit the summary or description by replacing text: old_text must match exactly once, otherwise nothing changes. The edit is applied to the current text as a minimal change, so it merges with a person typing elsewhere in the field.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "description": "summary or description",
+          "enum": [
+            "summary",
+            "description"
+          ],
+          "type": "string"
+        },
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        },
+        "new_text": {
+          "description": "Replacement text",
+          "type": "string"
+        },
+        "old_text": {
+          "description": "Text to replace; must occur exactly once",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "field",
+        "old_text",
+        "new_text"
+      ],
+      "type": "object"
+    },
+    "name": "edit_issue_text"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Read one issue. Pass fields to get only some of: summary, status, priority, assignee, reporter, labels, parent, description, lease.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "description": "Subset of fields to return (default: all)",
+          "type": "array"
+        },
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "name": "get_issue"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Everything needed to start work on an issue in one call: the issue, its description, the newest comments (earlier ones are collapsed), the transitions available now, links, attachment names and the claim lease. Text blocks carry their author and whether they are internal.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "comments": {
+          "description": "How many of the newest comments to include (default 10, max 30)",
+          "type": "integer"
+        },
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "name": "get_issue_context"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Read the comments of an issue, oldest first, a page at a time.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "Cursor from a previous result",
+          "type": "string"
+        },
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Page size, 1 to 30 (default 15)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "name": "list_comments"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "List the projects this identity can read.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "list_projects"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "The workflow transitions available on an issue right now.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "name": "list_transitions"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Give up your claim: the lease ends, you are unassigned, and an in-progress issue returns to To Do.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "name": "release_issue"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Post a structured progress update as a comment: what was done, what is next, and any blockers.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "blockers": {
+          "description": "Anything blocking the work",
+          "type": "string"
+        },
+        "done": {
+          "description": "What was done",
+          "type": "string"
+        },
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        },
+        "next": {
+          "description": "What happens next",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "done"
+      ],
+      "type": "object"
+    },
+    "name": "report_progress"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Search issues with TQL, for example: project = ABC AND status != Done AND assignee = currentUser() ORDER BY updated DESC. Results are paged: pass next_cursor to continue.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "description": "Cursor from a previous result",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Page size, 1 to 50 (default 20)",
+          "type": "integer"
+        },
+        "q": {
+          "description": "TQL query; empty returns recent issues",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "search_issues"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Move an issue along a workflow transition, by its name (see list_transitions). Transitions the workflow does not allow from the current status are refused.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        },
+        "transition": {
+          "description": "Transition name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "transition"
+      ],
+      "type": "object"
+    },
+    "name": "transition_issue"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Change priority, labels or assignee. Pass base_version (the issue's version you read) to be told if someone changed the same field meanwhile. assignee is \"me\", \"none\", or a person's name.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "description": "me, none, or a project member's name",
+          "type": "string"
+        },
+        "base_version": {
+          "description": "Version you read",
+          "type": "integer"
+        },
+        "key": {
+          "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
+          "type": "string"
+        },
+        "labels": {
+          "description": "The full list of labels",
+          "type": "array"
+        },
+        "priority": {
+          "description": "lowest, low, medium, high, highest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "name": "update_fields"
+  }
+]

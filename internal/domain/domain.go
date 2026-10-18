@@ -163,3 +163,6 @@ func (s *Service) FieldTracking(ctx context.Context, a Actor) (map[string]bool, 
 	}
 	return out, rows.Err()
 }
+
+func jsonUnmarshal(b []byte, v any) { _ = json.Unmarshal(b, v) }
+func jsonMarshal(v any) []byte      { b, _ := json.Marshal(v); return b }

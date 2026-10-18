@@ -872,5 +872,13 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | EXP-01, EXP-03, LIFE-17, IMP-05..07, PAUSE-01 | done | `internal/domain/bundle_test.go`: `TestEXP01_RoundTripJSONAndCSV`, `TestLIFE17_TrashOptionalAndHistoryRoundTrip`, `TestPAUSE01_SnapshotExportWhileUsersSave` (50 writers; the export holds exactly the saves the outbox recorded up to its marker), `TestEXP03_ExportRespectsPermissions`, `TestEXP_CorruptBundlesAreRejectedWholesale`, `TestIMP05_06_07_DryRunIdempotencyRollbackAndCollisions` |
 | IMP-09 (generic CSV), SEC-05 (CSV export) | partial | `internal/domain/import_csv_test.go`: mapping, row errors, idempotency, templates, formula-looking cells round trip as data |
 | PAUSE-04, 06, 07, 08, 10, 12 | done | `internal/domain/pause_test.go` and `TestHTTP_PAUSE04_WritersGet503WithRetryAfter`; the authorization matrix covers every new route |
+| MCP-01 | done | `TestMCP01_ProtocolConformance` (initialize, version negotiation, list, errors, transport rules, origin, auth, resources), `TestMCP01_StdioTransport`; no reference client or Claude Code run yet |
+| MCP-02 | done | `TestMCP02_ToolSchemaSnapshot` against `internal/mcp/testdata/tools.golden.json` (`UPDATE_GOLDEN=1` after an additive change) |
+| MCP-03 | partial | `TestMCP03_AuthorizationMatrix` (every tool x missing scope, wrong scope, outsider, viewer, member; outsider errors identical to not-found); security levels do not exist yet; REST equality is by shared domain calls |
+| MCP-05 | done | `TestMCP05_ClaimLeaseRace` |
+| MCP-06 | done | `TestMCP06_EditIssueTextWhileAHumanTypes` (presence display not covered) |
+| MCP-10, 11, 13 | done | `TestMCP10_SecretsAndSensitiveFields`, `TestMCP11_LimitsBudgetsAndCaps`, `TestMCP13_AuditCompletenessAndImmutability` |
+| MCP-17 | done | `TestMCP17_ContextLatency` (p95 under 100 ms including HTTP) |
+| MCP-04, 07, 08, 12, 14, 15, 16, 18, 19, 20 | open | not built |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

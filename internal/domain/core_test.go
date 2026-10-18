@@ -180,3 +180,21 @@ func TestAuthAndTokens(t *testing.T) { // SEC-05
 		t.Fatal("raw token stored")
 	}
 }
+
+// SEC-03: an internal comment is never shown to someone who cannot edit the issue.
+func TestSEC03_InternalCommentsHiddenFromViewers(t *testing.T) {
+	e := testutil.New(t)
+	e.Project()
+	is := e.Issue("s", "")
+	vu, _ := e.Svc.CreateUser(ctx, "vera@example.com", "Vera", "password123", false)
+	e.Svc.AddMember(ctx, e.Admin, "ABC", vu.ID, "viewer")
+	e.Svc.AddComment(ctx, e.Alice, is.Key, "public words", false)
+	e.Svc.AddComment(ctx, e.Alice, is.Key, "internal words", true)
+	vv, _ := e.Svc.View(ctx, domain.Actor{ID: vu.ID, Label: "Vera"}, is.Key)
+	if len(vv.Comments) != 1 || vv.Comments[0].Body != "public words" {
+		t.Fatalf("viewer saw %+v", vv.Comments)
+	}
+	if mv, _ := e.Svc.View(ctx, e.Bob, is.Key); len(mv.Comments) != 2 {
+		t.Fatalf("a member lost the internal comment: %d", len(mv.Comments))
+	}
+}
