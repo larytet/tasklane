@@ -1,7 +1,11 @@
 package blob
 
 import (
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/larytet/tasklane/internal/config"
 )
@@ -26,10 +30,13 @@ func OpenPair(c config.Config) (primary, secondary Store, err error) {
 	if primary, err = openBackend(c, c.BlobBackend, c.BlobDir); err != nil {
 		return nil, nil, err
 	}
+	if primary, err = withEncryption(c, primary); err != nil {
+		return nil, nil, err
+	}
 	if c.BlobFallback == "" || c.BlobFallback == "none" {
 		return primary, nil, nil
 	}
-	if c.BlobFallback == c.BlobBackend {
+	if c.BlobFallback == c.BlobBackend && c.BlobBackend != "fs" {
 		return nil, nil, errors.New("blob_fallback must be the other backend: it is the same as blob_backend")
 	}
 	if c.BlobFallback == "fs" {
@@ -51,4 +58,40 @@ func NewFromConfig(c config.Config) (Store, error) {
 		return p, err
 	}
 	return NewFallback(p, sec), nil
+}
+
+// ParseKeys reads "id:hex,id:hex" into master keys.
+func ParseKeys(list string) (map[byte][]byte, error) {
+	keys := map[byte][]byte{}
+	for _, part := range strings.Split(list, ",") {
+		id, h, ok := strings.Cut(strings.TrimSpace(part), ":")
+		n, err := strconv.ParseUint(id, 10, 8)
+		if !ok || err != nil {
+			return nil, fmt.Errorf("blob_encryption_keys: %q is not id:hex with an id from 0 to 255", part)
+		}
+		k, err := hex.DecodeString(h)
+		if err != nil || len(k) != 32 {
+			return nil, fmt.Errorf("blob_encryption_keys: key %d must be 64 hex characters (32 bytes)", n)
+		}
+		if _, dup := keys[byte(n)]; dup {
+			return nil, fmt.Errorf("blob_encryption_keys: key id %d appears twice", n)
+		}
+		keys[byte(n)] = k
+	}
+	return keys, nil
+}
+
+func withEncryption(c config.Config, s Store) (Store, error) {
+	if c.BlobEncKeys == "" {
+		return s, nil
+	}
+	keys, err := ParseKeys(c.BlobEncKeys)
+	if err != nil {
+		return nil, err
+	}
+	cur, err := strconv.ParseUint(c.BlobEncCurrent, 10, 8)
+	if err != nil {
+		return nil, errors.New("blob_encryption_keys needs blob_encryption_current, the id of the key to use (0-255)")
+	}
+	return NewEncrypted(s, byte(cur), keys)
 }

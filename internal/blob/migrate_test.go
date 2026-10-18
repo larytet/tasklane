@@ -217,8 +217,13 @@ func TestBLOB14_ConfigurationOfTheFallback(t *testing.T) {
 	if err != nil || p == nil || s != nil {
 		t.Fatalf("%v", err)
 	}
+	// a plain directory into another one (to encrypt it, say) is a legitimate move
+	if _, sec, err := blob.OpenPair(config.Config{BlobBackend: "fs", BlobDir: dir, BlobFallback: "fs", BlobFallbackDir: old}); err != nil || sec == nil {
+		t.Fatalf("fs to fs: %v", err)
+	}
 	for name, c := range map[string]config.Config{
-		"same backend":     {BlobBackend: "fs", BlobDir: dir, BlobFallback: "fs", BlobFallbackDir: old},
+		"same directory":   {BlobBackend: "fs", BlobDir: dir, BlobFallback: "fs", BlobFallbackDir: dir},
+		"same s3 backend":  {BlobBackend: "s3", BlobDir: dir, BlobFallback: "s3", S3Bucket: "b", S3AccessKey: "k", S3SecretKey: "s", S3Endpoint: "http://127.0.0.1:1", S3Region: "r"},
 		"no old directory": {BlobBackend: "s3", BlobDir: dir, BlobFallback: "fs", S3Bucket: "b", S3AccessKey: "k", S3SecretKey: "s", S3Endpoint: "http://127.0.0.1:1", S3Region: "r"},
 		"old is the new":   {BlobBackend: "s3", BlobDir: dir, BlobFallback: "fs", BlobFallbackDir: dir, S3Bucket: "b", S3AccessKey: "k", S3SecretKey: "s", S3Endpoint: "http://127.0.0.1:1", S3Region: "r"},
 	} {

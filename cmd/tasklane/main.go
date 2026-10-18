@@ -57,7 +57,11 @@ func main() {
 		}
 		return
 	}
-	cfg, err := config.Load(config.Options{Args: os.Args[min(2, len(os.Args)):]})
+	cfgArgs := os.Args[min(2, len(os.Args)):]
+	if cmd == "blobs" {
+		cfgArgs = nil // its words (migrate, verify, rewrap, --verify) are the command's own; settings come from the environment and the file
+	}
+	cfg, err := config.Load(config.Options{Args: cfgArgs})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -126,7 +130,7 @@ func main() {
 		st := mustOpen(ctx, cfg)
 		defer st.Close()
 		svc := domain.New(st.Pool)
-		fs, err := blob.NewFS(cfg.BlobDir)
+		fs, err := blob.NewFromConfig(cfg)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -141,6 +145,8 @@ func main() {
 		if !rep.Clean() {
 			os.Exit(1)
 		}
+	case "blobs":
+		blobsCmd(ctx, cfg)
 	case "create-admin":
 		if len(os.Args) < 4 {
 			log.Fatal("usage: tasklane create-admin EMAIL NAME   (password from TASKLANE_ADMIN_PASSWORD)")
