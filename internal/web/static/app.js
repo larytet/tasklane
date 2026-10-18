@@ -47,9 +47,28 @@
     }
     return box;
   }
-  function stopTimers() { S.timers.forEach(clearInterval); S.timers = []; }
+  function stopTimers() { S.timers.forEach(clearInterval); S.timers = []; if (S.cleanup) S.cleanup(); }
   function theme(t) { document.documentElement.dataset.theme = t; try { localStorage.setItem('tl-theme', t); } catch (e) { /* private mode */ } }
   try { theme(localStorage.getItem('tl-theme') || 'dark'); } catch (e) { /* default dark */ }
+
+  // ---------- realtime: presence and change events; best effort, pages work without it ----------
+  const RT = { ws: null, up: false, subs: new Map(), backoff: 1000, timer: 0 };
+  async function rtConnect() {
+    clearTimeout(RT.timer);
+    if (!S.me || RT.ws) return;
+    let tk;
+    try { const r = await api('POST', '/api/v1/ws/ticket'); if (r.status !== 200) throw new Error('no ticket'); tk = r.data.ticket; } catch (e) { return rtRetry(); }
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/v1/ws?ticket=' + encodeURIComponent(tk));
+    RT.ws = ws;
+    ws.onopen = () => { RT.up = true; RT.backoff = 1000; for (const k of RT.subs.keys()) ws.send(JSON.stringify({ op: 'sub', channel: 'issue:' + k })); };
+    ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch (e) { return; } const k = m.issue || (m.event && m.event.issue) || (m.channel || '').replace('issue:', ''); const h = RT.subs.get(k); if (h) h(m); };
+    ws.onclose = () => { RT.up = false; RT.ws = null; rtRetry(); };
+    ws.onerror = () => { try { ws.close(); } catch (e) { /* already closed */ } };
+  }
+  function rtRetry() { if (!S.me) return; RT.timer = setTimeout(rtConnect, RT.backoff); RT.backoff = Math.min(RT.backoff * 2, 30000); }
+  function rtSub(key, handler) { RT.subs.set(key, handler); if (RT.up) RT.ws.send(JSON.stringify({ op: 'sub', channel: 'issue:' + key })); else rtConnect(); }
+  function rtUnsub(key) { RT.subs.delete(key); if (RT.up) RT.ws.send(JSON.stringify({ op: 'unsub', channel: 'issue:' + key })); }
+  function rtSend(m) { if (RT.up) { RT.ws.send(JSON.stringify(m)); return true; } return false; }
 
   // ---------- shell ----------
   function topbar() {
@@ -159,12 +178,10 @@
       const is = v.issue;
       clear(root);
       // header: presence stack
-      const others = v.presence || [];
       root.append(h('div', { class: 'chips' },
         h('button', { class: 'btn ghost', onclick: () => history.back(), 'aria-label': 'Back' }, '←'),
-        h('span', { class: 'key' }, is.key), h('span', { class: 'grow' }),
-        others.length ? h('span', { class: 'stack', 'aria-label': others.length + ' others here' }, others.map(o => avatar(o.name, o.editing ? presColor(o.user_id) : ''))) : null,
-        others.length ? h('span', { class: 'muted' }, others.map(o => o.name).join(', ') + (others.length > 1 ? ' are here' : ' is here')) : null));
+        h('span', { class: 'key' }, is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' })));
+      fillPresence();
       root.append(subjectEl(is));
       root.append(chipLine(is));
       root.append(descriptionEl(is));
@@ -174,8 +191,30 @@
     }
 
     function noteFor(field, label) {
+      const box = h('span', { 'data-note': field, 'data-label': label || '' });
+      fillNote(box);
+      return box;
+    }
+    function fillNote(box) {
+      clear(box);
+      const field = box.dataset.note, label = box.dataset.label;
       const e = (v.presence || []).find(p => p.editing === field);
-      return e ? h('span', { class: 'note', role: 'status' }, e.name + ' is editing' + (label ? ' the ' + label : '') + ' (' + Math.max(1, Math.round((e.editing_seconds || 0) / 60)) + ' min)') : null;
+      if (e) box.append(h('span', { class: 'note', role: 'status' }, e.name + ' is editing' + (label ? ' the ' + label : '') + ' (' + Math.max(1, Math.round((e.editing_seconds || 0) / 60)) + ' min)'));
+    }
+    function fillPresence() {
+      const box = document.getElementById('pres');
+      if (!box) return;
+      clear(box);
+      const others = v.presence || [];
+      if (others.length) box.append(h('span', { class: 'stack', 'aria-label': others.length + ' others here' }, others.map(o => avatar(o.name, o.editing ? presColor(o.user_id) : ''))),
+        h('span', { class: 'muted' }, others.map(o => o.name).join(', ') + (others.length > 1 ? ' are here' : ' is here')));
+    }
+    // presence arrives while someone is typing: update the chrome in place, never touch the editor text
+    function updatePresenceUI() {
+      fillPresence();
+      document.querySelectorAll('[data-note]').forEach(fillNote);
+      const warn = document.getElementById('editing-warning');
+      if (warn) { const o = (v.presence || []).find(p => p.editing === 'description'); clear(warn); if (o) warn.append(h('div', { class: 'banner warn' }, o.name + ' is also editing this field. You can continue; if you both save you may need to merge.')); }
     }
 
     // ----- subject (editable in place; same save protocol as the description)
@@ -259,9 +298,7 @@
       clear(box);
       const ta = h('textarea', { 'aria-label': 'Description editor', value: ed.body });
       const state = h('span', { class: 'state', role: 'status' }, st.dirty ? 'Draft saved' : '');
-      const other = (v.presence || []).find(p => p.editing === 'description');
-      box.append(h('div', { class: 'chips' }, h('strong', {}, 'Description'), h('span', { class: 'grow' })));
-      if (other) box.append(h('div', { class: 'banner warn' }, other.name + ' is also editing this field. You can continue; if you both save you may need to merge.'));
+      box.append(h('div', { class: 'chips' }, h('strong', {}, 'Description'), h('span', { class: 'grow' })), h('div', { id: 'editing-warning' }));
       if (ed.restored) box.append(h('div', { class: 'banner warn' }, 'Restored your unsaved draft from ' + L.relTime(ed.restored.at) + '.',
         h('button', { class: 'btn', onclick: () => { ta.value = v.issue.description; ed.body = ta.value; ed.baseSeq = v.issue.description_seq; ed.restored = null; setLocalDraft(key, 'description', null); render(); } }, 'Discard')));
       box.append(h('div', { id: 'changed-banner' }), ta);
@@ -285,7 +322,7 @@
       box.append(h('div', { class: 'chips' }, state, h('span', { class: 'grow' }),
         h('button', { class: 'btn', onclick: () => { if (!st.dirty || confirm('Discard unsaved changes? Your draft is kept.')) stopEditing(false); render(); } }, 'Cancel'),
         h('button', { class: 'btn primary', onclick: save }, 'Save')));
-      setTimeout(() => ta.focus(), 0);
+      setTimeout(() => { ta.focus(); updatePresenceUI(); }, 0);
       return box;
     }
     // the banner is updated in place, so it can appear while the person is typing without touching their text
@@ -442,11 +479,13 @@
 
     // ----- presence heartbeat and change polling (advisory; never blocks anything)
     function heartbeat(field) {
-      api('POST', '/api/v1/issues/' + key + '/presence', { field }).then(r => { if (r.status === 200) { st.lastField = field; } }).catch(() => {});
+      st.lastField = field;
+      if (rtSend({ op: 'presence', channel: 'issue:' + key, field })) return; // over the socket: state changes only
+      api('POST', '/api/v1/issues/' + key + '/presence', { field }).then(r => { if (r.status === 200 && Array.isArray(r.data)) { v.presence = r.data; updatePresenceUI(); } }).catch(() => {});
     }
     let etag = null;
     async function poll() {
-      if (document.hidden) return;
+      if (document.hidden) { st.stale = true; return; } // refetched when the tab is shown again (events are best effort)
       let r; try { r = await fetch('/api/v1/issues/' + key + '/view', { credentials: 'same-origin', headers: etag ? { 'If-None-Match': etag } : {} }); } catch (e) { return; }
       if (r.status === 304 || r.status !== 200) return;
       etag = r.headers.get('ETag'); const nv = await r.json();
@@ -468,7 +507,16 @@
     }
     async function reloadAll() { const nv = await load(); if (nv) { v = nv; st.v = nv; render(); } }
     S.timers.push(setInterval(() => { if (!st.editing) heartbeat(''); else heartbeat('description'); }, 10000));
-    S.timers.push(setInterval(poll, 4000));
+    const onVisible = () => { if (!document.hidden && st.stale) { st.stale = false; poll(); } };
+    document.addEventListener('visibilitychange', onVisible);
+    let tick = 0;
+    S.timers.push(setInterval(() => { if (!RT.up || ++tick % 8 === 0) poll(); }, 4000)); // fallback: every 4 s without the socket, every 32 s with it
+    rtSub(key, m => {
+      if (m.type === 'presence') { v.presence = m.presence; updatePresenceUI(); }
+      else if (m.type === 'event') { if (m.event.actor_id !== S.me.id || m.event.type === 'attachment.changed') poll(); }
+      else if (m.type === 'error' && m.code === 'denied') toast('You no longer have access to this issue.');
+    });
+    S.cleanup = () => { rtUnsub(key); document.removeEventListener('visibilitychange', onVisible); S.cleanup = null; };
     heartbeat('');
     window.onbeforeunload = e => { if (st.dirty) { e.preventDefault(); e.returnValue = ''; } };
   }
@@ -485,7 +533,7 @@
   }
   async function boot() {
     const r = await api('GET', '/api/v1/bootstrap');
-    if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; } else S.me = null;
+    if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect(); } else S.me = null;
     route();
   }
   window.addEventListener('hashchange', route);

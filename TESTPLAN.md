@@ -853,5 +853,12 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | INST-05 | partial | `TestINST05_ReproducibleTarballs` (`make dist` twice, amd64 and arm64, identical hashes), `TestINST01_TarballContents` (normalized mtimes and owners, binary, NOTICE, SBOM, unit file, SHA256SUMS) |
 | LIC-01, LIC-02 | done | `TestLIC01_LinkedModulesAreAllowed` (every linked module classified against allow and deny lists; seven modules, MIT and BSD), `TestLIC02_NoticeIsCurrent` (`make notice`) |
 | LIC-05 | done | `TestLIC05_NoPhoneHome`: no HTTP client, dial, telemetry or licence-key code in production sources apart from the configured SMTP relay; the web assets load nothing from another origin |
+| PRES-01, PERF-12 | done (socket) | `internal/rt` tests: presence change reaches another person in p95 2.8 ms over 40 changes; leave on tab close and expiry on the injected clock are broadcast; the HTTP fallback reaches socket clients |
+| PERF-13 | done (single node) | `TestPERF13_ChangesReachOpenPagesQuickly`: scalar change, comment and text-saved events to another open socket, p95 6.6 ms, each carrying actor, `version` and `text_seq` |
+| SEC-02 | done | `TestSEC02_HandshakeAndAbuse`: forged, missing, expired, reused tickets; cross-origin handshake 403; oversized, malformed and binary frames; flood cut off by the rate limit; unknown operations and channel names; server healthy afterwards |
+| PRES-05 (partial), SEC-01 (WS) | partial | `TestPRES05_SEC02_ChannelAuthorization`: forbidden and nonexistent channels answer identically, presence without a subscription refused, events stop after revocation |
+| PRES-06 | partial | `TestPRES06_TrafficOnlyOnStateChange`: 50 connections, 250 unchanged heartbeats cause 0 messages; two joins cause 2 changes x 50 subscribers |
+| LIVE-17 | partial | `TestLIVE17_EventsAreBestEffort_SavesNeverDependOnThem`: a dead subscriber never blocks 300 writes; saves work with no hub |
+| LIVE-02, LIVE-03, PRES-01 (browser) | manual | the live path was driven by hand in Chrome: Arkady's presence ring, "is editing the description" note, new comment and priority change appeared on Jana's open page with no action; the background-tab refetch was found by this run and fixed |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

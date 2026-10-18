@@ -57,6 +57,9 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 	})
 	c.Author = User{ID: a.ID, Name: a.Label}
 	c.Body, c.Internal = body, internal
+	if err == nil {
+		s.emit(Event{Type: "comment.added", Issue: is.Key, Actor: a.Label, ActorID: a.ID})
+	}
 	return c, err
 }
 

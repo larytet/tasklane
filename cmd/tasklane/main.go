@@ -19,6 +19,7 @@ import (
 	"github.com/larytet/tasklane/internal/doctor"
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/mail"
+	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/store"
 )
@@ -184,7 +185,9 @@ func serve(ctx context.Context, cfg config.Config) {
 	ixCtx, stopIx := context.WithCancel(ctx)
 	defer stopIx()
 	go (&search.Indexer{DB: st.Pool}).Run(ixCtx)
-	srv := &api.Server{Svc: svc, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
+	hub := rt.New(svc)
+	go hub.SweepLoop(ctx)
+	srv := &api.Server{Hub: hub, Svc: svc, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
 		Ready: func(ctx context.Context) error { return st.Pool.Ping(ctx) }}
 	hs := &http.Server{Addr: cfg.Listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

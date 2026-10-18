@@ -418,6 +418,7 @@ func (s *Service) commitStaged(ctx context.Context, a Actor, is Issue, issueID, 
 	if class == blob.ClassImage && scanned == "clean" {
 		att.Thumb = "pending"
 	}
+	s.emit(Event{Type: "attachment.changed", Issue: is.Key, Actor: a.Label, ActorID: a.ID})
 	return att, nil
 }
 
@@ -430,6 +431,7 @@ func (s *Service) DeleteAttachment(ctx context.Context, a Actor, key, attID stri
 	if !canWrite(role) {
 		return ErrForbidden
 	}
+	defer func() { s.emit(Event{Type: "attachment.changed", Issue: is.Key, Actor: a.Label, ActorID: a.ID}) }()
 	return s.tx(ctx, func(tx pgx.Tx) error {
 		var blobID, name string
 		err := tx.QueryRow(ctx, `DELETE FROM attachment WHERE id=$1 AND issue_id=$2 RETURNING blob_id,name`, attID, is.ID).Scan(&blobID, &name)

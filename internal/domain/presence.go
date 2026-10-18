@@ -36,7 +36,7 @@ func NewPresence(now func() time.Time) *Presence {
 }
 
 // Heartbeat records that the user is viewing the issue, optionally editing a field.
-func (p *Presence) Heartbeat(issue string, a Actor, field string, appearOffline bool) {
+func (p *Presence) Heartbeat(issue string, a Actor, field string, appearOffline bool) (changed bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	us := p.m[issue]
@@ -49,17 +49,51 @@ func (p *Presence) Heartbeat(issue string, a Actor, field string, appearOffline 
 	if r == nil {
 		r = &presenceRec{name: a.Label}
 		us[a.ID] = r
+		changed = true
 	}
 	if field != r.field || r.since.IsZero() {
 		r.since = now
+		changed = true
+	}
+	if r.offline != appearOffline {
+		changed = true
 	}
 	r.field, r.seen, r.offline = field, now, appearOffline
+	return changed
 }
 
-func (p *Presence) Leave(issue, userID string) {
+func (p *Presence) Leave(issue, userID string) (changed bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.m[issue], userID)
+	if _, ok := p.m[issue][userID]; ok {
+		delete(p.m[issue], userID)
+		return true
+	}
+	return false
+}
+
+// Sweep drops entries that missed their heartbeat and returns the issues whose visible set changed.
+func (p *Presence) Sweep() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	var changed []string
+	for issue, us := range p.m {
+		drop := false
+		for id, r := range us {
+			if now.Sub(r.seen) > p.TTL {
+				delete(us, id)
+				drop = true
+			}
+		}
+		if drop {
+			changed = append(changed, issue)
+		}
+		if len(us) == 0 {
+			delete(p.m, issue)
+		}
+	}
+	return changed
 }
 
 // List returns who else is on the issue; the caller's own entry is excluded and
@@ -93,15 +127,21 @@ func (p *Presence) List(issue, exclude string) []PresenceEntry {
 // Heartbeat is the service-level call: it checks read access, honours the user's
 // "appear offline in editors" setting, records presence and returns who else is here.
 func (s *Service) Heartbeat(ctx context.Context, a Actor, key, field string) ([]PresenceEntry, error) {
+	l, _, err := s.HeartbeatChanged(ctx, a, key, field)
+	return l, err
+}
+
+// HeartbeatChanged also reports whether the visible presence state changed, so the realtime gateway broadcasts only on change.
+func (s *Service) HeartbeatChanged(ctx context.Context, a Actor, key, field string) ([]PresenceEntry, bool, error) {
 	is, role, err := s.access(ctx, a, key)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if field != "" && (!canWrite(role) || !textFields[field]) {
 		field = "" // viewers and unknown fields are shown as viewing, never as editing
 	}
 	var offline bool
 	s.DB.QueryRow(ctx, `SELECT appear_offline FROM app_user WHERE id=$1`, a.ID).Scan(&offline)
-	s.Presence.Heartbeat(is.Key, a, field, offline)
-	return s.Presence.List(is.Key, a.ID), nil
+	changed := s.Presence.Heartbeat(is.Key, a, field, offline)
+	return s.Presence.List(is.Key, a.ID), changed, nil
 }

@@ -384,7 +384,11 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	if err != nil {
 		return is, err
 	}
-	return s.getIssue(ctx, key)
+	out, gerr := s.getIssue(ctx, key)
+	if gerr == nil {
+		s.emit(Event{Type: "issue.updated", Issue: key, Fields: keys(changed), Version: out.Version, Actor: a.Label, ActorID: a.ID})
+	}
+	return out, gerr
 }
 
 func keys(m map[string]string) []string {
@@ -446,7 +450,11 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 	if err != nil {
 		return is, err
 	}
-	return s.getIssue(ctx, key)
+	out, gerr := s.getIssue(ctx, key)
+	if gerr == nil {
+		s.emit(Event{Type: "issue.transitioned", Issue: key, Fields: []string{"status"}, Version: out.Version, Actor: a.Label, ActorID: a.ID})
+	}
+	return out, gerr
 }
 
 type HistoryEntry struct {

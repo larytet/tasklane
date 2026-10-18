@@ -217,6 +217,9 @@ func (s *Service) mutateText(ctx context.Context, a Actor, key, field, mode, sav
 		res.Seq = next
 		return outbox(ctx, tx, "issue:"+is.Key, "issue.text_saved", map[string]any{"key": is.Key, "field": field, "text_seq": next, "version": is.Version, "actor": a.Label, "mode": mode})
 	})
+	if err == nil && !res.Unchanged && !res.Retried {
+		s.emit(Event{Type: "issue.text_saved", Issue: is.Key, Field: field, TextSeq: res.Seq, Version: is.Version, Actor: a.Label, ActorID: a.ID})
+	}
 	return res, err
 }
 

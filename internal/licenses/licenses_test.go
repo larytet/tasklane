@@ -16,13 +16,15 @@ const root = "../.."
 
 func TestClassify(t *testing.T) {
 	for text, want := range map[string]string{
-		"Permission is hereby granted, free of charge, to any person obtaining a copy": "MIT",
-		"Apache License\nVersion 2.0, January 2004":                                    "Apache-2.0",
-		"Redistribution and use in source and binary forms ... Neither the name of":    "BSD-3-Clause",
-		"GNU AFFERO GENERAL PUBLIC LICENSE Version 3":                                  "DENIED: GNU AFFERO",
-		"Server Side Public License VERSION 1":                                         "DENIED: SERVER SIDE PUBLIC LICENSE",
-		"Business Source License 1.1":                                                  "DENIED: BUSINESS SOURCE LICENSE",
-		"All rights reserved.":                                                         "UNKNOWN",
+		"Permission is hereby granted, free of charge, to any person obtaining a copy":                                        "MIT",
+		"Apache License\nVersion 2.0, January 2004":                                                                           "Apache-2.0",
+		"Redistribution and use in source and binary forms ... Neither the name of":                                           "BSD-3-Clause",
+		"GNU AFFERO GENERAL PUBLIC LICENSE Version 3":                                                                         "DENIED: GNU AFFERO",
+		"Server Side Public License VERSION 1":                                                                                "DENIED: SERVER SIDE PUBLIC LICENSE",
+		"Business Source License 1.1":                                                                                         "DENIED: BUSINESS SOURCE LICENSE",
+		"Permission to use, copy, modify, and distribute this software for any purpose with or without fee is hereby granted": "ISC",
+		"Permission to use, copy, modify, and/or distribute this software for any purpose":                                    "ISC",
+		"All rights reserved.": "UNKNOWN",
 	} {
 		if got := licenses.Classify(text); got != want {
 			t.Errorf("%q: %s, want %s", text[:20], got, want)

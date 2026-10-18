@@ -25,7 +25,7 @@ var deny = []string{"GNU GENERAL PUBLIC LICENSE", "GNU AFFERO", "GNU LESSER GENE
 
 // Classify names the licence from its text; the order matters (Apache text mentions "copyright" like the others).
 func Classify(text string) string {
-	u := strings.ToUpper(text)
+	u := strings.Join(strings.Fields(strings.ToUpper(text)), " ") // line wrapping must not matter
 	for _, d := range deny {
 		if strings.Contains(u, d) {
 			return "DENIED: " + d
@@ -36,7 +36,9 @@ func Classify(text string) string {
 		return "Apache-2.0"
 	case strings.Contains(u, "MOZILLA PUBLIC LICENSE"):
 		return "MPL-2.0"
-	case strings.Contains(u, "PERMISSION TO USE, COPY, MODIFY, AND/OR DISTRIBUTE THIS SOFTWARE") || strings.Contains(u, "ISC LICENSE"):
+	case strings.Contains(u, "PERMISSION TO USE, COPY, MODIFY, AND/OR DISTRIBUTE THIS SOFTWARE") ||
+		strings.Contains(u, "PERMISSION TO USE, COPY, MODIFY, AND DISTRIBUTE THIS SOFTWARE FOR ANY PURPOSE WITH OR WITHOUT FEE") ||
+		strings.Contains(u, "ISC LICENSE"):
 		return "ISC"
 	case strings.Contains(u, "PERMISSION IS HEREBY GRANTED, FREE OF CHARGE") || strings.Contains(u, "MIT LICENSE"):
 		return "MIT"

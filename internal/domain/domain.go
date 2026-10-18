@@ -19,6 +19,9 @@ type Service struct {
 	Presence *Presence
 	Blobs    *Blobs
 	Mail     *MailConfig
+	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:
+	// a lost event is repaired by a refetch, and nothing depends on delivery.
+	Publish func(Event)
 }
 
 func New(db *pgxpool.Pool) *Service {
@@ -86,3 +89,27 @@ func nilIfEmpty(s string) any {
 }
 
 func sp(s string) *string { return &s }
+
+// Event is a committed change, carrying both counters so open pages know what moved (SPEC 4.5).
+type Event struct {
+	Type    string   `json:"type"` // issue.updated, issue.transitioned, issue.text_saved, comment.added, attachment.changed
+	Issue   string   `json:"issue"`
+	Fields  []string `json:"fields,omitempty"`
+	Version int64    `json:"version,omitempty"`
+	TextSeq int64    `json:"text_seq,omitempty"`
+	Field   string   `json:"field,omitempty"`
+	Actor   string   `json:"actor"`
+	ActorID string   `json:"actor_id"`
+}
+
+func (s *Service) emit(e Event) {
+	if s.Publish != nil {
+		s.Publish(e)
+	}
+}
+
+// CanRead reports whether the actor may read the issue; the realtime gateway authorizes channels with it.
+func (s *Service) CanRead(ctx context.Context, a Actor, key string) bool {
+	_, _, err := s.access(ctx, a, key)
+	return err == nil
+}

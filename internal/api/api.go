@@ -2,17 +2,20 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/larytet/tasklane/internal/domain"
+	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/web"
 )
@@ -25,6 +28,7 @@ type Server struct {
 	Ready      func(ctx context.Context) error
 	Search     *search.Postgres
 	BlobOrigin string // optional separate origin for signed file links
+	Hub        *rt.Hub
 }
 
 type ctxKey struct{}
@@ -187,11 +191,17 @@ func (s *Server) Handler() http.Handler {
 		if !s.decode(w, r, &in) {
 			return
 		}
-		p, err := s.Svc.Heartbeat(r.Context(), actorOf(r), r.PathValue("key"), in.Field)
+		p, changed, err := s.Svc.HeartbeatChanged(r.Context(), actorOf(r), r.PathValue("key"), in.Field)
+		if err == nil && changed && s.Hub != nil { // clients on the socket learn of a person using the HTTP fallback
+			s.Hub.BroadcastPresence(strings.ToUpper(r.PathValue("key")))
+		}
 		s.reply(w, p, err)
 	}))
 	mux.HandleFunc("DELETE /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		s.Svc.Presence.Leave(strings.ToUpper(r.PathValue("key")), actorOf(r).ID)
+		key := strings.ToUpper(r.PathValue("key"))
+		if s.Svc.Presence.Leave(key, actorOf(r).ID) && s.Hub != nil {
+			s.Hub.BroadcastPresence(key)
+		}
 		s.json(w, 200, map[string]bool{"ok": true})
 	}))
 	if s.Search == nil {
@@ -210,6 +220,12 @@ func (s *Server) Handler() http.Handler {
 		l, err := s.Svc.MailLog(r.Context(), actorOf(r), 100)
 		s.reply(w, l, err)
 	}))
+	if s.Hub != nil {
+		mux.HandleFunc("POST /api/v1/ws/ticket", s.auth(func(w http.ResponseWriter, r *http.Request) {
+			s.json(w, 200, map[string]any{"ticket": s.Hub.Mint(actorOf(r)), "expires_in": 30})
+		}))
+		mux.HandleFunc("GET /api/v1/ws", s.Hub.Handler())
+	}
 	s.registerSearch(mux)
 	s.registerAttachments(mux)
 	if s.Extra != nil {
@@ -244,6 +260,22 @@ func (t *timingWriter) WriteHeader(c int) {
 		t.Header().Set("Server-Timing", fmt.Sprintf("app;dur=%.1f", float64(time.Since(t.start).Microseconds())/1000))
 	}
 	t.ResponseWriter.WriteHeader(c)
+}
+
+// Unwrap and Hijack keep WebSocket upgrades and http.ResponseController working through the middleware.
+func (t *timingWriter) Unwrap() http.ResponseWriter { return t.ResponseWriter }
+
+func (t *timingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := t.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("hijacking is not supported")
+}
+
+func (t *timingWriter) Flush() {
+	if f, ok := t.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (t *timingWriter) Write(b []byte) (int, error) {

@@ -29,7 +29,7 @@ this file is updated, and the work is committed and pushed.
 | M1a.7 UI | embedded dependency-free SPA (about 20 KB gzipped): sign-in, inbox with TQL search and error positions, thread view with presence, in-place subject, transitions, priority, assignee and labels with per-field conflict toast and reapply, description editor with local (2 s) and server (10 s) draft autosave, restored-draft banner, changed-under-you banner, three-column conflict dialog with per-block chooser and the four actions, attachments (paste, drop, resumable upload, thumbnails, signed download), comments, activity lines, dark and light themes, admin user creation endpoint | done, phone layout not yet verified |
 | M1a.8 Email and packaging | SMTP transport (none, STARTTLS, implicit TLS, verification always on, no plaintext credentials), shared in-process SMTP mock with transcript recording and scripted failures, per-issue threaded notifications and account mail from an outbox cursor, queue with lease, exponential backoff, idempotency and send-time permission check, admin delivery log, Dockerfile and Compose built and run for a fresh install, configuration reference | done |
 | M1a.9 Exit gate | Audit of every M1a exit id (TESTPLAN section 7) and closing the gaps that can be closed without a realtime channel or a browser harness: reliability mini-campaign with a reconciler that is itself tested, server-side latency, configuration schema with precedence and generated reference, `doctor` faults, licence scan, NOTICE and no-phone-home guard, systemd unit, reproducible tarballs | done; gaps listed below |
-| M1a.10 Realtime and browser harness | WebSocket gateway for presence and field-change events, rich-text schema and sanitizer, Playwright E2E with axe, throttled phone profile | next, needed to pass the M1a gate |
+| M1a.10 Realtime and browser harness | WebSocket gateway (single-use tickets, origin check, per-channel authorization with revocation, frame, rate and subscription limits, presence on state change only, change events carrying `version` and `text_seq`), UI on the socket with polling as the fallback, then: rich-text schema and sanitizer, Playwright E2E with axe, throttled phone profile | realtime done; the rest next, needed to pass the M1a gate |
 
 ## Deviations from the spec (deliberate, to be revisited)
 
@@ -38,7 +38,7 @@ this file is updated, and the work is committed and pushed.
 | Rich text | ProseMirror JSON canonical (DESIGN Part II) | Plain text with Markdown-style blocks separated by blank lines; merge works per block, then per word | Keeps M1a testable end to end; the merge, `text_seq` and history layers are format-agnostic. The editor schema and converters land with the UI milestone or M3 |
 | History | Written asynchronously from the outbox | Written in the same transaction as the change | Removes a class of lost-history bugs (E1 and HIST-06 risk) at no cost on one node. The outbox still carries the events; an async history writer can replace this later |
 | Tenancy | Organization root | Single organization | Multi-org is optional in the spec; a migration adds it |
-| Presence and change events | WebSocket channel | In-process store with a 10 s heartbeat API; open pages poll the view with `If-None-Match` every 4 s (a 304 when nothing changed) | The WebSocket gateway is deferred; all semantics (10 s heartbeat, 30 s expiry, appear-offline, banners) are in place and tested. Realtime would only make updates faster |
+| Presence and change events | WebSocket channel, Redis for 2+ nodes | WebSocket gateway and in-process presence and fan-out (single node); pages fall back to polling the view with `If-None-Match` when the socket is down | Redis fan-out is for the multi-node profile (M4); on one node the semantics are complete |
 | Presence (domain) | WebSocket channel | In-process store with a heartbeat API | WebSocket gateway arrives with the UI milestone; the semantics (10 s heartbeat, 30 s expiry, appear-offline) are implemented and tested |
 
 | Malware scanning | Pluggable scanner (ClamAV class), asynchronous `scanning` state | Built-in streaming EICAR signature check at commit, so a blob is `clean` or `blocked` immediately | The `scanning` state, the download refusal and the scan column exist; an external scanner replaces the signature check behind the same call |
@@ -81,17 +81,17 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | LIVE-10, 11 | partial | server drafts private and stale-aware, local drafts restored by hand; 30-day expiry and per-user cap, tab kill, offline and eviction not tested |
 | LIVE-12 | partial | the reconciler detects every injected class; injection into a running system and production counters are not built |
 | LIVE-13 | partial | link schemes, control characters and size are sanitized and reported; no node or attribute schema, no fuzzing |
-| LIVE-15, 17 | open | `text_seq` is on every REST read; events and the realtime channel do not exist |
+| LIVE-15, 17 | partial | `text_seq` on every REST read and on every text event; events are best effort (a dead subscriber never blocks writers, saves work with no hub at all); a hidden tab refetches when shown. Dropped-event fault injection and Redis loss are not tested |
 | DUR-01 | done for lost acknowledgements | real process kill not scripted |
 | DUR-02, 03, 05, 06 | open | restart during editing, Postgres restart or failover, validator change, 3-node profile |
 | DUR-04 | not applicable yet | history is written in the same transaction (deviation 2) |
-| PRES-01..04 | partial | semantics and API tested; no WebSocket, no avatar-stack and field-note checks in a browser |
-| PRES-05, 06, 07 | open | field and issue-security restrictions (no security levels exist yet), connection scaling, cross-node presence |
+| PRES-01..04 | partial | over the socket and the HTTP fallback: change broadcast, leave on tab close, expiry sweep, appear-offline flag, never blocks a save; the avatar stack and field notes were checked by hand in Chrome; accessibility of the stack is unchecked |
+| PRES-05, 06, 07 | partial | channel refusal is identical for forbidden and nonexistent issues, revocation stops events within the 5 s authorization window, 50 connections on one ticket send nothing for unchanged heartbeats; field and issue-security restrictions do not exist yet, 1,000 idle connections per node and cross-node presence (needs Redis) are not tested |
 | HIST-01, 02, 08 | partial | before and after, restore as a new change; no computed diff, no deduplication of stored versions |
 | HIST-03, 04, 05, 07 | open | mentions, notification batching, per-field tracking flag, GDPR redaction and legal hold |
 | PERF-01, 03, 07, 10, 11 | done (server time) | browser-side budgets not measured |
 | PERF-02, 04, 06, 08, 09 | open | cold data, board (M2), first visit timing, prefetch, editor on the phone profile |
-| PERF-12, 13 | open | need the event channel |
+| PERF-12, 13 | done (single node) | presence change p95 2.8 ms and saved-change event p95 6.6 ms to another open socket, against 1 s |
 | PERF-16, 17 | done | single machine; reference `perf` hardware undefined |
 | CHAOS-01 | partial | lost acknowledgements injected; no node kill |
 | CHAOS-02 | open | Redis is not implemented (single node only) |
@@ -104,7 +104,7 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | TQL-01, 02, 03, 06, 21, 22, 24, 26 | done or partial as listed in section 12 | no real-world JQL corpus |
 | TQL-04, 23, 25, 27 | partial or open | custom fields (M3); English text configuration and online switch; combined-plan matrix; GIN pending-list behaviour under a million updates |
 | SEC-01 | partial | permission checks tested per feature; the generated route-by-role matrix is not built |
-| SEC-02 | not applicable yet | no WebSocket |
+| SEC-02 | done | forged, missing, expired and reused tickets, cross-origin handshake, oversized frames, malformed JSON, binary frames, flooding, unknown operations and bad channel names are refused or disconnected and the server stays healthy |
 | SEC-03 | partial | comment visibility across REST, search and mail; no issue security levels |
 | SEC-05 | partial | XSS-safe rendering (no HTML sinks, escaped mail, CSP), sanitized links, parameterized TQL; CSV export injection is M1b |
 | UI-01 | partial | structural tests only; no visual regression |
@@ -123,3 +123,7 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | LIC-01, 02, 05 | done | |
 
 **Conclusion.** The tracker core, the editing-safety model, search, attachments, mail, packaging and configuration are built and tested. The M1a gate needs the realtime channel and a browser test harness (accessibility, visual, responsive, presence in a browser), the rich-text schema, and several durability and upgrade drills before it can be declared passed. M1a.10 covers the realtime channel and the harness. M1b and M1c are not started.
+| 20 | M1a.10 | The licence gate failed on a new dependency (`coder/websocket`, ISC) because the classifier matched one wording of the ISC text and the file wraps lines differently | The classifier normalizes whitespace and knows both ISC wordings; still keyed on licence text, not on package names. The gate working as designed: a new dependency is reviewed before it ships |
+| 21 | M1a.10 | The page did not refresh from an event while its tab was hidden: the refetch was skipped for hidden tabs and never retried | Found in Chrome (the automation window is a background tab). A hidden tab now marks itself stale and refetches when it becomes visible (SPEC: refetch on focus) |
+| 22 | M1a.10 | WebSocket upgrades would have failed behind the security-headers middleware, which wrapped the response writer and hid `Hijacker` | The wrapper exposes `Unwrap`, `Hijack` and `Flush`; every gateway test goes through the full handler stack |
+| 23 | M1a.10 | HTTP-fallback presence updated the store but not the socket clients, so mixed clients saw different state | The HTTP presence endpoints broadcast on change; `TestPRES_HTTPFallbackPresenceReachesSocketClients` |
