@@ -693,6 +693,23 @@ func rows() []row {
 		{"DELETE /api/v1/issues/{key}/presence", authed, func(f *fixture) req { return J("DELETE", "/api/v1/issues/"+f.issue()+"/presence", nil) }},
 		{"GET /api/v1/bootstrap", authed, func(f *fixture) req { return J("GET", "/api/v1/bootstrap", nil) }},
 		{"GET /api/v1/admin/mail", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail", nil) }},
+		{"POST /api/v1/mail/inbound/{id}", exp{anon: codes(403), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req {
+			return J("POST", "/api/v1/mail/inbound/00000000-0000-0000-0000-000000000000", map[string]any{"x": 1})
+		}}, // a source proves itself with a signature, never with a session
+		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
+		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
+		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},
+		{"DELETE /api/v1/admin/mail/inbound/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("DELETE", "/api/v1/admin/mail/inbound/999999", nil) }},
+		{"GET /api/v1/admin/mail/sources", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/sources", nil) }},
+		{"POST /api/v1/admin/mail/sources", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/admin/mail/sources", map[string]any{"name": fmt.Sprint("src", f.n)})
+		}},
+		{"DELETE /api/v1/admin/mail/sources/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/admin/mail/sources/00000000-0000-0000-0000-000000000000", nil)
+		}},
+		{"POST /api/v1/admin/mail/reply-keys", adminer, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/reply-keys", nil) }},
+		{"DELETE /api/v1/admin/mail/reply-keys/{kid}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/admin/mail/reply-keys/99", nil) }},
 		{"GET /api/v1/admin/fields", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/fields", nil) }},
 		{"PUT /api/v1/admin/fields/{field}/history", adminer, func(f *fixture) req {
 			return J("PUT", "/api/v1/admin/fields/priority/history", map[string]any{"track": true})

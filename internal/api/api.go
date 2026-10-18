@@ -344,6 +344,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerPrivacy(mux)
 	s.registerGroups(mux)
 	s.registerQuota(mux)
+	s.registerInboundMail(mux)
 	s.registerSCIM(mux)
 	s.registerJira(mux)
 	s.registerSearchAdmin(mux)

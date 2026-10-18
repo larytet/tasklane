@@ -1,0 +1,45 @@
+# Inbound email
+
+People reply to a notification to comment on the issue. This page covers what is built; create-an-issue-by-email, IMAP and the SMTP listener are not yet.
+
+## How a message is handled
+
+1. A **source** delivers the raw message. The webhook source takes `POST /api/v1/mail/inbound/{id}` with the message as the body and `X-Tasklane-Signature: sha256=<hex>`, the HMAC-SHA256 of the body under the source's secret. Add a source in Admin, Email; its secret is shown once. Every refusal (unknown source, bad signature, source removed) is the same `403`. A body over 26 MB is `413`.
+2. The message is **recorded once**, by `Message-ID`: a second delivery is counted (`duplicates`) and ignored. A message with no id gets one from its hash. If the process dies half way, the relay's retry finishes the job once two minutes have passed.
+3. The raw message is **stored in the blob store before anything else** (it is the `.eml` an administrator can open from the queue). If it cannot be stored the request fails with a 5xx and the sender retries; nothing is acknowledged that was not kept.
+4. It ends in one **outcome**, recorded with the reason and visible in Admin, Email:
+   - `ignored` — automatic or looping mail, a duplicate, a rate limit, no text, or not about an issue;
+   - `rejected` — too large (25 MiB by default), a huge header section, not a message, more than one sender;
+   - `quarantined` — waiting for an administrator (see below);
+   - `accepted` — it became a comment.
+
+Nothing is ever sent back to the sender, so there is no backscatter, and mail never creates a comment as anyone but the person it came from.
+
+## What makes a message a comment
+
+All of these, in this order:
+
+- **Not automatic.** Ignored: `Auto-Submitted` other than `no`, `Precedence: bulk|junk|list|auto_reply`, `X-Auto-Response-Suppress`, `X-Autoreply`, `List-Id`, a null `Return-Path`, a delivery report, an out-of-office subject, mail from `mailer-daemon` or `postmaster`, and any message carrying `X-Tasklane-Loop` or `X-Tasklane-Instance` (everything this server sends does, so mail between two installations, or fed back to this one, stops at once).
+- **Within limits.** Per sender 30 per hour, per sender domain 300, per issue 100 (counted from the record; the clock is the server's).
+- **A known sender.** The single `From` address must be an active user's email address. The display name is never used. Agents cannot write by email. An unknown sender is quarantined.
+- **Proof of origin.** Only from a source marked **trusted** (the path before it is yours: a provider or a relay you run) and only if its `Authentication-Results` header says `dmarc=pass`, or `dkim=pass` with a signing domain equal to the sender's domain or a parent of it on a label boundary (`example.com` for `bob@mail.example.com`, never `example.com.evil.net` or `notexample.com`). Anything else is quarantined with "no proof of origin". A source that is not trusted cannot make its own header count. *Tasklane does not yet verify DKIM itself from the raw message*; until it does, run it behind a receiver that does.
+- **A target issue.** In this order: the signed reply address (`reply+TOKEN@domain` in `To`, `Cc`, `Delivered-To`, `X-Original-To` or `Envelope-To`); otherwise `In-Reply-To` or `References` naming a message this server sent; otherwise a key like `[ABC-123]` in the subject. A message that names no issue is ignored.
+- **A mirrored project** is quarantined with the reason "mirrored project".
+- **The sender's own permission.** The comment is made through the same code as a comment in the browser, as that user, so Add Comments, project roles, group roles and archived (read-only) issues all apply. A sender who may not comment is quarantined, never told why.
+- **Text.** The comment is what the person wrote: the reply-marker line, "On … wrote:" attributions in several languages, Outlook header blocks, "Original Message" and forwarded dividers, a trailing block of `>` quotes and a `-- ` signature are removed. An inline reply (answers between quoted lines) is kept whole, and when unsure the text stays. HTML is reduced to text (no script, style, remote content or markup); charsets (UTF-8, ISO-8859-x, Shift-JIS, GBK…), quoted-printable and base64 are decoded with bounds on size, nesting (6 levels) and parts (100). Attachments are counted but **not kept yet**.
+
+The comment shows "via email" on the ticket.
+
+## Reply addresses
+
+Every notification carries `Reply-To: reply+TOKEN@domain`. The token holds the issue, an expiry (30 days) and a signature over the issue, the **recipient** and the expiry, so a forwarded notification does not give its power to whoever received the forward: the signature fails for any other sender. A forged, expired or wrong-sender address is quarantined (and, since it names no trusted issue, cannot be released).
+
+Keys: **Rotate reply key** (Admin, Email, or `POST /api/v1/admin/mail/reply-keys`) adds a signing key; addresses signed earlier keep working. `DELETE /api/v1/admin/mail/reply-keys/{kid}` revokes one, which invalidates every address it signed; the newest key cannot be revoked.
+
+## The quarantine
+
+Admin, Email lists the messages by outcome. An administrator can open the original (`.eml`), **release** a quarantined message or **delete** it. Release makes the comment once, as the matched user with that user's permissions (it fails and leaves the message quarantined if they may no longer comment), and only works for a message with a known sender, an issue and some text. Deleting drops the text and keeps the row. Both are audited.
+
+## Configuration
+
+The reply domain is the host of `base_url`. Limits (`InboundLimits`) have fixed defaults for now. Receiving mail does not need outbound mail to be configured.

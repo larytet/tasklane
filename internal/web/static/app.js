@@ -785,7 +785,7 @@
       const t = h('div', {});
       for (const c of v.comments) {
         t.append(h('div', { class: 'msg' }, avatar(c.author.name), h('div', { class: 'body' },
-          h('div', {}, h('span', { class: 'who' }, c.author.name), ' ', h('span', { class: 'muted' }, L.relTime(c.created) + (c.internal ? ' · internal' : '') + (c.edited ? ' · edited' : ''))), paragraphs(c.body))));
+          h('div', {}, h('span', { class: 'who' }, c.author.name), ' ', h('span', { class: 'muted' }, L.relTime(c.created) + (c.internal ? ' · internal' : '') + (c.via_email ? ' · via email' : '') + (c.edited ? ' · edited' : ''))), paragraphs(c.body))));
       }
       if (!v.comments.length) t.append(h('p', { class: 'muted' }, 'No comments yet.'));
       const act = h('div', {}); t.append(act);

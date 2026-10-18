@@ -14,11 +14,12 @@ type Comment struct {
 	Internal bool       `json:"internal"`
 	Created  time.Time  `json:"created"`
 	Edited   *time.Time `json:"edited,omitempty"`
+	ViaEmail bool       `json:"via_email,omitempty"` // posted from an email; an administrator can open the original
 }
 
 // listComments returns the thread; internal comments only for people who may see them (write access), so a viewer never reads them.
 func (s *Service) listComments(ctx context.Context, issueID string, internalToo bool) ([]Comment, error) {
-	rows, err := s.DB.Query(ctx, `SELECT c.id,u.id,u.name,u.email,c.body,c.internal,c.created_at,c.edited_at FROM comment c JOIN app_user u ON u.id=c.author_id WHERE c.issue_id=$1 AND ($2 OR NOT c.internal) ORDER BY c.created_at,c.id`, issueID, internalToo)
+	rows, err := s.DB.Query(ctx, `SELECT c.id,u.id,u.name,u.email,c.body,c.internal,c.created_at,c.edited_at,c.mail_inbound_id IS NOT NULL FROM comment c JOIN app_user u ON u.id=c.author_id WHERE c.issue_id=$1 AND ($2 OR NOT c.internal) ORDER BY c.created_at,c.id`, issueID, internalToo)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +27,7 @@ func (s *Service) listComments(ctx context.Context, issueID string, internalToo 
 	out := []Comment{}
 	for rows.Next() {
 		var c Comment
-		rows.Scan(&c.ID, &c.Author.ID, &c.Author.Name, &c.Author.Email, &c.Body, &c.Internal, &c.Created, &c.Edited)
+		rows.Scan(&c.ID, &c.Author.ID, &c.Author.Name, &c.Author.Email, &c.Body, &c.Internal, &c.Created, &c.Edited, &c.ViaEmail)
 		out = append(out, c)
 	}
 	return out, rows.Err()

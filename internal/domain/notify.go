@@ -24,6 +24,8 @@ type MailConfig struct {
 	BaseURL string
 	// EditBatch is how long a description-edit notice waits to absorb further saves by the same person (default 3 minutes).
 	EditBatch time.Duration
+	// Inbound bounds what one sender, domain, issue or message may cost (zero values take the defaults).
+	Inbound InboundLimits
 }
 
 const (
@@ -239,9 +241,9 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		if e.Payload.ActorID != "" {
 			actor = e.Payload.ActorID
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,issue_id,recipient_id,recipient,internal,subject,message_id,in_reply_to,refs,body_text,body_html,kind,actor_id,next_attempt_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (idempotency_key) DO NOTHING`,
-			fmt.Sprintf("%s:%d:%s%s", k, e.ID, r.id, keySuffix), id, r.id, (&netmail.Address{Name: r.name, Address: r.email}).String(), internal, msg.Subject, msg.MessageID, msg.InReplyTo, msg.Refs, msg.Text, msg.HTML, k, actor, next)
+		tag, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,issue_id,recipient_id,recipient,internal,subject,message_id,in_reply_to,refs,body_text,body_html,kind,actor_id,next_attempt_at,reply_to)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (idempotency_key) DO NOTHING`,
+			fmt.Sprintf("%s:%d:%s%s", k, e.ID, r.id, keySuffix), id, r.id, (&netmail.Address{Name: r.name, Address: r.email}).String(), internal, msg.Subject, msg.MessageID, msg.InReplyTo, msg.Refs, msg.Text, msg.HTML, k, actor, next, msg.ReplyTo)
 		if err != nil {
 			return err
 		}
@@ -337,6 +339,7 @@ func (s *Service) compose(ctx context.Context, tx pgx.Tx, issueID string, e noti
 		m.InReplyTo, m.Refs = prev, root+" "+prev
 	}
 	link := strings.TrimRight(s.Mail.BaseURL, "/") + "/#/issue/" + key
+	m.ReplyTo = s.replyAddress(ctx, tx, issueID, r.id)
 	m.ListUnsubscribe = "<mailto:" + addrOnly(s.Mail.From) + "?subject=unsubscribe>"
 	var t strings.Builder
 	t.WriteString("-- Reply above this line --\r\n\r\n" + what + "\r\n")
@@ -382,24 +385,24 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 		return 0, nil
 	}
 	type job struct {
-		id                          int64
-		issueID, userID             *string
-		internal                    bool
-		attempts                    int
-		to, subject, mid, irt, refs string
-		text, html                  string
+		id                                   int64
+		issueID, userID                      *string
+		internal                             bool
+		attempts                             int
+		to, subject, mid, irt, refs, replyTo string
+		text, html                           string
 	}
 	now := s.Now()
 	rows, err := s.DB.Query(ctx, `UPDATE mail_message SET next_attempt_at=$2 WHERE id IN (
 		SELECT id FROM mail_message WHERE status='pending' AND next_attempt_at<=$1 ORDER BY id LIMIT 20 FOR UPDATE SKIP LOCKED)
-		RETURNING id,issue_id,recipient_id,internal,attempts,recipient,subject,message_id,in_reply_to,refs,body_text,body_html`, now, now.Add(leaseFor))
+		RETURNING id,issue_id,recipient_id,internal,attempts,recipient,subject,message_id,in_reply_to,refs,body_text,body_html,reply_to`, now, now.Add(leaseFor))
 	if err != nil {
 		return 0, err
 	}
 	var jobs []job
 	for rows.Next() {
 		var j job
-		if err := rows.Scan(&j.id, &j.issueID, &j.userID, &j.internal, &j.attempts, &j.to, &j.subject, &j.mid, &j.irt, &j.refs, &j.text, &j.html); err != nil {
+		if err := rows.Scan(&j.id, &j.issueID, &j.userID, &j.internal, &j.attempts, &j.to, &j.subject, &j.mid, &j.irt, &j.refs, &j.text, &j.html, &j.replyTo); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -420,7 +423,7 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 			continue
 		}
 		serr := s.Mail.Mailer.Send(ctx, mail.Message{From: s.Mail.From, To: j.to, Subject: j.subject, MessageID: j.mid, InReplyTo: j.irt, Refs: j.refs,
-			Text: j.text, HTML: j.html, ListUnsubscribe: "<mailto:" + addrOnly(s.Mail.From) + "?subject=unsubscribe>", Date: s.Now()})
+			Text: j.text, HTML: j.html, ReplyTo: j.replyTo, Instance: s.Mail.Domain, ListUnsubscribe: "<mailto:" + addrOnly(s.Mail.From) + "?subject=unsubscribe>", Date: s.Now()})
 		if serr == nil {
 			s.DB.Exec(ctx, `UPDATE mail_message SET status='sent', sent_at=$2, attempts=attempts+1, last_error='' WHERE id=$1`, j.id, s.Now())
 			sent++

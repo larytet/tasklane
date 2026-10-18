@@ -13,6 +13,7 @@
       h('a', { href: '#/admin/workflows', class: 'tab', 'aria-current': active === 'workflows' ? 'page' : null }, 'Workflows'),
       h('a', { href: '#/admin/automation', class: 'tab', 'aria-current': active === 'automation' ? 'page' : null }, 'Automation'),
       h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
+      h('a', { href: '#/admin/email', class: 'tab', 'aria-current': active === 'email' ? 'page' : null }, 'Email'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
   }
 
@@ -380,6 +381,56 @@
     }, 2000);
   }
 
+  // ---------- inbound email ----------
+  async function emailView() {
+    const app = clear(document.getElementById('app'));
+    if (!S.me.admin) { app.append(topbar(), h('div', { class: 'page' }, h('p', {}, 'Only administrators can manage email.'))); return; }
+    const outcome = h('select', { 'aria-label': 'Outcome' }, [['quarantined', 'Quarantined'], ['', 'All'], ['accepted', 'Accepted'], ['ignored', 'Ignored'], ['rejected', 'Rejected']].map(o => h('option', { value: o[0] }, o[1])));
+    const queue = h('div', { class: 'card', role: 'list', 'aria-label': 'Inbound messages' });
+    const sources = h('div', { class: 'card', role: 'list', 'aria-label': 'Mail sources' });
+    const msg = h('div', { class: 'err', role: 'alert' });
+    const name = h('input', { type: 'text', 'aria-label': 'New source name', placeholder: 'Source name' });
+    const trusted = h('input', { type: 'checkbox', 'aria-label': 'Trusted receiver' });
+    async function loadSources() {
+      clear(sources);
+      const r = await api('GET', '/api/v1/admin/mail/sources');
+      if (r.status !== 200) { sources.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      if (!r.data.length) sources.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No sources. Add one to receive mail by webhook.')));
+      for (const x of r.data) sources.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, x.name), ' ', h('span', { class: 'muted' }, (x.trusted ? 'trusted receiver' : 'untrusted') + ' · POST /api/v1/mail/inbound/' + x.id)),
+        h('button', { class: 'btn ghost', 'aria-label': 'Delete source ' + x.name, onclick: async () => { const d = await api('DELETE', '/api/v1/admin/mail/sources/' + x.id); if (d.status === 200) loadSources(); else toast(errText(d)); } }, 'Delete')));
+    }
+    async function loadQueue() {
+      clear(queue);
+      const r = await api('GET', '/api/v1/admin/mail/inbound?limit=100&outcome=' + encodeURIComponent(outcome.value));
+      if (r.status !== 200) { queue.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      if (!r.data.length) queue.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No messages.')));
+      for (const m of r.data) {
+        const acts = [];
+        if (m.raw) acts.push(h('a', { class: 'btn ghost', href: '/api/v1/admin/mail/inbound/' + m.id + '/raw', download: 'message.eml', 'aria-label': 'Original of message ' + m.id }, 'Original'));
+        if (m.outcome === 'quarantined') {
+          acts.push(h('button', { class: 'btn', 'aria-label': 'Release message ' + m.id, onclick: async () => { const d = await api('POST', '/api/v1/admin/mail/inbound/' + m.id + '/release'); if (d.status === 200) { toast('Released as a comment'); loadQueue(); } else toast(errText(d)); } }, 'Release'));
+          acts.push(h('button', { class: 'btn ghost', 'aria-label': 'Delete message ' + m.id, onclick: async () => { const d = await api('DELETE', '/api/v1/admin/mail/inbound/' + m.id); if (d.status === 200) loadQueue(); else toast(errText(d)); } }, 'Delete'));
+        }
+        queue.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, m.sender || '(no sender)'), ' ', m.subject, ' ',
+          h('span', { class: 'muted' }, new Date(m.received).toLocaleString() + ' · ' + m.outcome + (m.reason ? ': ' + m.reason : '') + (m.issue ? ' · ' + m.issue : '') + (m.duplicates ? ' · ' + m.duplicates + ' repeat(s)' : ''))), ...acts));
+      }
+    }
+    outcome.addEventListener('change', loadQueue);
+    app.append(topbar(), adminTabs('email'), h('div', { class: 'page' }, h('h2', {}, 'Inbound email'),
+      h('p', { class: 'muted' }, 'Replies to notifications become comments only with a signed reply address, a known sender and a proven origin. Everything else waits here for a decision, and nothing is ever sent back to the sender.'),
+      h('h3', {}, 'Sources'), sources,
+      h('div', { class: 'chips', style: 'margin:8px 0' }, name, h('label', {}, trusted, ' Trusted receiver (its Authentication-Results header is believed)'), h('button', { class: 'btn', onclick: async () => {
+        const r = await api('POST', '/api/v1/admin/mail/sources', { name: name.value, trusted: trusted.checked });
+        if (r.status === 201) { name.value = ''; msg.textContent = ''; loadSources(); const close = modal(h('div', {}, h('h2', {}, 'Signing secret'), h('p', {}, 'Sign each request body with this secret (HMAC-SHA256, header X-Tasklane-Signature: sha256=<hex>). It is shown once.'), h('pre', { class: 'code', 'aria-label': 'Signing secret' }, r.data.secret), h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => close() }, 'Done')))); }
+        else msg.textContent = errText(r);
+      } }, 'Add source')), msg,
+      h('div', { class: 'chips', style: 'margin-top:16px' }, h('h3', { style: 'margin:0' }, 'Messages'), outcome, h('span', { class: 'grow' }),
+        h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/admin/mail/reply-keys'); toast(r.status === 201 ? 'New reply-address key ' + r.data.kid + ' is signing. Older addresses keep working until their key is revoked.' : errText(r)); } }, 'Rotate reply key')),
+      queue));
+    await Promise.all([loadSources(), loadQueue()]);
+  }
+
+  A.EXT.routes.push({ re: /^#\/admin\/email\/?$/, run: () => emailView() });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/([0-9a-f-]{36})/, run: m => editorView(m[1]) });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/?$/, run: () => listView() });
   A.EXT.routes.push({ re: /^#\/admin\/audit\/?$/, run: () => auditView() });

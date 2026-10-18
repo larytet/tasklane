@@ -29,6 +29,9 @@ type Message struct {
 	Text, HTML      string
 	ListUnsubscribe string
 	Date            time.Time
+	// Instance names this installation in X-Tasklane-Instance; every message of ours carries it and a loop counter, so
+	// mail between two Tasklane installations (or back to us) is recognised and ignored.
+	Instance string
 }
 
 // Mailer is the transport interface; provider APIs (SES, SendGrid, ...) implement it later.
@@ -204,6 +207,10 @@ func Build(m Message) ([]byte, error) {
 	w("Auto-Submitted", "auto-generated")
 	w("X-Auto-Response-Suppress", "All")
 	w("Precedence", "bulk")
+	if m.Instance != "" {
+		w("X-Tasklane-Instance", m.Instance)
+		w("X-Tasklane-Loop", "1")
+	}
 	w("List-Unsubscribe", m.ListUnsubscribe)
 	w("MIME-Version", "1.0")
 	mw := multipart.NewWriter(&b)

@@ -21,6 +21,9 @@ type Service struct {
 	Presence *Presence
 	Blobs    *Blobs
 	Mail     *MailConfig
+	// InboundDomain is the reply domain when email is received but not sent by this server (the outbound mail settings carry it otherwise).
+	InboundDomain string
+	InboundLimits InboundLimits
 	// SecretKey (32 bytes) encrypts stored credentials; when unset a key kept in the database is used.
 	SecretKey []byte
 	// GitEgress lets tests adjust the egress policy used for provider calls (the production policy is the default).

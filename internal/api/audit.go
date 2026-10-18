@@ -20,7 +20,7 @@ var ordinaryWork = map[string]bool{
 	"POST /oauth/register": true, "POST /oauth/token": true, "POST /oauth/revoke": true, // clients with no account yet: the grant is audited by the domain
 	"POST /api/v1/login": true, "POST /api/v1/login/mfa": true, "POST /api/v1/logout": true, "POST /api/v1/ws/ticket": true,
 	"POST /mcp": true, "DELETE /mcp": true, // the MCP server keeps its own call log
-	"POST /api/v1/git/webhooks/{id}": true, "POST /api/v1/jira/webhooks/{id}": true, // inbound, signed by the provider
+	"POST /api/v1/mail/inbound/{id}": true, "POST /api/v1/git/webhooks/{id}": true, "POST /api/v1/jira/webhooks/{id}": true, // inbound, signed by the provider
 	"POST /api/v1/issues": true, "PATCH /api/v1/issues/{key}": true, "POST /api/v1/issues/{key}/comments": true, "PATCH /api/v1/issues/{key}/comments/{id}": true,
 	"POST /api/v1/issues/{key}/transitions": true, "POST /api/v1/issues/{key}/links": true, "POST /api/v1/issues/{key}/archive": true, "DELETE /api/v1/issues/{key}/archive": true,
 	"POST /api/v1/issues/{key}/lifecycle": true, // audited by the domain
