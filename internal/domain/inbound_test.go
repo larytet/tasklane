@@ -2,7 +2,11 @@ package domain_test
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -619,5 +623,81 @@ func TestMAIL08_16_UnknownSendersAndPermissionsForNewIssues(t *testing.T) {
 	}
 	if _, err := e.Svc.ReleaseInbound(ctx, e.Admin, r.ID); err == nil || e.issueCount() != n+1 {
 		t.Fatal("released twice")
+	}
+}
+
+type fixtureDNS map[string]string
+
+func (m fixtureDNS) LookupTXT(_ context.Context, name string) ([]string, error) {
+	if v, ok := m[name]; ok {
+		return []string{v}, nil
+	}
+	return nil, errors.New("NXDOMAIN")
+}
+
+func loadDKIM(t *testing.T) (fixtureDNS, func(string) []byte) {
+	b, err := os.ReadFile("../mail/testdata/dkim/dns.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m fixtureDNS
+	json.Unmarshal(b, &m)
+	return m, func(n string) []byte {
+		r, err := os.ReadFile("../mail/testdata/dkim/" + n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+}
+
+// MAIL-10: Tasklane verifies DKIM on the stored raw message itself, so a plain source (no trusted receiver) can prove origin.
+func TestMAIL10_DKIMProvesOriginWithoutATrustedReceiver(t *testing.T) {
+	e := newInbound(t)
+	dns, file := loadDKIM(t)
+	e.Svc.DNS = dns
+	// signed by the sender's own domain, delivered by a source nobody vouches for: accepted
+	if r := e.ingest(false, file("reply_aligned.eml")); r.Outcome != "accepted" {
+		t.Fatalf("%+v", r)
+	}
+	cs := e.comments()
+	if len(cs) != 1 || cs[0].Author.ID != e.Bob.ID || cs[0].Body != "Signed reply from Bob." {
+		t.Fatalf("%+v", cs)
+	}
+	// a valid signature by a different domain is no proof that bob@example.com wrote it
+	r := e.ingest(false, file("reply_misaligned.eml"))
+	if r.Outcome != "quarantined" || !strings.Contains(r.Reason, "not aligned") {
+		t.Fatalf("%+v", r)
+	}
+	// the signed message with its body changed in transit
+	forged := bytes.Replace(file("reply_aligned.eml"), []byte("Signed reply from Bob."), []byte("Give Eve access."), 1)
+	forged = bytes.Replace(forged, []byte("sig1@"), []byte("sig4@"), 1) // a different Message-ID, so it is not a duplicate
+	r = e.ingest(false, forged)
+	if r.Outcome != "quarantined" || !strings.Contains(r.Reason, "body hash") && !strings.Contains(r.Reason, "does not verify") {
+		t.Fatalf("%+v", r)
+	}
+	// the key is gone from DNS (or DNS is down): nothing is proven
+	e.Svc.DNS = fixtureDNS{}
+	again := bytes.Replace(file("reply_aligned.eml"), []byte("sig1@"), []byte("sig5@"), 1)
+	if r := e.ingest(false, again); r.Outcome != "quarantined" || !strings.Contains(r.Reason, "could not be found") {
+		t.Fatalf("%+v", r)
+	}
+	// an untrusted source's own Authentication-Results still counts for nothing
+	e.Svc.DNS = dns
+	if r := e.ingest(false, e.eml("bob@example.com", "tasklane@example.com", "Re: [ABC-1] x", []string{authOK}, "claims a pass")); r.Outcome != "quarantined" || !strings.Contains(r.Reason, "no DKIM signature") {
+		t.Fatalf("%+v", r)
+	}
+	// a trusted receiver's verdict still works when there is no signature
+	if r := e.ingest(true, e.eml("bob@example.com", "tasklane@example.com", "Re: [ABC-1] y", []string{authOK}, "vouched for")); r.Outcome != "accepted" {
+		t.Fatalf("%+v", r)
+	}
+	if len(e.comments()) != 2 {
+		t.Fatalf("%d comments", len(e.comments()))
+	}
+	// without a resolver configured, signatures are not looked at (a trusted receiver is then the only proof)
+	e.Svc.DNS = nil
+	third := bytes.Replace(file("reply_aligned.eml"), []byte("sig1@"), []byte("sig6@"), 1)
+	if r := e.ingest(false, third); r.Outcome != "quarantined" {
+		t.Fatalf("%+v", r)
 	}
 }

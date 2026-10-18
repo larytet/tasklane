@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/larytet/tasklane/internal/egress"
+	"github.com/larytet/tasklane/internal/mail"
 	"sync"
 	"time"
 
@@ -23,6 +24,8 @@ type Service struct {
 	Mail     *MailConfig
 	// InboundDomain is the reply domain when email is received but not sent by this server (the outbound mail settings carry it otherwise).
 	InboundDomain string
+	// DNS answers TXT lookups for DKIM keys; when nil Tasklane does not verify DKIM and relies on a trusted receiver's verdict.
+	DNS           mail.TXTResolver
 	InboundLimits InboundLimits
 	// SecretKey (32 bytes) encrypts stored credentials; when unset a key kept in the database is used.
 	SecretKey []byte

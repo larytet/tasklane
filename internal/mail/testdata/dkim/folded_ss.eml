@@ -1,0 +1,21 @@
+DKIM-Signature: v=1; a=rsa-sha256; c=simple/simple; d=example.com;
+ i=@example.com; q=dns/txt; s=rsa; t=1792328797; h=from : to : subject
+ : date : message-id; bh=t4/lv7lhKKgEDLOMn8Gb8nNVVc3/nj208nCEtztKxBU=;
+ b=hxUJBFkEMdl8TEWVF1SEdh16kgSkVXu7XCLikz1ZF4PkJm1CBqLzx4aOCd+Hxg21hPHON
+ /1q118DHT1jW4WMB5yDHCTdlikBybI1gvy1jJ4HYvK0YguogPtkVvrN2f7CVoQ6zrCmKO+X
+ 7iVeNOyoobfsj/axWF6enPqblkTARunjun8SRDPfQdhYERweFj9g3ahEXWRR84a7au/pdId
+ nSRJh5rlBhdQugwHqIVTkWOrdZJuoO/vcJl15ZYGSF5RLJjjpZ9WCv0PbD/eFtU3vBk9wDz
+ n77/pJDmasRJjREsLpqYurjzaA7mvf40hgkBFmn24WeTirZ2ACl99bJRD46w==
+From: Bob <bob@example.com>
+To: tasklane@example.org,
+	other@example.org
+Subject: A subject that is
+  folded   with  odd spacing 
+Date: Tue, 3 Mar 2026 10:00:00 +0000
+Message-ID: <f1@example.com>
+
+body with trailing space   
+
+  indented   and   spaced
+
+

@@ -1,0 +1,16 @@
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=example.com;
+ i=@example.com; q=dns/txt; s=rsa; t=1792328797; h=from : to : subject
+ : date : message-id; bh=dwx6Y059i+0OhGIJWngn+D0ViqZQCjJZsUEDHJMU9Mw=;
+ b=m6a740Trq+p5NcvrPcqxNFeXMq87l0wp8YoVikNuF5WydIWP5Ou6hplDB6vvd5R4CquT0
+ Jy4c1DGZnwXUvnBcz7OAa1CDtao51Em6KJzQhjg4jMSDfL0hfDMYLe4BbqdN3oo6YxSX9zU
+ cp3ziGAjnhViCkSSYG82Qh673knghSAyLUGGd/8QpbgCx5eBXkJX+ZX8xM20aWnZy6GdY0T
+ 6lIpAJ6zGJNlE2+32861taCqWfR+TK0kqQx8Syq/xkybaw9DrhLahW+RbcdCLx0023W+8n4
+ Ig/f1TNJFxJqDpTLeB4cEjAoj2Dmqvob2BM7nHYUmhFdBzwBaATkcWbHLZAQ==
+From: bob@example.com
+To: tasklane@example.com
+Subject: Re: [ABC-1] Printer is on fire
+Date: Tue, 3 Mar 2026 10:00:00 +0000
+Message-ID: <sig1@example.com>
+Content-Type: text/plain
+
+Signed reply from Bob.

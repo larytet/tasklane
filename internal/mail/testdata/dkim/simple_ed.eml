@@ -1,0 +1,13 @@
+DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d=example.com;
+ i=@example.com; q=dns/txt; s=ed; t=1792328797; h=from : to : subject :
+ date : message-id; bh=JnwZnBMjf7weJP8Y40cYOApSZgG0P8+hFYUeNUM0euA=;
+ b=0fDo7epdxFTWY121Do/k6zS13KTdMiQJItsSA2/NQmiQ+/BE7xmDWRXwFQT+e470FS//G
+ 3VXhTjTe7Dg4XYGBg==
+From: Bob <bob@example.com>
+To: tasklane@example.org
+Subject: Hello there
+Date: Tue, 3 Mar 2026 10:00:00 +0000
+Message-ID: <s1@example.com>
+
+A plain body.
+Second line.

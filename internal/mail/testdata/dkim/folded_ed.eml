@@ -1,0 +1,18 @@
+DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d=example.com;
+ i=@example.com; q=dns/txt; s=ed; t=1792328797; h=from : to : subject :
+ date : message-id; bh=TOGC0PC819DrOc4UtXSga5DISKlX0Q4AuthAX7nP4+A=;
+ b=bvuAlAUDdKYFVeq718lw9TTVNduDFbxkw7MB0MTG//HKhgzBF+KtknOxzNbapLCBIMkNm
+ KK8Ul1ZVZfwFciNBg==
+From: Bob <bob@example.com>
+To: tasklane@example.org,
+	other@example.org
+Subject: A subject that is
+  folded   with  odd spacing 
+Date: Tue, 3 Mar 2026 10:00:00 +0000
+Message-ID: <f1@example.com>
+
+body with trailing space   
+
+  indented   and   spaced
+
+

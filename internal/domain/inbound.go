@@ -452,7 +452,7 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 	} else {
 		s.DB.Exec(ctx, `UPDATE mail_inbound SET raw_sha256=$2 WHERE id=$1`, id, sha)
 	}
-	v := s.classifyInbound(ctx, p, trusted, from, ferr, id, now, lim)
+	v := s.classifyInbound(ctx, p, raw, trusted, from, ferr, id, now, lim)
 	if v.outcome == "accepted" && v.create != nil {
 		act := Actor{ID: v.userID, Label: v.userName, Admin: v.userAdmin && v.userKind != "agent", Kind: v.userKind}
 		key, err := s.createFromMail(ctx, act, *v.create, v.body)
@@ -506,7 +506,7 @@ func singleSender(h netmail.Header) (*netmail.Address, error) {
 func ignore(reason string) verdict { return verdict{outcome: "ignored", reason: reason} }
 
 // classifyInbound decides what to do with a parsed message. It changes nothing.
-func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, trusted bool, from *netmail.Address, ferr error, id int64, now time.Time, lim InboundLimits) verdict {
+func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, raw []byte, trusted bool, from *netmail.Address, ferr error, id int64, now time.Time, lim InboundLimits) verdict {
 	h := p.Header
 	// our own and automatic mail first: these never get a reply and never act
 	switch {
@@ -558,8 +558,13 @@ func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, trusted b
 	}
 	v.body = body
 	// proof of origin: only the receiving path's own verdict counts, and only from a source marked trusted
-	if !trusted || !authenticated(h, domain) {
-		v.outcome, v.reason = "quarantined", "no proof of origin: the sender's domain was not verified by a trusted receiver"
+	proven := trusted && authenticated(h, domain)
+	why := "the sender's domain was not verified by a trusted receiver and the message carries no DKIM signature"
+	if !proven && s.DNS != nil { // Tasklane checks the signature itself, whatever the transport
+		proven, why = s.dkimProof(ctx, raw, domain, now)
+	}
+	if !proven {
+		v.outcome, v.reason = "quarantined", "no proof of origin: "+why
 		s.locateIssue(ctx, p, &v, false)
 		if v.issueID == "" {
 			s.locateCreate(ctx, p, &v)
@@ -976,4 +981,25 @@ func (s *Service) SetMailPolicy(ctx context.Context, a Actor, key, policy string
 		}
 		return s.audit(ctx, tx, a, "project.mail_policy", strings.ToUpper(key), map[string]any{"policy": policy})
 	})
+}
+
+// dkimProof verifies the DKIM signatures on the stored raw message. Proof is a valid signature whose domain is aligned with the
+// sender's domain. When there is none, the reason says whether there was no signature or what was wrong with the ones present.
+func (s *Service) dkimProof(ctx context.Context, raw []byte, fromDomain string, now time.Time) (bool, string) {
+	rs := mail.VerifyDKIM(ctx, raw, s.DNS, now)
+	if len(rs) == 0 {
+		return false, "the sender's domain was not verified by a trusted receiver and the message carries no DKIM signature"
+	}
+	why := ""
+	for _, r := range rs {
+		switch {
+		case r.Pass && mail.Aligned(r.Domain, fromDomain):
+			return true, ""
+		case r.Pass:
+			why += fmt.Sprintf("; the signature by %s is valid but is not aligned with the sender's domain %s", r.Domain, fromDomain)
+		default:
+			why += fmt.Sprintf("; the DKIM signature by %s failed: %s", r.Domain, r.Reason)
+		}
+	}
+	return false, strings.TrimPrefix(why, "; ")
 }

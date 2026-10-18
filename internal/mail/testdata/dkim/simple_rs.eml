@@ -1,0 +1,16 @@
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=example.com;
+ i=@example.com; q=dns/txt; s=rsa; t=1792328797; h=from : to : subject
+ : date : message-id; bh=JnwZnBMjf7weJP8Y40cYOApSZgG0P8+hFYUeNUM0euA=;
+ b=zyCZ6Taa1OUsGilIsW5/L7jHaWHykxmalI/2FbePLgZWXiEFn+N2ylJQSg/NHQhIL7R1Y
+ 7rDC8/xDQK6OjO8MTUNJ9aad9Itq2bzwIIO1RquufU+w4+IilIYfOe6S8kc0/Qq9GPRr6cM
+ 9jvOm7hh6Ec0DQ3tfipGXIOk4hYP2s/k2lsoMzo1i2vZVUJm4OzwcpaCegy6UddE93+2zl9
+ fgcZiPXuV/y/8bT9ztGmr2N5DwSvBECl9cWK5BgI3aiO6AjNz5ebISfgnusEfA2d4eTQOcS
+ SZBXxxheQmuzJdfz7r83Ku4IgeoMVIOBC5hU+mijhCl6ktanIukttKcwsv5Q==
+From: Bob <bob@example.com>
+To: tasklane@example.org
+Subject: Hello there
+Date: Tue, 3 Mar 2026 10:00:00 +0000
+Message-ID: <s1@example.com>
+
+A plain body.
+Second line.

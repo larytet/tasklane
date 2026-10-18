@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/larytet/tasklane/internal/egress"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -220,7 +221,8 @@ func serve(ctx context.Context, cfg config.Config) {
 	if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {
 		dom = u.Hostname()
 	}
-	svc.InboundDomain = dom // mail can be received (a webhook source) without this server sending any
+	svc.DNS = net.DefaultResolver // DKIM keys are looked up in DNS
+	svc.InboundDomain = dom       // mail can be received (a webhook source) without this server sending any
 	if cfg.SMTPHost != "" {
 		svc.Mail = &domain.MailConfig{
 			Mailer: &mail.SMTP{Host: cfg.SMTPHost, Port: cfg.SMTPPort, TLS: cfg.SMTPTLS, User: cfg.SMTPUser, Pass: cfg.SMTPPass, From: cfg.SMTPFrom},
