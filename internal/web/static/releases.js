@@ -107,7 +107,7 @@
       if (r.status === 201) { name.value = desc.value = start.value = due.value = ''; load(); } else msg.textContent = errText(r);
     } }, 'Add version'));
     showArchived.addEventListener('change', load);
-    app.append(topbar(), h('div', { class: 'page' }, h('div', { class: 'chips' }, h('h2', { style: 'margin:0' }, 'Releases'), sel, h('label', { for: 'rel-arch' }, showArchived, ' Show archived'), h('a', { href: '#/portal-admin/' + key }, 'Customer portal settings')), list, h('h3', { style: 'margin-top:16px' }, 'New version'), form, msg));
+    app.append(topbar(), h('div', { class: 'page' }, h('div', { class: 'chips' }, h('h2', { style: 'margin:0' }, 'Releases'), sel, h('label', { for: 'rel-arch' }, showArchived, ' Show archived'), h('a', { href: '#/portal-admin/' + key }, 'Customer portal settings'), h('a', { href: '#/queues/' + key }, 'Queues')), list, h('h3', { style: 'margin-top:16px' }, 'New version'), form, msg));
     await load();
   }
 

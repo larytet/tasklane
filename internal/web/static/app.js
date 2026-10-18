@@ -113,6 +113,17 @@
   function rtSend(m) { if (RT.up) { RT.ws.send(JSON.stringify(m)); return true; } return false; }
 
   // ---------- shell ----------
+  // the less used places, folded into one menu so the bar fits at any width (a disclosure, so it works with the keyboard and screen readers)
+  function moreMenu() {
+    const d = h('details', { class: 'topmore' });
+    const go = (label, hash) => h('a', { href: hash, class: 'topmore-item', onclick: () => d.removeAttribute('open') }, label);
+    const first = S.projects[0] ? S.projects[0].key : '';
+    d.append(h('summary', { class: 'btn ghost' }, 'More'),
+      h('div', { class: 'topmore-list' }, go('Dashboards', '#/dashboards'), go('Releases', '#/releases'), go('Approvals', '#/approvals'), go('Queues', '#/queues'), go('Trash', '#/trash/' + first)));
+    d.addEventListener('keydown', e => { if (e.key === 'Escape') { d.removeAttribute('open'); d.querySelector('summary').focus(); } });
+    return d;
+  }
+
   function topbar() {
     const q = h('input', { type: 'search', placeholder: 'Search or TQL…  e.g. project = ABC AND status = "To Do"', class: 'grow', 'aria-label': 'Search or TQL', value: S.q });
     q.addEventListener('keydown', e => {
@@ -128,11 +139,8 @@
       h('button', { class: 'btn primary', onclick: createDialog }, '+ Create'),
       h('button', { class: 'btn ghost', id: 'bell', 'aria-label': 'Inbox', onclick: () => { location.hash = '#/inbox/unread'; } }, 'Inbox', h('span', { id: 'bell-n', class: 'badge', hidden: true })),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
-      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/dashboards'; } }, 'Dashboards'),
-      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/releases'; } }, 'Releases'),
-      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/approvals'; } }, 'Approvals'),
+      moreMenu(),
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
-      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
       S.me ? h('button', { class: 'btn ghost', 'aria-label': 'Account and security', onclick: () => { location.hash = '#/account'; } }, S.me.label) : null,
       h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/logout'); S.me = null; route(); } }, 'Sign out'));
@@ -939,7 +947,23 @@
       const audience = h('span', { class: 'muted', role: 'status', id: 'reply-audience' });
       const say = () => { audience.textContent = v.request ? (internal.checked ? 'Internal note: only staff see it.' : 'The customer (' + v.request.email + ') will see this reply in the portal.') : ''; };
       internal.addEventListener('change', say); say();
-      return h('div', { class: 'reply' }, ta, h('div', { class: 'chips' }, h('label', {}, internal, ' Internal'), audience, h('span', { class: 'grow' }),
+      // saved replies of the project, when there are any
+      const canned = h('select', { 'aria-label': 'Insert a canned response', hidden: true }, h('option', { value: '' }, 'Canned response…'));
+      api('GET', '/api/v1/projects/' + v.issue.project + '/canned-responses').then(r => {
+        if (r.status !== 200 || !r.data.length) return;
+        r.data.forEach(c => canned.append(h('option', { value: c.id }, c.name)));
+        canned.hidden = false;
+        canned.addEventListener('change', () => {
+          const c = r.data.find(x => x.id === canned.value);
+          canned.value = '';
+          if (!c) return;
+          const text = c.body.replace(/\{\{\s*issue\.key\s*\}\}/g, v.issue.key).replace(/\{\{\s*customer\s*\}\}/g, v.request ? (v.request.customer || v.request.email) : 'there').replace(/\{\{\s*agent\s*\}\}/g, (S.me && (S.me.label || S.me.name)) || '');
+          ta.value = ta.value ? ta.value + '\n' + text : text;
+          ta.dispatchEvent(new Event('input'));
+          ta.focus();
+        });
+      });
+      return h('div', { class: 'reply' }, ta, h('div', { class: 'chips' }, h('label', {}, internal, ' Internal'), canned, audience, h('span', { class: 'grow' }),
         h('button', { class: 'btn primary', onclick: async () => {
           if (!ta.value.trim()) return;
           const r = await api('POST', '/api/v1/issues/' + key + '/comments', { body: ta.value, internal: internal.checked });

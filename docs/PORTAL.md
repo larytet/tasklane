@@ -62,6 +62,12 @@ A clock is **running**, **paused**, **met** or **breached**; one that was met af
 
 Staff see the clocks on the request's ticket; **customers never see them**. In search: `sla.state = breached`, `sla.firstResponse.state in (running, paused)`, `sla.resolution.state = met`.
 
+## Queues and canned responses
+
+A **queue** is a named TQL query held to one project (`#/queues/PROJECT`, or `/api/v1/projects/{key}/queues`), shown with the number of issues in it **for the person looking**: the query is run with that person's permissions and is always combined with `project = PROJECT`, so it can never reach another project even if its text names one. Queues have an order; a query that stops compiling shows its error in its own row and the others still answer. Anyone who can see the project sees its queues; project administrators manage them, and a query that does not compile is refused when it is saved.
+
+A **canned response** is a saved reply, inserted from a menu in the ticket's reply box. `{{issue.key}}`, `{{customer}}` (the person who raised the request, or "there") and `{{agent}}` (the person replying) are filled in by the page. People who can comment see the responses; project administrators manage them.
+
 ## Not built yet
 
-Still to build: attachments on requests, queues, canned responses, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,  customer organizations that share requests, customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.
+Still to build: attachments on requests, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,  customer organizations that share requests, customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.

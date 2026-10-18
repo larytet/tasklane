@@ -404,6 +404,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerVersions(mux)
 	s.registerApprovals(mux)
 	s.registerPortal(mux)
+	s.registerQueues(mux)
 	s.registerQuota(mux)
 	s.registerInboundMail(mux)
 	s.registerGitAuto(mux)

@@ -124,6 +124,26 @@ func (f *fixture) requestType() string {
 	return rt.ID
 }
 
+func (f *fixture) queue() string {
+	f.n++
+	n, q := fmt.Sprint("Q ", f.n), "statusCategory != Done"
+	v, err := f.e.Svc.CreateQueue(testutil.Ctx(), f.e.Admin, "ABC", domain.QueueIn{Name: &n, TQL: &q})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return v.ID
+}
+
+func (f *fixture) canned() string {
+	f.n++
+	n, b := fmt.Sprint("C ", f.n), "Hello"
+	v, err := f.e.Svc.CreateCanned(testutil.Ctx(), f.e.Admin, "ABC", domain.CannedIn{Name: &n, Body: &b})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return v.ID
+}
+
 func (f *fixture) versionName() string {
 	f.n++
 	n := fmt.Sprint("n", f.n)
@@ -677,6 +697,27 @@ func rows() []row {
 		{"GET /api/v1/portal/{key}/requests/{issue}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/requests/"+f.issue(), nil) }},
 		{"POST /api/v1/portal/{key}/requests/{issue}/comments", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
 			return J("POST", "/api/v1/portal/ABC/requests/"+f.issue()+"/comments", map[string]any{"body": "x"})
+		}},
+		{"GET /api/v1/projects/{key}/queues", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/queues", nil) }},
+		{"POST /api/v1/projects/{key}/queues", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/projects/ABC/queues", map[string]any{"name": fmt.Sprint("Queue ", f.n), "tql": "statusCategory != Done"})
+		}},
+		{"PUT /api/v1/queues/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/queues/"+f.queue(), map[string]any{"position": 3})
+		}},
+		{"DELETE /api/v1/queues/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("DELETE", "/api/v1/queues/"+f.queue(), nil) }},
+		{"GET /api/v1/queues/{id}/issues", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/queues/"+f.queue()+"/issues", nil) }},
+		{"GET /api/v1/projects/{key}/canned-responses", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/canned-responses", nil) }},
+		{"POST /api/v1/projects/{key}/canned-responses", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/projects/ABC/canned-responses", map[string]any{"name": fmt.Sprint("Reply ", f.n), "body": "Hello"})
+		}},
+		{"PUT /api/v1/canned-responses/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/canned-responses/"+f.canned(), map[string]any{"body": "Changed"})
+		}},
+		{"DELETE /api/v1/canned-responses/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/canned-responses/"+f.canned(), nil)
 		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {

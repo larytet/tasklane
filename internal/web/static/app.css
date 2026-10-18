@@ -159,3 +159,8 @@ table.data{border-collapse:collapse;margin:8px 0}table.data th,table.data td{bor
 .chips[hidden]{display:none}.rel-row{align-items:center;gap:12px;flex-wrap:wrap}.rel-progress{display:flex;align-items:center;gap:8px;min-width:200px}
 .rel-bar{display:flex;width:140px;height:10px;border-radius:5px;overflow:hidden;background:var(--hover)}.rel-seg{display:block;height:100%}.rel-seg.done{background:#2e9e5b}.rel-seg.prog{background:#3b82c4}.rel-seg.todo{background:#9aa5b1}
 .rel-actions{display:flex;gap:4px;flex-wrap:wrap}.rel-notes{white-space:pre-wrap;max-height:50vh;overflow:auto;background:var(--hover);padding:10px;border-radius:6px}
+
+/* the top bar's menu of less used places */
+.topmore{position:relative}.topmore>summary{list-style:none;cursor:pointer}.topmore>summary::-webkit-details-marker{display:none}.topmore>summary::after{content:" ▾"}
+.topmore-list{position:absolute;right:0;top:100%;z-index:30;min-width:160px;background:var(--overlay);border:1px solid var(--border);border-radius:8px;padding:4px;display:flex;flex-direction:column}
+.topmore-item{padding:8px 12px;border-radius:6px;color:inherit;text-decoration:none}.topmore-item:hover,.topmore-item:focus{background:var(--hover)}
