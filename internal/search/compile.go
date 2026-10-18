@@ -263,6 +263,8 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 			return "(cardinality(i.labels)>0)", nil
 		}
 		return "", errAt(x.Pos, "operator %s cannot be used with labels", opName(x.Op))
+	case "fixversion", "affectedversion", "affectsversion":
+		return c.versionClause(x, isNeg)
 	case "inputrequested":
 		switch x.Op {
 		case "is":

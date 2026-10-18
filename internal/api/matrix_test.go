@@ -88,6 +88,25 @@ func (f *fixture) board() string {
 	return b.ID
 }
 
+func (f *fixture) version() string {
+	f.n++
+	n := fmt.Sprint("v", f.n)
+	v, err := f.e.Svc.CreateVersion(testutil.Ctx(), f.e.Admin, "ABC", domain.VersionIn{Name: &n})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return v.ID
+}
+
+func (f *fixture) versionName() string {
+	f.n++
+	n := fmt.Sprint("n", f.n)
+	if _, err := f.e.Svc.CreateVersion(testutil.Ctx(), f.e.Admin, "ABC", domain.VersionIn{Name: &n}); err != nil {
+		f.t.Fatal(err)
+	}
+	return n
+}
+
 func (f *fixture) sprintBoard() string {
 	f.n++
 	b, err := f.e.Svc.CreateBoard(testutil.Ctx(), f.e.Admin, "ABC", fmt.Sprint("scrum ", f.n), "scrum")
@@ -557,6 +576,26 @@ func rows() []row {
 		}},
 		{"DELETE /api/v1/filters/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/filters/00000000-0000-0000-0000-000000000009", nil) }},
 		{"GET /api/v1/dashboard-kinds", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboard-kinds", nil) }},
+		{"GET /api/v1/projects/{key}/versions", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/versions", nil) }},
+		{"POST /api/v1/projects/{key}/versions", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/projects/ABC/versions", map[string]any{"name": fmt.Sprint("m", f.n)})
+		}},
+		{"GET /api/v1/versions/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/versions/"+f.version(), nil) }},
+		{"PUT /api/v1/versions/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/versions/"+f.version(), map[string]any{"description": "changed"})
+		}},
+		{"DELETE /api/v1/versions/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("DELETE", "/api/v1/versions/"+f.version(), nil) }},
+		{"POST /api/v1/versions/{id}/release", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/versions/"+f.version()+"/release", map[string]any{})
+		}},
+		{"POST /api/v1/versions/{id}/unrelease", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req {
+			return J("POST", "/api/v1/versions/"+f.version()+"/unrelease", nil)
+		}},
+		{"GET /api/v1/versions/{id}/notes", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/versions/"+f.version()+"/notes", nil) }},
+		{"PUT /api/v1/issues/{key}/versions", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/issues/"+f.issue()+"/versions", map[string]any{"fix": []string{f.versionName()}})
+		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {
 			return J("POST", "/api/v1/dashboards", map[string]any{"name": "Matrix dashboard"})

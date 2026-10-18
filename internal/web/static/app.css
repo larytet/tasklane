@@ -154,3 +154,8 @@ table.data{border-collapse:collapse;margin:8px 0}table.data th,table.data td{bor
 .dash-bar-track{background:var(--hover);border-radius:4px;height:10px;display:block}.dash-bar-fill{display:block;height:10px;border-radius:4px;background:var(--accent,#7aaef7)}
 .dash-big{font-size:28px;font-weight:600;margin:4px 0}.dash-feed{padding-left:18px;margin:0}.dash-flow{width:100%;height:auto}.dash-c{fill:var(--accent,#7aaef7)}.dash-r{fill:#7bd389}.dash-key.c{color:var(--accent,#7aaef7)}.dash-key.r{color:#7bd389}
 @media (max-width:800px){.dash-cols-2,.dash-cols-3{grid-template-columns:1fr}}
+
+/* releases */
+.chips[hidden]{display:none}.rel-row{align-items:center;gap:12px;flex-wrap:wrap}.rel-progress{display:flex;align-items:center;gap:8px;min-width:200px}
+.rel-bar{display:flex;width:140px;height:10px;border-radius:5px;overflow:hidden;background:var(--hover)}.rel-seg{display:block;height:100%}.rel-seg.done{background:#2e9e5b}.rel-seg.prog{background:#3b82c4}.rel-seg.todo{background:#9aa5b1}
+.rel-actions{display:flex;gap:4px;flex-wrap:wrap}.rel-notes{white-space:pre-wrap;max-height:50vh;overflow:auto;background:var(--hover);padding:10px;border-radius:6px}

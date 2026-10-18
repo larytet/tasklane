@@ -67,6 +67,7 @@ type IssueView struct {
 	Presence    []PresenceEntry `json:"presence"`
 	Input       *InputRequest   `json:"input_requested,omitempty"`
 	Mirror      *MirrorInfo     `json:"mirror,omitempty"` // set on issues mirrored from Jira: read-only, and how fresh the copy is
+	Versions    IssueVersions   `json:"versions"`
 }
 
 var priorities = map[string]bool{"lowest": true, "low": true, "medium": true, "high": true, "highest": true}
@@ -390,6 +391,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 		v.Issue.Custom = cv
 	}
 	v.Input = s.inputRequest(ctx, is.ID)
+	v.Versions = s.issueVersions(ctx, is.ID)
 	if v.Mirror = s.mirrorInfo(ctx, is.Project); v.Mirror != nil {
 		s.DB.QueryRow(ctx, `SELECT COALESCE(origin_key,'') FROM issue WHERE id=$1`, is.ID).Scan(&v.Mirror.IssueKey)
 	}

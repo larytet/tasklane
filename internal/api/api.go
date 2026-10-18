@@ -401,6 +401,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerPrivacy(mux)
 	s.registerGroups(mux)
 	s.registerDashboards(mux)
+	s.registerVersions(mux)
 	s.registerQuota(mux)
 	s.registerInboundMail(mux)
 	s.registerGitAuto(mux)

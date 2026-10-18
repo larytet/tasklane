@@ -129,6 +129,7 @@
       h('button', { class: 'btn ghost', id: 'bell', 'aria-label': 'Inbox', onclick: () => { location.hash = '#/inbox/unread'; } }, 'Inbox', h('span', { id: 'bell-n', class: 'badge', hidden: true })),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/dashboards'; } }, 'Dashboards'),
+      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/releases'; } }, 'Releases'),
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
@@ -541,7 +542,18 @@
       asg.addEventListener('change', () => patch({ assignee: asg.value }, 'assignee'));
       const labels = h('input', { type: 'text', value: (is.labels || []).join(' '), placeholder: 'labels', 'aria-label': 'Labels', disabled: !canEdit(), style: 'width:160px' });
       labels.addEventListener('change', () => patch({ labels: labels.value.split(/[\s,]+/).filter(Boolean) }, 'labels'));
-      return h('div', { class: 'chips' }, lozenge(is.status, is.status_category), trans, pri, asg, labels,
+      const vlist = h('datalist', { id: 'vers-list' });
+      api('GET', '/api/v1/projects/' + is.project + '/versions').then(r => { if (r.status === 200) r.data.versions.filter(x => !x.archived).forEach(x => vlist.append(h('option', { value: x.name }))); });
+      const verInput = (kind, label, vals) => {
+        const el = h('input', { type: 'text', value: vals.join(', '), placeholder: label.toLowerCase(), 'aria-label': label, list: 'vers-list', disabled: !canEdit(), style: 'width:150px' });
+        el.addEventListener('change', async () => {
+          const r = await api('PUT', '/api/v1/issues/' + key + '/versions', { [kind]: el.value.split(/\s*,\s*/).filter(Boolean) });
+          if (r.status === 200) await reloadAll(); else { toast((r.data && r.data.error) || 'Could not set versions'); el.value = vals.join(', '); }
+        });
+        return el;
+      };
+      return h('div', { class: 'chips' }, lozenge(is.status, is.status_category), trans, pri, asg, labels, vlist,
+        verInput('fix', 'Fix versions', v.versions ? v.versions.fix : []), verInput('affects', 'Affects versions', v.versions ? v.versions.affects : []),
         h('span', { class: 'muted' }, is.type + ' · reported by ' + is.reporter.name));
     }
     async function patch(ch, field) {
