@@ -75,8 +75,18 @@ func (e *Postgres) Search(ctx context.Context, sc Scope, src string, pg Page) (*
 	order += ", i.id" // total order makes paging deterministic
 	args = append(args, pg.Limit, pg.Offset)
 	sql := sel + from + " WHERE " + cq.where + " ORDER BY " + order + fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args))
+	// the capped total runs concurrently with the page query (DESIGN 11.1: parallel fan-in over the pool)
+	var n int
+	var cntErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cnt := `SELECT count(*) FROM (SELECT 1` + listFrom + ` WHERE ` + cq.where + fmt.Sprintf(` LIMIT %d) x`, TotalCap+1)
+		cntErr = e.DB.QueryRow(ctx, cnt, cq.args...).Scan(&n)
+	}()
 	rows, err := e.DB.Query(ctx, sql, args...)
 	if err != nil {
+		<-done
 		return nil, fmt.Errorf("search: %w", err)
 	}
 	res := &Result{Rows: []Row{}, Query: src}
@@ -84,19 +94,18 @@ func (e *Postgres) Search(ctx context.Context, sc Scope, src string, pg Page) (*
 		var r Row
 		if err := rows.Scan(&r.Key, &r.Summary, &r.Type, &r.Status, &r.StatusCat, &r.Priority, &r.Assignee, &r.Project, &r.Labels, &r.Updated, &r.Comments); err != nil {
 			rows.Close()
+			<-done
 			return nil, err
 		}
 		res.Rows = append(res.Rows, r)
 	}
 	rows.Close()
+	<-done
 	if rows.Err() != nil {
 		return nil, rows.Err()
 	}
-	// total, capped so a broad query cannot scan unboundedly
-	var n int
-	cnt := `SELECT count(*) FROM (SELECT 1` + listFrom + ` WHERE ` + cq.where + fmt.Sprintf(` LIMIT %d) x`, TotalCap+1)
-	if err := e.DB.QueryRow(ctx, cnt, cq.args...).Scan(&n); err != nil {
-		return nil, err
+	if cntErr != nil {
+		return nil, cntErr
 	}
 	if n > TotalCap {
 		n, res.TotalCapped = TotalCap, true

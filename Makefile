@@ -15,4 +15,4 @@ db:
 # 100,000-issue search benchmark and plan-shape assertions (slow to load)
 perf:
 	TASKLANE_PERF=1 $(GO) test ./internal/search -run 'PERF|TQL21' -count=1 -v -timeout 30m
-	TASKLANE_PERF=1 $(GO) test ./internal/api -run TwoGiB -count=1 -v -timeout 30m
+	TASKLANE_PERF=1 $(GO) test ./internal/api -run 'TwoGiB|PERF_Server' -count=1 -v -timeout 30m
