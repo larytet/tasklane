@@ -206,6 +206,10 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.json(w, 200, map[string]any{"me": actorOf(r), "projects": ps, "users": us})
 	}))
+	mux.HandleFunc("GET /api/v1/admin/mail", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		l, err := s.Svc.MailLog(r.Context(), actorOf(r), 100)
+		s.reply(w, l, err)
+	}))
 	s.registerSearch(mux)
 	s.registerAttachments(mux)
 	if s.Extra != nil {

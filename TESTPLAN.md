@@ -35,7 +35,14 @@ Tooling is a recommendation; the contract is the level and the gate, not the pro
 | Resilience / chaos | Node kill, partitions, restarts, slow disks, dependency loss | Fault injection (toxiproxy-style), scripted | Nightly, release |
 | Security | AuthZ matrix, OWASP ASVS L2 checks, dependency and secret scanning, WS abuse | Scanners, scripted abuse tests (external pentest postponed, see SEC-11) | PR (scanners), release |
 | Upgrade / DR | Zero-downtime migrations, backup/restore, RPO/RTO | Scripted environments | Release |
-| Jira mirror | Sync, permission mapping and read-only enforcement against a real Jira Cloud test site and a recorded fake | Recorded fixtures + a dedicated sandbox site | PR (fake), nightly (real, rate-limit aware) |
+| Jira mirror | Sync, permission mapping and read-only enforcement against `jira-fake` (recorded Jira behavior with fault injection) | Recorded fixtures, `jira-fake` | Every PR and nightly |
+| Real Jira verification | The same mirror, import and export behavior against a **real Jira Cloud test site**, plus a check that the fake still matches it (section 5.17) | Dedicated sandbox site | **Occasionally, manually triggered, before a major release** (not per PR, not nightly) |
+
+**Real by default, mock only where real is impossible or unsafe.** A dependency is replaced by a mock only when (a) it
+cannot be run or reached in CI (paid or per-message provider APIs, a mailbox on the public internet), (b) the test needs
+a fault the real system will not produce on demand, or (c) the case is a pure unit of our own code. Every mock is held
+to the real system by a contract check (recorded exchanges replayed against the real thing nightly), so a mock cannot
+drift unnoticed. Section 3.2 lists the choice per dependency.
 
 ## 3. Environments and data
 
@@ -44,7 +51,7 @@ Tooling is a recommendation; the contract is the level and the gate, not the pro
 | `dev` | Docker Compose `single` profile on every developer machine (section 3.1) |
 | `ci` | Ephemeral Docker Compose project per run: `single`, and `multi` or `ha` with the `chaos`, fake and runner overlays (section 3.1) |
 | `perf` | Fixed hardware profile (documented cores, RAM, disk) running the Compose `single` and `multi` profiles with `obs`, so numbers are comparable run to run |
-| `jira-sandbox` | A Jira Cloud site owned by the project, with a seeded project set; test accounts only |
+| `jira-sandbox` | A Jira Cloud site owned by the project; test accounts only. Used **only** by the real Jira verification run (section 5.17), which happens once in a while before a major release. Credentials from the CI vault, never available to PR or nightly jobs |
 
 **Datasets** (generated deterministically from a seed, checked into the generator, not the data):
 
@@ -88,20 +95,21 @@ deploy/compose/
 | `ha` | `postgres-primary`, `postgres-standby` (synchronous), `redis` + replica + sentinel | CHAOS-01..05, DUR-03, RPO tests, backup and restore |
 | `chaos` | `toxiproxy` between app and postgres, redis, minio, and between runner and `lb`; `docker compose kill/pause/stop`; size-limited `tmpfs` volume for disk-full | CHAOS, DUR, LIVE-09 |
 | `sso` | `keycloak` (OIDC and SAML), SCIM test client | SEC-04 |
-| `mail` | `mailpit` (SMTP sink and API), `greenmail` (IMAP and SMTP for inbound mailboxes), provider-webhook fake, raw-message injector | Notifications, MAIL cases |
+| `mail` | `mailpit` (SMTP **mock**: sink with API, optional auth and TLS, scripted failures), `greenmail` (real IMAP and SMTP server for inbound mailboxes), provider-webhook fake, raw-message injector | Notifications, MAIL cases |
 | `upgrade` | Previous and next release images side by side, scripted rolling replace and offline N-2 upgrade | UPG cases |
 | `av` | `clamav` | BLOB-08 |
 | `scm-fake` | `scm-fake`: replays recorded GitHub and GitLab webhooks and serves a subset of each REST and GraphQL API | GIT tests on every PR |
 | `scm-gitlab` | `gitlab-ce` (self-managed, seeded group and project; needs about 4 GB RAM and a few minutes to start) | GIT tests, nightly |
-| `jira-fake` | `jira-fake`: recorded Jira REST, webhook and permission fixtures with 429 and failure injection | MIR, IMP, EXP on every PR |
+| `jira-fake` | `jira-fake`: recorded Jira REST, webhook and permission fixtures; scripted 429 with `Retry-After`, 5xx, latency, resets, truncated bodies, and dropped, delayed, duplicated and reordered webhooks; exotic permission schemes and grant types, deleted and closed accounts, a 10,000-issue project | MIR, IMP, EXP on every PR and nightly, local dev |
 | `search` | `opensearch` (one node in CI, three nodes for performance runs) | TQL-08..20, PERF-05 |
 | `egress` | `evil-sink` on a private range plus an internal-only network | SSRF tests |
 | `obs` | `prometheus`, `otel-collector`, `grafana` | PERF and LOAD runs |
 | `runners` | `playwright` (official image), `k6`, the simulated-user fleet for LIVE-09 | All E2E, load and campaign runs |
 
-Real external systems stay outside Compose and are used only nightly with a request budget: AWS S3, GitHub (a
-dedicated test org and repositories), and the Jira Cloud sandbox. There is no self-hosted GitHub in the free tier, so
-GitHub in CI is the `scm-fake`, kept honest by the nightly run against the real org.
+Real external systems stay outside Compose and are used with a request budget: AWS S3 (nightly) and GitHub (a
+dedicated test org and repositories, nightly). There is no self-hosted GitHub in the free tier, so GitHub in CI is the
+`scm-fake`, kept honest by the nightly run against the real org. The Jira Cloud sandbox is used far less often: only in
+the real Jira verification before a major release (section 5.17).
 
 **Rules**
 
@@ -122,6 +130,39 @@ GitHub in CI is the `scm-fake`, kept honest by the nightly run against the real 
   traces and videos are uploaded; the project is torn down either way.
 - **Local use:** developers run the same profiles (`make env-up PROFILE=multi`), so a CI failure reproduces locally.
 
+### 3.2 Real versus mock, per dependency
+
+| Dependency | Commit (`go test`) | PR (Compose) | Nightly / release | Why |
+|---|---|---|---|---|
+| PostgreSQL, Redis or Valkey | real (testcontainers) | real | real, plus `ha` | Cheap to run; mocking them hides the bugs that matter (locks, outbox, GIN plans) |
+| **Outbound SMTP** | **mock:** in-process Go SMTP server in the test (scripted greeting, EHLO extensions, AUTH, STARTTLS with a throwaway CA, 4xx and 5xx at each stage, drop after DATA, slow reads) | **mock:** `mailpit` (inspect rendered mail by API, no delivery) | mock, plus a real relay smoke: one message through a real provider to a seeded test mailbox, verified by IMAP | No test may send real mail; the protocol and failure paths are what we test, and only a mock can fail on demand. The real relay run proves deliverability and DKIM (MAIL-20) once a night |
+| Inbound mail (IMAP, SMTP listener) | in-process fake for parser units | **real server:** `greenmail` | real | A real IMAP server behaves like one (UIDVALIDITY, IDLE); the message content comes from the `mail-replies` and `mail-hostile` corpora |
+| Mail provider APIs (SES, SendGrid, Mailgun, Postmark) | mock (`httptest`, payloads and signature schemes from each provider's documentation) | mock: provider-webhook fake | real sandbox or test-token send where the provider offers one free (Postmark test token, Mailgun sandbox, SES sandbox to verified addresses); recorded exchanges replayed to detect drift | Per-message cost and verified-sender setup; contract check keeps the mock honest |
+| **Jira Cloud** (mirror, import, export) | recorded fixtures for the ADF reader, mappers and permission evaluation | `jira-fake` | `jira-fake`; the **real sandbox only in the pre-major-release verification** (5.17) | Real Jira is slow, rate limited and shared state, so day-to-day runs use the fake; because the mirror is correct only if it matches what Jira really returns, the real run before a major release is a required check and refreshes the fake's recordings |
+| GitHub | recorded fixtures | `scm-fake` | real test org (nightly, budgeted); fake replayed against it for drift | No self-hosted GitHub; rate limits |
+| GitLab | recorded fixtures | `scm-fake` | real `gitlab-ce` container | Free to self-host, heavy to start |
+| S3 | `fs` backend and in-process fake | real MinIO | real MinIO and AWS S3 (budgeted) | MinIO is real S3 semantics for free; AWS differences caught nightly |
+| ClamAV | built-in EICAR check | real `clamav` | real | Container is free |
+| OIDC and SAML identity provider | in-process fake IdP for token units | real `keycloak` | real | Real flows, redirects and signatures |
+| OpenSearch | none | real (when the engine is enabled) | real, 1 and 3 nodes | Needed for TQL-05 and fan-out; not mocked |
+| Webhook targets (outbound webhooks, automation) | `httptest` receiver | `webhook-sink` container recording requests | same | Receiver behavior is ours to script |
+| DNS (SPF, DKIM, DMARC checks) | in-process resolver stub | a test DNS zone container | real lookups against test domains we own | MAIL-20 |
+| Outbound egress to unknown hosts | blocked | blocked (internal network; named exceptions only) | blocked, `egress` profile | SSRF suite SEC-12, no accidental calls |
+
+Rules for the mocks:
+
+- **One mock per system, shared** by every test that needs it (`internal/testutil/smtpmock`, `jira-fake`, `scm-fake`),
+  never an ad hoc stub per test file; a mock that fails a scripted case is a test failure, not a skip.
+- **A mock records what it received** (raw SMTP transcript and message, request log) and tests assert on that record, so
+  "no message sent" and "exactly one message" are checkable.
+- **Contract check:** exchanges recorded from the real system (GitHub, provider webhooks) are replayed against the
+  mock in CI and against the real system nightly; a difference fails the nightly and blocks the mock update. For Jira
+  the same check runs in the real Jira verification (5.17), not nightly.
+- **Real-system tests are budgeted and polite:** a request budget per run, backoff on `429`, no more than one run per
+  sandbox at a time, unique names per run, teardown in all cases, and a janitor for leftovers. A run that exhausts the
+  budget reports "budget exhausted" and fails, never silently passes.
+- **Credentials** for real services are test accounts only, held in the CI vault, absent from pull requests from forks.
+
 ## 4. Traceability (spec area to tests)
 
 | SPEC area | Primary test levels | Section here |
@@ -133,7 +174,7 @@ GitHub in CI is the `scm-fake`, kept honest by the nightly run against the real 
 | 8, 9 Custom fields, workflows | Unit, integration, contract | 5.5 |
 | 10 Search, TQL | Unit, fuzz, conformance, perf | 5.4 |
 | 13, 16 Notifications, automation | Integration (outbox), E2E | 5.5 |
-| 18.1 Jira mirror | Sync, permission mapping and read-only enforcement tests; chaos (Jira down, 429) | 5.6 |
+| 18.1 Jira mirror | Sync, permission mapping and read-only enforcement tests; chaos (Jira down, 429) on `jira-fake`; real Jira verification before a major release | 5.6, 5.17 |
 | 18.2 Import/export | Round-trip, golden, scale | 5.6 |
 | 18.3 MCP and agent-driven development | Protocol conformance, authorization matrix, red-team, E2E agent loop | 5.9 |
 | 17.6 Blob storage | Integration on fs, MinIO and AWS S3, security, load isolation, fsck | 5.10 |
@@ -332,22 +373,22 @@ live in a version-controlled file so changes are reviewed.
 
 | Id | Case | Pass criterion |
 |---|---|---|
-| IMP-01 | Jira REST import, `jira-sandbox` | Counts and field values match; original dates, authors and keys (or aliases) preserved |
+| IMP-01 | Jira REST import against `jira-fake` (and again against the real sandbox in 5.17, JREAL-03) | Counts and field values match; original dates, authors and keys (or aliases) preserved |
 | IMP-02 | Jira CSV import with repeated columns, multi-line cells, unusual encodings | All rows mapped or listed in the error report |
 | IMP-03 | Jira backup XML (best effort) | Imports supported content; unmappable items reported |
 | IMP-04 | ADF to document model round trip | No content lost; unknown nodes preserved opaque |
 | IMP-05 | Dry run | Predicts counts, gaps and duration; commits nothing |
 | IMP-06 | Idempotency | Re-importing the same source updates in place; no duplicates |
 | IMP-07 | Rollback by import id | Removes only records created by that import |
-| IMP-08 | Rate limits (`429`, `Retry-After`) during import | Job slows, resumes, completes |
+| IMP-08 | Rate limits (`429`, `Retry-After`) during import, scripted in `jira-fake` | Job slows, resumes, completes |
 | IMP-09 | Third-party presets: GitHub Issues, Trello, Linear, Asana, generic CSV and JSON | Mapped fields correct on a fixture per tool; mapping templates reusable |
 | EXP-01 | JSON bundle and CSV bundle round trip (export, import into empty instance) | Semantically identical project; attachments verified by checksum |
 | EXP-02 | Large export (`org` data) | Streams, resumable, bounded memory, manifest checksums valid |
 | EXP-03 | Export respects permissions, security levels, field restrictions | Restricted data absent unless an admin runs an audited full export |
-| EXP-04 | Jira-importable CSV export (write-through push to Jira is deferred with the outbound half of the mirror) | The CSV imports correctly through Jira's CSV importer on the sandbox site |
+| EXP-04 | Jira-importable CSV export (write-through push to Jira is deferred with the outbound half of the mirror) | The CSV imports correctly through Jira's CSV importer on the sandbox site (JREAL-04, real Jira verification only) |
 | EXP-05 | Format stability | Golden bundles from each released version still import (backward compatibility) |
 
-**Jira mirror mode** (one-way inbound; runs against `jira-fake` on every PR and a real Jira Cloud test site nightly)
+**Jira mirror mode** (one-way inbound; runs against `jira-fake` on every PR and nightly, including all fault cases; the same behavior is confirmed against a real Jira Cloud test site only in the real Jira verification before a major release, section 5.17)
 
 | Id | Case | Pass criterion |
 |---|---|---|
@@ -421,7 +462,7 @@ live in a version-controlled file so changes are reviewed.
 | MCP-13 | Audit completeness | Every call recorded with agent, on-behalf-of, client, tool, redacted args, outcome; entries immutable |
 | MCP-14 | Kill switch and per-agent pause | Takes effect immediately; in-flight leases released; subsequent calls fail cleanly |
 | MCP-15 | Resource subscriptions | Updates delivered for comment, status, assignment and filter matches within 1 s; unsubscribe works |
-| MCP-16 | Mirror mode: read tools work, write tools return the read-only mirror error with the Jira link | Supported tools work against the Jira fake and sandbox; unsupported ones return a clear error and appear in the compatibility check |
+| MCP-16 | Mirror mode: read tools work, write tools return the read-only mirror error with the Jira link | Supported tools work against `jira-fake` (and the sandbox in 5.17); unsupported ones return a clear error and appear in the compatibility check |
 | MCP-17 | Latency | `get_issue_context` warm under 100 ms server p95; read tools within UI endpoint budgets; no regression of UI latency under MCP load |
 | MCP-18 | Token efficiency | Median `get_issue_context` for the `team` dataset stays under a set size budget; long threads collapse as in the ticket view |
 | MCP-19 | End-to-end agent scenario with a scripted agent: pick from "Agent ready", claim, plan comment, subtask, link PR, record tests, move to Review, human approves | Full loop completes; history, notifications and audit are correct |
@@ -510,7 +551,14 @@ reviews, checks and pipelines.
 
 ### 5.13 Email (outbound and inbound)
 
-Runs in the Compose `mail` profile: `mailpit` (SMTP sink with API), `greenmail` (IMAP and SMTP server for inbound mailboxes),
+**SMTP is mocked.** Outbound cases run against an in-process mock SMTP server in Go tests (every commit: TLS modes, AUTH,
+certificate failure, 4xx and 5xx at each stage, connection drop after `DATA`, slow server; the test asserts on the
+recorded transcript and raw message) and against `mailpit` in the Compose `mail` profile (PR: rendering, threading and
+the full notification path through the app, inspected by the mailpit API). No test sends real mail. Once a night one
+message goes through a real relay to a seeded test mailbox and is read back by IMAP, to cover deliverability and DKIM
+(MAIL-20) and to check the mock against reality. Inbound uses a real IMAP server (`greenmail`), not a mock.
+
+Runs in the Compose `mail` profile: `mailpit` (SMTP mock with API), `greenmail` (IMAP and SMTP server for inbound mailboxes),
 a provider-webhook fake for SES, SendGrid, Mailgun and Postmark shapes, and an injector that sends crafted raw messages
 (including DKIM-signed ones). Corpora: `mail-replies` (recorded replies from Gmail, Outlook desktop, web and mobile, Apple
 Mail, Yahoo, Thunderbird, plain text, in several languages, top- and bottom-posted, with signatures and disclaimers),
@@ -619,14 +667,49 @@ containers) nightly for the Helm chart.
 | PORT-07 | Notifications and email replies for customers | Customer-visible content only plus portal link; replies follow MAIL rules |
 | PORT-08 | Request types, forms and SLA clocks (start, pause, resume, breach, calendar-aware) with the fake clock | Clocks correct across pauses, calendars and holidays |
 
+### 5.17 Real Jira verification (occasional, before a major release)
+
+**When:** run on demand, once in a while, before a **major** release (and optionally after a Jira API change notice or a
+large change to the mirror's Jira client). It is not part of any PR, nightly or minor-release pipeline. It is a
+checklist item of the major-release gate (section 7): a major release does not ship until the latest run passed on
+the release candidate, or an exception is recorded.
+
+**Why:** everything else uses `jira-fake`. A fake can only be as right as its recordings, so this run answers two
+questions the fake cannot: does Tasklane behave correctly against what Jira really returns today, and does the fake
+still match Jira.
+
+**Setup:** the `jira-sandbox` Jira Cloud site (test accounts only, credentials from the CI vault, available only to this
+job). The run creates its own project (key `T<run id>`) with a seeded, small project set, works within a request budget,
+backs off on `429`, and deletes everything on teardown; a janitor removes leftovers older than a day. Real Jira cannot
+be made to fail on demand, so fault cases stay on `jira-fake`; here real limits and latencies are only observed.
+Webhooks need a reachable URL: the job starts a small public webhook relay that forwards to the app; if the relay is
+unavailable the webhook cases are reported as **not run** (the polling path is the source of truth) and the release
+owner decides whether to wait.
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| JREAL-01 | Backfill of a seeded project (custom fields, comments, attachments, links, sprints, versions, changelog); a kill and resume | Counts and field values equal Jira (MIR-01 on real data, project of a few hundred issues, not 10,000); resumes without duplicates |
+| JREAL-02 | Incremental sync: edit, comment, transition, delete and move issues in Jira during the run; webhook and polling paths | Changes arrive within the MIR-02 freshness targets; deletes and key changes handled (MIR-02, MIR-03) |
+| JREAL-03 | Jira REST import into a native project; dry run, commit, re-import, rollback by import id | IMP-01, IMP-05..07 pass on real data |
+| JREAL-04 | Jira-importable CSV export imported by Jira's own CSV importer | EXP-04 passes |
+| JREAL-05 | Permission mapping with the real roles, groups, security levels and comment restrictions of the sandbox, using accounts with different access (a mirrored issue must never be visible beyond Jira's rules) | MIR-06 passes for every grant type the sandbox can express; unsupported grants hidden and listed |
+| JREAL-06 | ADF from real Jira: a set of issues authored in Jira's editor covering every node type the editor can produce | MIR-05 and IMP-04 pass; no content dropped; unknown nodes opaque |
+| JREAL-07 | Read-only enforcement and cut-over on a real mirrored project | MIR-07 and MIR-11 pass; nothing is written to Jira (verified from Jira's audit log and issue histories) |
+| JREAL-08 | Attachments from real Jira: lazy fetch, size cap, deleted attachment | MIR-10 passes |
+| JREAL-09 | Real rate limits and latency observed during the run | Tasklane honors any `429` and `Retry-After` it meets; the UI stays within budget; the observed limits are recorded in the report |
+| JREAL-10 | **Fake versus real contract check:** replay the exchanges recorded from `jira-fake` (REST requests, webhook payloads, permission responses) against the real sandbox and compare shapes and values | No difference that changes Tasklane behavior; every difference is either fixed in the fake or recorded as an accepted deviation with an owner; the fake's recordings are refreshed from this run |
+
+**Output:** a report attached to the release candidate: cases run, not run (with reason), requests used against the budget, differences found between fake and real, and fixes made to the fake. A defect found here is severity 1 or 2 by the usual rules (section 8) and gets a regression test against `jira-fake` before it is closed, so it is caught on every PR from then on.
+
 ## 6. Pipeline and gates
 
 | Stage | Contents | Gate |
 |---|---|---|
 | Commit | Format, lint, unit, short property/fuzz, contract, merge corpus, bundle-size budgets | All green, under about 10 minutes |
-| Pull request | Integration, E2E smoke (including a two-user conflict), visual, axe, security scanners, mirror tests against the fake | All green; visual diffs reviewed |
-| Nightly | Long property/fuzz, full E2E, chaos subset, load subset on `perf`, real Jira sandbox, soak (weekly) | Trend report; regression opens an issue |
+| Pull request | Integration, E2E smoke (including a two-user conflict), visual, axe, security scanners, mirror tests against `jira-fake`, mail against the SMTP mock | All green; visual diffs reviewed |
+| Nightly | Long property/fuzz, full E2E, chaos subset, load subset on `perf`, real-relay mail smoke, real GitHub, AWS S3, mock contract checks, soak (weekly) | Trend report; regression opens an issue |
 | Release candidate | Full perf (all PERF and LOAD), full chaos, upgrade and DR, manual a11y, security review, import/export compatibility | Exit criteria below |
+| Major release candidate, extra | Real Jira verification (5.17), run manually once, in addition to the row above | JREAL-01..10 passed or excepted; see release criteria |
 
 Flaky tests are quarantined within a day and fixed within a week; a quarantined test cannot cover a release criterion.
 
@@ -653,6 +736,8 @@ Flaky tests are quarantined within a day and fixed within a week; a quarantined 
 - LIVE-09 campaign completed at the required size with zero E1, E2 and E4 errors and the draft model within E3 on the release candidate build; production
   E1 to E4 rates for the previous release within the 30 day budgets (SPEC 21).
 - Backward compatibility: bundles and database migrations from the previous two releases apply cleanly.
+- **Major releases only:** the real Jira verification (5.17) has passed on the release candidate, with the fake refreshed from
+  it and every difference resolved or recorded; once the mirror ships, no major release goes out without it.
 
 ## 8. Defects
 
@@ -678,7 +763,9 @@ Every severity 1 or 2 defect gets a regression test (a document triple added to 
 |---|---|
 | Conflicts happen more often than expected and the dialog is painful | Conflict rate and draft-recovery telemetry (DESIGN 12.9); presence warnings reduce collisions; real-time co-editing can be revisited, nothing in the data model prevents it |
 | Lab latency does not predict real networks | Throttled profiles, RUM comparison, dedicated LAN `perf` environment |
-| Jira sandbox rate limits slow mirror tests | Recorded fake for PR runs; real site only nightly, with a request budget |
+| The fake drifts from real Jira between verifications | Fake recorded from the real sandbox; the pre-major-release run replays and compares, and must pass before a major release; run it also after any Jira API change notice or a change in the mirror's Jira client |
+| Jira sandbox rate limits, outages or shared state | Real Jira is used rarely and on purpose; per-run project, request budget, a "budget exhausted" failure; a sandbox outage marks the run "not run", never green, and a major release waits for it |
+| A mock drifts from the real system | Contract replay against the real system nightly; a failing replay blocks the mock update |
 | Non-deterministic time-dependent tests (sprints) | Injectable clock everywhere; no sleeps in tests |
 | Large datasets slow CI | Generate from seed on cached volumes; `scale` only on `perf` |
 | Visual baseline churn | Per-theme baselines, review required, tolerance only for font rendering |
@@ -746,6 +833,13 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | LIVE-02, LIVE-03 (browser) | manual only | Driven by hand in Chrome with two users: non-overlapping change merged automatically, overlapping lines shown as a conflict block with a chooser, Save merged result stored as a `merge` version, the other user's version kept in history. Not yet automated |
 | LIVE-11 (partial) | manual | Reload with a local draft restores it with a banner; the unsaved-changes guard blocks navigation. Tab kill, eviction and offline are untested |
 | UI-01 (partial) | automated | `internal/web` tests: shell routing for client routes, ETag and 304, gzip, 404 for a missing asset, no `innerHTML`, `outerHTML`, `eval` or `document.write` in the app, bundle budget (SPEC 21: under 200 KB gzipped JavaScript), Node unit tests of the diff, choice application, relative time and link whitelist |
+| MAIL-01 | done (mock) | `internal/mail` against the shared `internal/testutil/smtpmock`: none, STARTTLS and implicit TLS with a throwaway CA, AUTH PLAIN, STARTTLS as the default mode; untrusted certificate refused with nothing sent; a server that drops STARTTLS is refused (no plaintext fallback, no credentials in clear); plaintext AUTH to a non-local host refused by the client; wrong credentials permanent; 4xx retryable and 5xx permanent at greeting, MAIL, RCPT, DATA and end; bounded time against a hanging server; lost acknowledgement; connection refused. Provider API mailers and the admin test-send are pending (M5 and M4) |
+| MAIL-02 | done (mock) | `TestMAIL02_ThreadingPerIssue`: root id, deterministic Message-ID, In-Reply-To the previous message of the issue, References starting with the root; rename keeps the thread. Recorded Gmail, Outlook and Apple Mail grouping and the move-to-another-project case are pending |
+| MAIL-03 | partial (mock) | `TestMAIL03_NotificationContent`, `TestMAIL03_MessageFormat`, `TestMAIL03_HeaderInjectionIsImpossible`: plain and HTML parts, quoted-printable, UTF-8 subject, escaped HTML with no remote content, `Auto-Submitted`, `List-Unsubscribe`, reply marker, header injection impossible. Locales and time zones, the client matrix and the spam-score check are pending. The `mailpit` PR run (full path through the running app) is not set up yet; the mock covers the protocol and failures, mailpit will cover rendering |
+| MAIL-04 (core) | partial | `TestMAIL_InternalCommentsNeverReachViewers`, `TestMAIL04_VisibilityIsRechecked_AtSendTime`, `TestMAIL_RecipientsAndSelfNotification`; preferences, quiet hours and digests are M4 |
+| MAIL-05 (core) | partial | `TestMAIL05_QueueRetriesBackoffAndIdempotency`, `TestMAIL05_PermanentFailureAndGiveUp`, `TestMAIL05_ConcurrentSendersSendEachMessageOnce`: exponential backoff on the injected clock, give up after 8 attempts, one row per event and recipient under replay, five concurrent senders send each message once. Known limit: a lost acknowledgement after DATA is retried and the recipient can get a duplicate; SMTP cannot prevent that |
+| INST-01 | partial | A fresh install from the Compose file was run for real: image built, migrations applied, administrator created, `/readyz` green, `doctor` clean, login 200 (found and fixed the non-root volume permission bug). Tarball with systemd and Helm are not built; the run is manual, not yet a CI job |
+| MIR, IMP-01, IMP-08 | open (M2) | No Jira code yet. When `internal/jiramirror` lands: `jira-fake` first; the real Jira verification (5.17) is set up before the first major release that includes the mirror |
 | UI-02, UI-03, A11Y-01 | open | Dark and light themes checked by eye on the ticket view; phone layout, keyboard-only flow, screen reader and axe runs are not done |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

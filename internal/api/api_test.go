@@ -263,3 +263,19 @@ func TestHTTP_AdminCreatesUsers(t *testing.T) {
 		t.Fatalf("weak password: %d", c)
 	}
 }
+
+func TestHTTP_MailLogIsAdminOnly(t *testing.T) {
+	e, alice, _, _ := setup(t)
+	if c, _, _ := alice.do("GET", "/api/v1/admin/mail", nil); c != 403 {
+		t.Fatalf("%d", c)
+	}
+	us, _ := e.Svc.ListUsers(testutil.Ctx())
+	for _, u := range us {
+		if u.Email == "admin@example.com" {
+			tok, _ := e.Svc.CreateAPIToken(testutil.Ctx(), u.ID, "a")
+			if c, _, _ := (&client{t: t, base: alice.base, token: tok}).do("GET", "/api/v1/admin/mail", nil); c != 200 {
+				t.Fatalf("%d", c)
+			}
+		}
+	}
+}

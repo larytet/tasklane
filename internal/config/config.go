@@ -17,6 +17,7 @@ type Config struct {
 	SMTPHost      string
 	SMTPPort      int
 	SMTPFrom      string
+	SMTPTLS       string
 	SMTPUser      string
 	SMTPPass      string
 	AdminEmail    string
@@ -43,7 +44,8 @@ func Load() Config {
 		BaseURL:       get("BASE_URL", "http://localhost:8080"),
 		SMTPHost:      get("SMTP_HOST", ""),
 		SMTPPort:      port,
-		SMTPFrom:      get("SMTP_FROM", "tasklane@localhost"),
+		SMTPFrom:      get("SMTP_FROM", "Tasklane <tasklane@localhost>"),
+		SMTPTLS:       get("SMTP_TLS", "starttls"),
 		SMTPUser:      get("SMTP_USER", ""),
 		SMTPPass:      get("SMTP_PASS", ""),
 		AdminEmail:    get("ADMIN_EMAIL", ""),

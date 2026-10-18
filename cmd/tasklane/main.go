@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/larytet/tasklane/internal/config"
 	"github.com/larytet/tasklane/internal/doctor"
 	"github.com/larytet/tasklane/internal/domain"
+	"github.com/larytet/tasklane/internal/mail"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/store"
 )
@@ -136,6 +138,19 @@ func serve(ctx context.Context, cfg config.Config) {
 		log.Fatalf("blobs: %v", err)
 	}
 	go svc.RunBlobWorkers(ctx, log.Printf)
+	if cfg.SMTPHost != "" {
+		dom := "tasklane.local"
+		if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {
+			dom = u.Hostname()
+		}
+		svc.Mail = &domain.MailConfig{
+			Mailer: &mail.SMTP{Host: cfg.SMTPHost, Port: cfg.SMTPPort, TLS: cfg.SMTPTLS, User: cfg.SMTPUser, Pass: cfg.SMTPPass, From: cfg.SMTPFrom},
+			From:   cfg.SMTPFrom, Domain: dom, BaseURL: cfg.BaseURL,
+		}
+		go svc.RunMail(ctx, log.Printf)
+	} else {
+		log.Printf("outbound email is off (set TASKLANE_SMTP_HOST to enable notifications and account mail)")
+	}
 	if cfg.AdminEmail != "" && cfg.AdminPassword != "" {
 		if _, err := svc.CreateUser(ctx, cfg.AdminEmail, "Administrator", cfg.AdminPassword, true); err == nil {
 			log.Printf("created administrator %s", cfg.AdminEmail)

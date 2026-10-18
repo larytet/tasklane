@@ -18,6 +18,7 @@ type Service struct {
 	Now      func() time.Time
 	Presence *Presence
 	Blobs    *Blobs
+	Mail     *MailConfig
 }
 
 func New(db *pgxpool.Pool) *Service {

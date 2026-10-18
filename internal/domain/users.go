@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"github.com/larytet/tasklane/internal/mail"
 	"strings"
 	"time"
 
@@ -37,6 +39,9 @@ func (s *Service) CreateUser(ctx context.Context, email, name, password string, 
 		email, name, string(h), admin).Scan(&u.ID)
 	if err != nil && strings.Contains(err.Error(), "app_user_email_key") {
 		return User{}, invalid("a user with this email already exists")
+	}
+	if err == nil {
+		s.queueAccountMail(ctx, u)
 	}
 	return u, err
 }
@@ -119,3 +124,5 @@ func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
 	}
 	return out, rows.Err()
 }
+
+func asPermanent(err error, target **mail.Permanent) bool { return errors.As(err, target) }

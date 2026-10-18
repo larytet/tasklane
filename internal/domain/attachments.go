@@ -405,7 +405,7 @@ func (s *Service) commitStaged(ctx context.Context, a Actor, is Issue, issueID, 
 			return err
 		}
 		tx.Exec(ctx, `UPDATE issue SET updated_at=now() WHERE id=$1`, issueID)
-		return outbox(ctx, tx, "issue:"+is.Key, "attachment.added", map[string]any{"key": is.Key, "attachment": att.ID, "actor": a.Label})
+		return outbox(ctx, tx, "issue:"+is.Key, "attachment.added", map[string]any{"key": is.Key, "attachment": att.ID, "actor": a.Label, "actor_id": a.ID})
 	})
 	if err != nil {
 		os.Remove(path)
@@ -445,7 +445,7 @@ func (s *Service) DeleteAttachment(ctx context.Context, a Actor, key, attID stri
 		if err := history(ctx, tx, is.ID, a, "attachment", sp(name), nil); err != nil {
 			return err
 		}
-		return outbox(ctx, tx, "issue:"+is.Key, "attachment.removed", map[string]any{"key": is.Key, "attachment": attID, "actor": a.Label})
+		return outbox(ctx, tx, "issue:"+is.Key, "attachment.removed", map[string]any{"key": is.Key, "attachment": attID, "actor": a.Label, "actor_id": a.ID})
 	})
 }
 

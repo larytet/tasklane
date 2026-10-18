@@ -11,7 +11,8 @@ All settings are environment variables. Unset variables use the default shown. `
 | `TASKLANE_MAX_UPLOAD_MB` | `100` | Largest accepted attachment |
 | `TASKLANE_ADMIN_EMAIL`, `TASKLANE_ADMIN_PASSWORD` | unset | On start, creates this administrator if it does not exist. Remove after first start |
 | `TASKLANE_SMTP_HOST`, `TASKLANE_SMTP_PORT` | unset, `25` | Outbound mail server. Unset means mail is off |
-| `TASKLANE_SMTP_FROM`, `TASKLANE_SMTP_USER`, `TASKLANE_SMTP_PASS` | `tasklane@localhost`, unset, unset | Sender address and credentials |
+| `TASKLANE_SMTP_TLS` | `starttls` | `starttls` (refuses to continue without it), `tls` (implicit TLS) or `none`. Certificates are always verified |
+| `TASKLANE_SMTP_FROM`, `TASKLANE_SMTP_USER`, `TASKLANE_SMTP_PASS` | `Tasklane <tasklane@localhost>`, unset, unset | Sender address and credentials. Credentials are never sent over an unencrypted connection to a non-local host |
 
 ## Commands
 

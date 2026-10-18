@@ -160,7 +160,7 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 		if err := history(ctx, tx, id, a, "created", nil, sp(key)); err != nil {
 			return err
 		}
-		return outbox(ctx, tx, "issue:"+key, "issue.created", map[string]any{"key": key, "actor": a.Label})
+		return outbox(ctx, tx, "issue:"+key, "issue.created", map[string]any{"key": key, "actor": a.Label, "actor_id": a.ID})
 	})
 	if err != nil {
 		return Issue{}, err
@@ -379,7 +379,7 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 		if _, err := tx.Exec(ctx, `UPDATE issue SET `+strings.Join(sets, ",")+` WHERE id=$1`, args...); err != nil {
 			return err
 		}
-		return outbox(ctx, tx, "issue:"+is.Key, "issue.updated", map[string]any{"key": is.Key, "fields": keys(changed), "version": next, "actor": a.Label})
+		return outbox(ctx, tx, "issue:"+is.Key, "issue.updated", map[string]any{"key": is.Key, "fields": keys(changed), "version": next, "actor": a.Label, "actor_id": a.ID})
 	})
 	if err != nil {
 		return is, err
@@ -441,7 +441,7 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 			return err
 		}
 		history(ctx, tx, is.ID, a, "status", &fromName, &toName)
-		return outbox(ctx, tx, "issue:"+is.Key, "issue.transitioned", map[string]any{"key": is.Key, "from": fromName, "to": toName, "version": next, "actor": a.Label})
+		return outbox(ctx, tx, "issue:"+is.Key, "issue.transitioned", map[string]any{"key": is.Key, "from": fromName, "to": toName, "version": next, "actor": a.Label, "actor_id": a.ID})
 	})
 	if err != nil {
 		return is, err

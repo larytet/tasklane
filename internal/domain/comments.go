@@ -53,7 +53,7 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 			return err
 		}
 		tx.Exec(ctx, `DELETE FROM draft WHERE user_id=$1 AND issue_id=$2 AND field='comment'`, a.ID, is.ID)
-		return outbox(ctx, tx, "issue:"+is.Key, "comment.added", map[string]any{"key": is.Key, "comment": c.ID, "actor": a.Label})
+		return outbox(ctx, tx, "issue:"+is.Key, "comment.added", map[string]any{"key": is.Key, "comment": c.ID, "actor": a.Label, "actor_id": a.ID})
 	})
 	c.Author = User{ID: a.ID, Name: a.Label}
 	c.Body, c.Internal = body, internal
