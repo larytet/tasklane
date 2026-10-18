@@ -44,3 +44,14 @@ Each migration runs in its own transaction with a one second lock timeout, so a 
 ## What is not covered yet
 
 The rolling upgrade under load, mixed-version clusters and feature gates (`cluster_min_version`), the rich-text and client skew windows, data-format compatibility with earlier releases and the single-node pause are not built; there has been no release to upgrade from, so the floor is empty. They are listed in STATUS.md.
+
+## The cluster version gate (rolling upgrades)
+
+Every node writes the version it runs to the database every 10 seconds (`GET /api/v1/admin/cluster` lists them). A node that stops reporting for 30 seconds, or leaves cleanly, stops counting. A new behaviour that older nodes cannot handle is a **gate**:
+
+- it stays **off** until every live node runs at least the version it needs, then turns **on** by itself;
+- a **risky** gate does not turn on by itself: it shows as `pending` once every node qualifies, and an administrator confirms it (`POST /api/v1/admin/cluster/gates/{name}/confirm`, audited). If an older node joins while it waits, it goes back to off;
+- once on it **stays on**. A node older than an active gate refuses to start and names the gate and the version it needs: rolling back past it is not an option, and the way back is a restore from a backup taken before it was activated. During a rollout keep every node on the new version before the gate turns on, and do not start an old node after it has.
+- with no node registered nothing turns on. A development build (`-dev`) counts as the release it leads up to.
+
+This release has one gate, `mail_retention` (needs 0.1.0): the purge of old inbound mail leaves hashed Message-IDs that an older node would not recognise, so the purge does not run until every node knows them. Gates are for the release after this one to use: the mechanism is there so the first real mixed-version rollout has it.

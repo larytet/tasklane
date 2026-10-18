@@ -58,6 +58,9 @@ type Service struct {
 	// MailRawDays and MailBounceDays are the retention of inbound mail and of bounce records, in days (0 keeps them, once
 	// MailRetentionSet says the values were chosen; unset, the defaults apply).
 	MailRawDays, MailBounceDays int
+	// NodeID and NodeVersion say which node this is and what it runs (the cluster version gate); Gates overrides BuiltinGates.
+	NodeID, NodeVersion string
+	Gates               []Gate
 	// MailWorkers is how many messages are sent at the same time (default 8).
 	MailWorkers      int
 	lastMailBatch    atomic.Int64

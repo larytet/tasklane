@@ -100,4 +100,11 @@ func TestUPG06_TheServerRefusesToStartOutsideItsSchemaRange(t *testing.T) {
 	if out, err := run("migrate", "plan"); err != nil || !strings.Contains(out, "up to date") {
 		t.Fatalf("%v\n%s", err, out)
 	}
+	// 5. UPG-04: a behaviour already on for the cluster needs a newer binary: starting this one is a rollback that is refused
+	pool.Exec(ctx, `INSERT INTO feature_gate(name,min_version,state,activated_at) VALUES('future_thing','99.0.0','on',now())`)
+	out, err = run("serve")
+	if err == nil || !strings.Contains(out, "refusing to start") || !strings.Contains(out, "future_thing") || !strings.Contains(out, "99.0.0") {
+		t.Fatalf("a rollback past an active gate: err=%v\n%s", err, out)
+	}
+	pool.Exec(ctx, `DELETE FROM feature_gate WHERE name='future_thing'`)
 }

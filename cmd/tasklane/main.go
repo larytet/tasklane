@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
@@ -257,6 +258,14 @@ func serve(ctx context.Context, cfg config.Config) {
 	if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {
 		dom = u.Hostname()
 	}
+	host, _ := os.Hostname()
+	nb := make([]byte, 4)
+	rand.Read(nb)
+	svc.NodeID, svc.NodeVersion = fmt.Sprintf("%s-%d-%x", host, os.Getpid(), nb), releaseVersion()
+	if err := svc.CheckNodeAgainstGates(ctx, svc.NodeVersion); err != nil { // rolling back past an activated behaviour is refused
+		log.Fatalf("refusing to start: %v", err)
+	}
+	go svc.RunCluster(ctx, log.Printf)
 	svc.IMAPAllowPrivate = cfg.IMAPAllowPrivate
 	svc.MailRawDays, svc.MailBounceDays, svc.MailRetentionSet = cfg.MailRawDays, cfg.MailBounceDays, true
 	go svc.RunMailRetentionWorker(ctx, time.Hour, log.Printf)

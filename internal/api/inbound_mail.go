@@ -104,6 +104,13 @@ func (s *Server) registerInboundMail(mux *http.ServeMux) {
 	s.handle(mux, "DELETE /api/v1/admin/mail/suppressions/{email}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.ClearSuppression(r.Context(), actorOf(r), r.PathValue("email")))
 	}))
+	s.handle(mux, "GET /api/v1/admin/cluster", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ClusterStatus(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/admin/cluster/gates/{name}/confirm", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.ConfirmGate(r.Context(), actorOf(r), r.PathValue("name")))
+	}))
 	s.handle(mux, "POST /api/v1/admin/mail/retention/run", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Svc.RunMailRetentionNow(r.Context(), actorOf(r))
 		s.reply(w, v, err)

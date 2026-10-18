@@ -164,7 +164,9 @@ func (s *Service) RunMailRetentionWorker(ctx context.Context, every time.Duratio
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
-		if r, err := s.RunMailRetention(ctx); err != nil && ctx.Err() == nil {
+		if !s.GateOn(ctx, MailRetentionG) { // an older node would not recognise the hashed Message-IDs a purge leaves
+			// not yet: wait until every live node qualifies
+		} else if r, err := s.RunMailRetention(ctx); err != nil && ctx.Err() == nil {
 			logf("mail retention: %v", err)
 		} else if r.Messages+r.Bounces+r.Suppression > 0 {
 			logf("mail retention: %d message(s), %d original(s), %d bounce record(s), %d suppression(s) removed", r.Messages, r.Blobs, r.Bounces, r.Suppression)
