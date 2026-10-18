@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,10 @@ type SecurityPolicy struct {
 	RequireSecondFactor bool     `json:"require_second_factor"`
 	IPAllowlist         []string `json:"ip_allowlist"`
 	SessionMaxHours     int      `json:"session_max_hours"`
+	// AllowedEmailDomains limits the addresses people of the organization can have (empty: any). PeopleOutsideDomains counts the
+	// active people who already have another address: they stay, but nobody like them can be added or re-activated.
+	AllowedEmailDomains  []string `json:"allowed_email_domains"`
+	PeopleOutsideDomains *int     `json:"people_outside_allowed_domains,omitempty"`
 	// WithoutSecondFactor is how many active people in the organization would be held at the enrolment page by RequireSecondFactor.
 	WithoutSecondFactor *int `json:"people_without_second_factor,omitempty"`
 }
@@ -101,7 +106,7 @@ func (s *Service) policyOf(ctx context.Context, org string) (policyEntry, error)
 	}
 	c.mu.Unlock()
 	var e policyEntry
-	err := s.DB.QueryRow(ctx, `SELECT require_second_factor,ip_allowlist,session_max_hours FROM organization WHERE id::text=$1`, org).Scan(&e.p.RequireSecondFactor, &e.p.IPAllowlist, &e.p.SessionMaxHours)
+	err := s.DB.QueryRow(ctx, `SELECT require_second_factor,ip_allowlist,session_max_hours,allowed_email_domains FROM organization WHERE id::text=$1`, org).Scan(&e.p.RequireSecondFactor, &e.p.IPAllowlist, &e.p.SessionMaxHours, &e.p.AllowedEmailDomains)
 	if err != nil {
 		return e, err
 	}
@@ -146,6 +151,12 @@ func (s *Service) GetSecurityPolicy(ctx context.Context, a Actor, org string) (S
 	var n int
 	s.DB.QueryRow(ctx, `SELECT count(*) FROM app_user u WHERE u.org_id::text=$1 AND u.active AND u.kind='human' AND NOT EXISTS (SELECT 1 FROM user_mfa m WHERE m.user_id=u.id AND m.enabled) AND NOT EXISTS (SELECT 1 FROM webauthn_credential w WHERE w.user_id=u.id)`, org).Scan(&n)
 	p.WithoutSecondFactor = &n
+	if p.AllowedEmailDomains == nil {
+		p.AllowedEmailDomains = []string{}
+	}
+	var outside int
+	s.DB.QueryRow(ctx, `SELECT count(*) FROM app_user u WHERE u.org_id::text=$1 AND u.active AND u.kind='human' AND cardinality($2::text[])>0 AND NOT (lower(split_part(u.email,'@',2)) = ANY($2::text[]))`, org, p.AllowedEmailDomains).Scan(&outside)
+	p.PeopleOutsideDomains = &outside
 	return p, nil
 }
 
@@ -182,6 +193,10 @@ func (s *Service) SetSecurityPolicy(ctx context.Context, a Actor, org string, in
 	if len(nets) > 0 && !a.Admin && !ipIn(nets, callerIP) {
 		return invalid("your own address (%s) is not on the list: this would lock you out", callerIP)
 	}
+	domains, err := cleanDomains(in.AllowedEmailDomains)
+	if err != nil {
+		return err
+	}
 	// the same guard for a second factor: an administrator without one would be held at the enrolment page by their own change
 	if in.RequireSecondFactor && org == a.OrgID() && !s.hasSecondFactorNow(ctx, a.ID) {
 		return invalid("set up your own second factor first: requiring one would hold you at the enrolment page")
@@ -191,14 +206,14 @@ func (s *Service) SetSecurityPolicy(ctx context.Context, a Actor, org string, in
 		list = append(list, n.String())
 	}
 	err = s.tx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE organization SET require_second_factor=$2, ip_allowlist=$3, session_max_hours=$4 WHERE id::text=$1`, org, in.RequireSecondFactor, list, in.SessionMaxHours)
+		tag, err := tx.Exec(ctx, `UPDATE organization SET require_second_factor=$2, ip_allowlist=$3, session_max_hours=$4, allowed_email_domains=$5 WHERE id::text=$1`, org, in.RequireSecondFactor, list, in.SessionMaxHours, domains)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
 			return ErrNotFound
 		}
-		return s.audit(ctx, tx, a, "security.policy_changed", org, map[string]any{"require_second_factor": in.RequireSecondFactor, "ip_allowlist": list, "session_max_hours": in.SessionMaxHours})
+		return s.audit(ctx, tx, a, "security.policy_changed", org, map[string]any{"require_second_factor": in.RequireSecondFactor, "ip_allowlist": list, "session_max_hours": in.SessionMaxHours, "allowed_email_domains": domains})
 	})
 	s.forgetPolicy(org)
 	return err
@@ -290,4 +305,30 @@ func (s *Service) ClientIP(remoteAddr, forwardedFor string) string {
 		}
 	}
 	return host
+}
+
+var reDomain = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+// cleanDomains normalises the allowed email domains: lower case, without a leading "@", exact host names (no wildcards, no
+// addresses), at most 50.
+func cleanDomains(in []string) ([]string, error) {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, d := range in {
+		d = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(d), "@"))
+		if d == "" {
+			continue
+		}
+		if !reDomain.MatchString(d) || len(d) > 253 {
+			return nil, invalid("%q is not a domain name such as example.com (no wildcards, no addresses)", d)
+		}
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	if len(out) > 50 {
+		return nil, invalid("at most 50 domains")
+	}
+	return out, nil
 }

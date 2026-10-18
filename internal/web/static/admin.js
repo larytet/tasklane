@@ -599,10 +599,13 @@
     const req = h('input', { type: 'checkbox', id: 'req2fa' });
     const nets = h('textarea', { 'aria-label': 'Allowed networks', rows: 4, placeholder: '203.0.113.0/24\n198.51.100.7', style: 'width:100%;max-width:420px' });
     const hours = h('input', { type: 'number', min: 0, max: 8760, 'aria-label': 'Longest session in hours', style: 'width:100px' });
+    const doms = h('textarea', { 'aria-label': 'Allowed email domains', rows: 3, placeholder: 'example.com\npartner.example', style: 'width:100%;max-width:420px' });
+    const outside = h('p', { class: 'muted' });
     const count = h('span', { class: 'muted' });
     const r = await api('GET', '/api/v1/admin/security-policy');
     if (r.status === 200) {
-      req.checked = r.data.require_second_factor; nets.value = (r.data.ip_allowlist || []).join('\n'); hours.value = r.data.session_max_hours;
+      req.checked = r.data.require_second_factor; nets.value = (r.data.ip_allowlist || []).join('\n'); hours.value = r.data.session_max_hours; doms.value = (r.data.allowed_email_domains || []).join('\n');
+      const o = r.data.people_outside_allowed_domains; outside.textContent = (r.data.allowed_email_domains || []).length ? (o === 1 ? '1 active person has' : o + ' active people have') + ' an address outside these domains. They stay, but nobody like them can be added or re-activated.' : '';
       const n = r.data.people_without_second_factor; count.textContent = (n === 1 ? '1 active person has' : n + ' active people have') + ' no second factor yet. They would be held at the Account page until they add one.';
     } else msg.textContent = errText(r);
     app.append(topbar(), adminTabs('security'), h('div', { class: 'page' }, h('h2', {}, 'Security policy'),
@@ -610,9 +613,10 @@
       h('h3', {}, 'Second factor'), h('label', { for: 'req2fa' }, req, ' Require a second factor (an authenticator app or a passkey)'), h('p', {}, count),
       h('p', { class: 'muted' }, 'People without one can still sign in, but only reach the page where they set one up. Single sign-on sessions are not asked: your identity provider is the authority there. API tokens are not affected.'),
       h('h3', {}, 'Allowed networks'), h('p', { class: 'muted' }, 'One address or network per line. Empty means anywhere. Sign-in and every request, including API tokens, must come from these. You cannot save a list that leaves out your own address.'), nets,
+      h('h3', {}, 'Allowed email domains'), h('p', { class: 'muted' }, 'One domain per line. Empty means any address. When set, an account (made by hand, by SCIM or by single sign-on) must have an address in one of these domains; exact domains only, no wildcards. People who already have another address are not removed.'), doms, outside,
       h('h3', {}, 'Longest session'), h('p', {}, hours, ' hours (0 means no limit beyond the server\u2019s)'),
       h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: async () => {
-        const body = { require_second_factor: req.checked, ip_allowlist: nets.value.split(/[\n,]+/).map(x => x.trim()).filter(Boolean), session_max_hours: Number(hours.value) || 0 };
+        const body = { require_second_factor: req.checked, ip_allowlist: nets.value.split(/[\n,]+/).map(x => x.trim()).filter(Boolean), session_max_hours: Number(hours.value) || 0, allowed_email_domains: doms.value.split(/[\n,\s]+/).map(x => x.trim()).filter(Boolean) };
         const x = await api('PUT', '/api/v1/admin/security-policy', body);
         if (x.status === 200) { toast('Policy saved'); securityView(); } else msg.textContent = errText(x);
       } }, 'Save policy')), msg));

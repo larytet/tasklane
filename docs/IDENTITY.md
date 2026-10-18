@@ -48,3 +48,12 @@ Administration → **Security** (and `GET`/`PUT /api/v1/admin/security-policy`) 
 - **Longest session.** Hours, 0 for no limit. A session never outlives it, however long the server's session time is.
 
 **Behind a reverse proxy**, tell Tasklane which networks are your proxies with `trusted_proxies`. Only from those is the `X-Forwarded-For` header believed (the nearest address in it that is not itself a proxy is the visitor); from anyone else it is ignored, because a visitor can write anything in it. Without it, every request seems to come from the proxy, and an allowed-networks list is either useless or locks everyone out. This also fixes the address recorded for sign-ins and used by lockouts.
+
+### Allowed email domains
+
+In the same Security policy, **Allowed email domains** limits the addresses people of the organization can have. One domain per line (exact domains such as `example.com`; no wildcards, so subdomains are listed separately). Empty means any address.
+
+- It applies to **every way an account is made or switched on**: the Users form and API, SCIM provisioning, just-in-time single sign-on accounts, and an imported or mirrored placeholder when it is claimed or activated. The check is made by the database, so a new path cannot forget it.
+- **People who already have another address stay.** They are counted in the Security tab ("N active people have an address outside these domains"), keep working, and can be renamed or deactivated, but cannot be re-activated once deactivated.
+- A refusal says which domains are allowed. Placeholders that cannot sign in (made by an import or the Jira mirror) are not accounts yet and are not refused.
+- **Not done:** proving that your organization owns a domain (domain verification), wildcard domains, and a managed-account mode that takes over existing accounts of a domain.

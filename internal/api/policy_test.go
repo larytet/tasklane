@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -128,6 +129,26 @@ func (p *policyEnv) session(t *testing.T, email, secret string, ip string) *http
 		t.Fatal(err)
 	}
 	return &http.Cookie{Name: "tl_session", Value: res.Token}
+}
+
+// signInAs signs a person in by password (they have no second factor in these tests) and returns the cookie and status.
+func (p *policyEnv) signInAs(t *testing.T, email string) (*http.Cookie, int) {
+	return p.signIn(t, email, nil)
+}
+
+// session2 signs in an administrator that has an authenticator app (the policy tests enrol them first).
+func (p *policyEnv) session2(t *testing.T, email string) *http.Cookie {
+	t.Helper()
+	ctx := testutil.Ctx()
+	ul, _ := p.Svc.ListUsersFor(ctx, p.Admin)
+	var a domain.Actor
+	for _, u := range ul {
+		if u.Email == email {
+			a, _ = p.Svc.ActorFor(ctx, u.ID)
+		}
+	}
+	secret := p.enrol(t, a)
+	return p.session(t, email, secret, "")
 }
 
 func (p *policyEnv) signIn(t *testing.T, email string, hdr map[string]string) (*http.Cookie, int) {
@@ -404,5 +425,104 @@ func TestSEC04_ARequiredSecondFactorHoldsPeopleWithoutOneToTheEnrolmentPagesUnti
 	p.Svc.SetSecurityPolicy(ctx, p.a, "", domain.SecurityPolicy{}, "")
 	if r, _ := call(t, p.ts, "GET", "/api/v1/projects", nil, ckHeld, nil); r.StatusCode != 200 {
 		t.Fatalf("%d", r.StatusCode)
+	}
+}
+
+func TestSEC04_AnEmailDomainRestrictionStopsAccountsOutsideItOnEveryPathAndLeavesExistingPeopleAlone(t *testing.T) {
+	p := newPolicyEnv(t)
+	ctx := testutil.Ctx()
+	// before the restriction anyone can be added
+	if _, err := p.Svc.CreateUserAs(ctx, p.a, "early@elsewhere.example", "Early", "password123", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	// the list is normalised, and nonsense is refused
+	for _, bad := range []string{"*.acme.example", "acme", "pat@acme.example", "ac me.example", "-bad.example", strings.Repeat("a", 64) + ".example"} {
+		if err := p.Svc.SetSecurityPolicy(ctx, p.a, "", domain.SecurityPolicy{AllowedEmailDomains: []string{bad}}, ""); err == nil {
+			t.Errorf("%q was accepted as a domain", bad)
+		}
+	}
+	if err := p.Svc.SetSecurityPolicy(ctx, p.a, "", domain.SecurityPolicy{AllowedEmailDomains: []string{" @Acme.Example ", "partner.example", "acme.example", ""}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	pol, _ := p.Svc.GetSecurityPolicy(ctx, p.a, "")
+	if len(pol.AllowedEmailDomains) != 2 || pol.AllowedEmailDomains[0] != "acme.example" || pol.AllowedEmailDomains[1] != "partner.example" {
+		t.Fatalf("%v", pol.AllowedEmailDomains)
+	}
+	// the people who already have another address are counted and left alone
+	if pol.PeopleOutsideDomains == nil || *pol.PeopleOutsideDomains != 1 {
+		t.Fatalf("%v", pol.PeopleOutsideDomains)
+	}
+	if _, code := p.signInAs(t, "early@elsewhere.example"); code != 200 {
+		t.Fatalf("an existing person was locked out by the restriction: %d", code)
+	}
+	// making an account: inside works (any case), outside is refused with the allowed domains named
+	if _, err := p.Svc.CreateUserAs(ctx, p.a, "New.Person@ACME.example", "New", "password123", false, ""); err != nil {
+		t.Fatalf("an address in an allowed domain: %v", err)
+	}
+	_, err := p.Svc.CreateUserAs(ctx, p.a, "x@elsewhere.example", "X", "password123", false, "")
+	if err == nil || !strings.Contains(err.Error(), "allowed domains") || !strings.Contains(err.Error(), "acme.example") {
+		t.Fatalf("an address outside the domains: %v", err)
+	}
+	// over HTTP the same, as an ordinary bad request
+	ckBoss := p.session2(t, "boss@acme.example")
+	r, body := call(t, p.ts, "POST", "/api/v1/users", map[string]any{"email": "y@elsewhere.example", "name": "Y", "password": "password123"}, ckBoss, nil)
+	if r.StatusCode != 400 || !strings.Contains(fmt.Sprint(body["error"]), "allowed domains") {
+		t.Fatalf("%d %v", r.StatusCode, body)
+	}
+	// the database is the backstop for every other path (SCIM, single sign-on, anything added later): a direct insert is refused too
+	if _, err := p.Store.Pool.Exec(ctx, `INSERT INTO app_user(email,name,org_id) VALUES('z@elsewhere.example','Z',$1)`, p.orgA); err == nil {
+		t.Fatal("the database accepted an account outside the allowed domains")
+	}
+	// ... but a placeholder that cannot sign in (made by an import or the Jira mirror) is not an account yet
+	if _, err := p.Store.Pool.Exec(ctx, `INSERT INTO app_user(email,name,org_id,active) VALUES('placeholder@elsewhere.example','P',$1,false)`, p.orgA); err != nil {
+		t.Fatalf("a placeholder was refused: %v", err)
+	}
+	// ... and it cannot be activated by a route that does not check (SCIM sets active)
+	if _, err := p.Store.Pool.Exec(ctx, `UPDATE app_user SET active=true WHERE email='placeholder@elsewhere.example'`); err == nil {
+		t.Fatal("a placeholder outside the domains was activated")
+	}
+	// a person who already has another address can be deactivated and renamed, but not re-activated
+	p.Store.Pool.Exec(ctx, `UPDATE app_user SET name='Renamed' WHERE email='early@elsewhere.example'`)
+	if _, err := p.Store.Pool.Exec(ctx, `UPDATE app_user SET active=false WHERE email='early@elsewhere.example'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Store.Pool.Exec(ctx, `UPDATE app_user SET active=true WHERE email='early@elsewhere.example'`); err == nil {
+		t.Fatal("an account outside the domains was re-activated")
+	}
+	// another organization has its own rules: here anything goes
+	if _, err := p.Svc.CreateUserAs(ctx, p.b, "anyone@elsewhere.example", "Anyone", "password123", false, ""); err != nil {
+		t.Fatalf("another organization was held to this list: %v", err)
+	}
+	// removing the restriction allows everyone again; the change is audited with the list
+	if err := p.Svc.SetSecurityPolicy(ctx, p.a, "", domain.SecurityPolicy{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Svc.CreateUserAs(ctx, p.a, "free@elsewhere.example", "Free", "password123", false, ""); err != nil {
+		t.Fatalf("after the restriction was removed: %v", err)
+	}
+	var n int
+	p.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_event WHERE action='security.policy_changed' AND detail->'allowed_email_domains' @> '"partner.example"'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("%d audit records carry the list", n)
+	}
+}
+
+// SCIM is the path a company's directory uses: an account outside the domains is refused there too, in words the directory can show.
+func TestSEC04_SCIMCannotProvisionAddressesOutsideTheAllowedDomains(t *testing.T) {
+	e := testutil.New(t)
+	ctx := testutil.Ctx()
+	if err := e.Svc.SetSecurityPolicy(ctx, e.Admin, "", domain.SecurityPolicy{AllowedEmailDomains: []string{"example.com"}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.Svc.SCIMCreate(ctx, domain.SCIMIn{UserName: "in@example.com", DisplayName: "In"}); err != nil {
+		t.Fatalf("an allowed address: %v", err)
+	}
+	if _, _, err := e.Svc.SCIMCreate(ctx, domain.SCIMIn{UserName: "out@other.example", DisplayName: "Out"}); err == nil || !strings.Contains(err.Error(), "allowed domains") {
+		t.Fatalf("an address outside the domains: %v", err)
+	}
+	var n int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM app_user WHERE email='out@other.example'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("the refused account exists")
 	}
 }

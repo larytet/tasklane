@@ -74,7 +74,7 @@ func (s *Service) createUser(ctx context.Context, email, name, password string, 
 	if err == nil {
 		s.queueAccountMail(ctx, u)
 	}
-	return u, err
+	return u, mapRestriction(err)
 }
 
 // actorFor builds the actor for a person from the database, with their organization and administrator rights.

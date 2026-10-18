@@ -11,11 +11,13 @@ import (
 	"github.com/larytet/tasklane/internal/egress"
 	"github.com/larytet/tasklane/internal/mail"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -144,9 +146,19 @@ func (s *Service) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 	}
 	if err := fn(tx); err != nil {
 		tx.Rollback(ctx)
-		return err
+		return mapRestriction(err)
 	}
-	return tx.Commit(ctx)
+	return mapRestriction(tx.Commit(ctx))
+}
+
+// mapRestriction turns the database's refusal of an address outside an organization's allowed domains into an ordinary invalid-input
+// error with the words the database chose, so every path that makes an account says the same thing.
+func mapRestriction(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23514" && strings.Contains(pe.Message, "allowed domains") {
+		return invalid("%s", pe.Message)
+	}
+	return err
 }
 
 func outbox(ctx context.Context, tx pgx.Tx, aggregate, typ string, payload any) error {

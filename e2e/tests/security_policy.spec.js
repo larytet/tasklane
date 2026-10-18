@@ -62,9 +62,15 @@ test('SEC-04: requiring a second factor holds members of the organization to the
   // without one of their own the administrator would hold themselves: tested in the Go suite; here they have one
   await boss.page.getByLabel('Require a second factor').check();
   await boss.page.getByLabel('Longest session in hours').fill('12');
+  await boss.page.getByLabel('Allowed email domains').fill('org.example');
   await boss.page.getByRole('button', { name: 'Save policy' }).click();
   await expect(boss.page.getByText('Policy saved')).toBeVisible();
   await expect(boss.page.getByLabel('Require a second factor')).toBeChecked();
+
+  // an address outside the allowed domain cannot be given an account, in the words the database chose
+  const outsider = await boss.ctx.request.fetch('/api/v1/users', { method: 'POST', headers: H, data: { email: `out${tag}@elsewhere.example`, name: 'Outsider', password: 'password123' } });
+  expect(outsider.status()).toBe(400);
+  expect((await outsider.json()).error).toContain('allowed domains');
 
   // the member signs in with the password and is taken to the account page, told why
   const mem = await signIn(browser, `member${tag}@org.example`, 'password123');
