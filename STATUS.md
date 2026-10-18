@@ -16,7 +16,7 @@ this file is updated, and the work is committed and pushed.
 | M1c Agents | **MCP server, gates, kill switch built** | milestones M1c.1 and M1c.2 below; OAuth, subscriptions and bulk tools are open |
 | M2 Agile | **built, exit gate not passed** | M2.1 to M2.9 below; the audit at the end of the M2 section lists what only a real service or a scale run can prove |
 | M3 Fields and workflow | **built, exit gate not passed** | M3.1 to M3.4 below; the exit gate's golden bundles from released versions (EXP-05) and the gaps listed per milestone are open |
-| M4 Enterprise | **in progress** | M4.1 audit log, M4.2 notifications, M4.3 automation and M4.4 account security and M4.5 single sign-on and SCIM and M4.6 agent safe writes and M4.7 OAuth for MCP and M4.8 privacy and M4.9 groups and permission schemes and M4.10 blob backend migration built; the rest of M4 is open |
+| M4 Enterprise | **in progress** | M4.1 audit log, M4.2 notifications, M4.3 automation and M4.4 account security and M4.5 single sign-on and SCIM and M4.6 agent safe writes and M4.7 OAuth for MCP and M4.8 privacy and M4.9 groups and permission schemes and M4.10 blob backend migration and M4.11 storage quotas built; the rest of M4 is open |
 | M5 | not started | |
 
 ## M4 milestones
@@ -42,6 +42,10 @@ this file is updated, and the work is committed and pushed.
 | M4.9 | Groups and permission schemes (SPEC 17.2): user groups, group roles in projects through the single membership view (the highest of direct and group roles; search, lists, notifications, exports, assignable people and every check follow), per-project permission schemes for create, comment, transition, assign and manage sprints (lowest role per action, viewers may be given create and comment, administrators always can, archived and mirrored stay read-only), REST routes with matrix rows, audited; `docs/PERMISSIONS.md` | **built** |
 
 | M4.10 | Online backend migration (BLOB-14): a read-through `Fallback` store (reads from the new backend, falls back to the old one and copies across, writes only to the new one, removal and listing across both), `tasklane blobs migrate [--verify]` (streaming, hash-checked on the way, never copies a damaged object, resumable, skips what is there, never touches the old backend, parallel), `tasklane blobs verify`, configuration `blob_fallback` and `blob_fallback_dir`, rollback is the same move reversed, end-to-end test with attachments through filesystem, fallback and S3; fixed a bug found on the way: an empty attachment could not be stored on S3 (411 MissingContentLength); `docs/S3.md` | **built** |
+
+| M4.11 | Storage quotas (BLOB-18, part): a per-project quota, checked when an upload starts and again when the received file is registered (nothing stored for a refused file), `413 quota_exceeded` with the numbers and what to do, deleting frees space at once, usage report by class and overview, audited; class size limits and the concurrent-upload limit already existed; `docs/S3.md` | **built** |
+
+M4.11 gaps: no bandwidth limits, no per-user quota, no screen, a quota counts copies of the same content separately and concurrent uploads can overshoot it by what they carry.
 
 M4.10 gaps: not built from the same plan row: tiering by rule (BLOB-15), encryption at rest with key rotation on the filesystem backend (BLOB-16; S3 server-side encryption exists), quotas and bandwidth limits (BLOB-18), blob backup ordering (BLOB-13). The migration is a command, not an admin screen with progress, and it lists blobs from the database (an orphan only on disk is not moved).
 

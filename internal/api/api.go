@@ -343,6 +343,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerOAuth(mux)
 	s.registerPrivacy(mux)
 	s.registerGroups(mux)
+	s.registerQuota(mux)
 	s.registerSCIM(mux)
 	s.registerJira(mux)
 	s.registerSearchAdmin(mux)
@@ -639,6 +640,7 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		rom *domain.ReadOnlyMirror
 		ep  *domain.ErrPaused
 		ce  *domain.ConflictError
+		qe  *domain.QuotaError
 		nd  *domain.NotDownloadable
 	)
 	switch {
@@ -646,6 +648,8 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.json(w, ok, v)
 	case errors.As(err, &inv):
 		s.fail(w, 400, "invalid", inv.Msg, nil)
+	case errors.As(err, &qe):
+		s.fail(w, 413, "quota_exceeded", qe.Error(), map[string]int64{"quota": qe.Quota, "used": qe.Used})
 	case errors.Is(err, domain.ErrForbidden):
 		s.fail(w, 403, "forbidden", "you do not have permission to do this", nil)
 	case errors.Is(err, domain.ErrNotFound):

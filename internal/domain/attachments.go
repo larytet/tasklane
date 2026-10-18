@@ -143,6 +143,9 @@ func (s *Service) StartUpload(ctx context.Context, a Actor, key, name, declaredM
 	if max := s.maxAnyClass(); size > max {
 		return UploadSession{}, invalid("file is too large (limit %d MiB)", max>>20)
 	}
+	if err := s.checkQuota(ctx, is.Project, size); err != nil {
+		return UploadSession{}, err
+	}
 	name = blob.SafeName(name)
 	us := UploadSession{Size: size, Name: name, IssueKey: is.Key}
 	err = s.DB.QueryRow(ctx, `INSERT INTO upload_session(user_id,issue_id,name,declared_mime,total_size) VALUES($1,$2,$3,$4,$5) RETURNING id`,
@@ -395,6 +398,10 @@ func (s *Service) commitStaged(ctx context.Context, a Actor, is Issue, issueID, 
 func (s *Service) registerAttachment(ctx context.Context, a Actor, is Issue, issueID, name, declaredMIME, sha string, size int64, mime string, class blob.Class,
 	scanState, detail, flag string, commit func() error, discard func()) (Attachment, error) {
 	var att Attachment
+	if err := s.checkQuota(ctx, is.Project, size); err != nil { // what was actually received, not what was declared
+		discard()
+		return att, err
+	}
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var blobID string
 		err := tx.QueryRow(ctx, `SELECT id FROM blob WHERE sha256=$1 FOR UPDATE`, sha).Scan(&blobID)

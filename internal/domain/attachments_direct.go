@@ -70,6 +70,9 @@ func (s *Service) StartDirectUpload(ctx context.Context, a Actor, key, name, dec
 	if max := s.maxAnyClass(); size > max {
 		return DirectUpload{}, invalid("file is too large (limit %d MiB)", max>>20)
 	}
+	if err := s.checkQuota(ctx, is.Project, size); err != nil {
+		return DirectUpload{}, err
+	}
 	if sha != "" && !blob.ValidSHA(sha) {
 		return DirectUpload{}, invalid("sha256 must be 64 lowercase hex characters")
 	}
