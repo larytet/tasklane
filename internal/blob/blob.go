@@ -111,6 +111,56 @@ func (s *FS) Commit(stagingID, sha string) (bool, error) {
 	return false, nil
 }
 
+// Raw is implemented by stores that can hold bytes under a name that is not their hash: an encrypted object is named by the
+// hash of its plaintext, a tiered one is moved byte for byte. With replace the object under the name is replaced in one atomic
+// step (a rewrap never leaves a moment with no object).
+type Raw interface {
+	CommitRaw(stagingID, name string, replace bool) (existed bool, err error)
+}
+
+// CommitRaw stores a staging file under name through the store's raw path, or through Commit when it has none.
+func CommitRaw(st Store, stagingID, name string, replace bool) (bool, error) {
+	if r, ok := st.(Raw); ok {
+		return r.CommitRaw(stagingID, name, replace)
+	}
+	if replace {
+		if err := st.Remove(name); err != nil && err != ErrNotFound {
+			return false, err
+		}
+	}
+	return st.Commit(stagingID, name)
+}
+
+func (s *FS) CommitRaw(stagingID, name string, replace bool) (bool, error) {
+	if !replace {
+		return s.Commit(stagingID, name)
+	}
+	src, err := s.StagingPath(stagingID)
+	if err != nil {
+		return false, err
+	}
+	dst, err := s.objPath(name)
+	if err != nil {
+		return false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+		return false, err
+	}
+	if f, err := os.Open(src); err == nil {
+		f.Sync()
+		f.Close()
+	}
+	if err := os.Rename(src, dst); err != nil { // rename replaces the old object atomically
+		return false, err
+	}
+	os.Chmod(dst, 0o440)
+	if d, err := os.Open(filepath.Dir(dst)); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return true, nil
+}
+
 func (s *FS) Open(sha string) (Object, error) {
 	p, err := s.objPath(sha)
 	if err != nil {

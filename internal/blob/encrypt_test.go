@@ -258,3 +258,52 @@ func TestBLOB16_ConfigurationOfTheKeys(t *testing.T) {
 }
 
 func ok2(b bool) bool { return b }
+
+// BLOB-16 on S3: objects are encrypted before they reach the bucket, which names them by the plaintext hash, so the service
+// must not be told that the bytes it receives hash to that name.
+func TestBLOB16_EncryptionOverS3(t *testing.T) {
+	r := newRig(t, nil)
+	e, err := blob.NewEncrypted(r.s, 1, map[byte][]byte{1: key()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int{0, 100, 70000, 40 << 20} { // the last one goes through a multipart upload
+		b := make([]byte, n)
+		rand.Read(b)
+		copy(b, "BUCKET-PLAINTEXT-MARKER")
+		sha := put(t, e, b)
+		got, err := readAll(t, e, sha)
+		if err != nil || !bytes.Equal(got, b) {
+			t.Fatalf("size %d: %v", n, err)
+		}
+		stored, _ := r.m.Get(sha[:2] + "/" + sha[2:4] + "/" + sha)
+		if n >= 32 && (len(stored) == 0 || bytes.Contains(stored, []byte("BUCKET-PLAINTEXT-MARKER"))) {
+			t.Fatalf("size %d: the bucket holds the plaintext or nothing (%d bytes)", n, len(stored))
+		}
+	}
+}
+
+func TestBLOB16_RotationOverS3ReplacesInOneStep(t *testing.T) {
+	r := newRig(t, nil)
+	k1, k2 := key(), key()
+	e1, _ := blob.NewEncrypted(r.s, 1, map[byte][]byte{1: k1})
+	b := make([]byte, 90000)
+	rand.Read(b)
+	sha := put(t, e1, b)
+	before, _ := r.m.Get(sha[:2] + "/" + sha[2:4] + "/" + sha)
+	e2, _ := blob.NewEncrypted(r.s, 2, map[byte][]byte{1: k1, 2: k2})
+	if rep := e2.RewrapAll([]string{sha}); rep.Changed != 1 || len(rep.Failed) != 0 {
+		t.Fatalf("%+v", rep)
+	}
+	after, _ := r.m.Get(sha[:2] + "/" + sha[2:4] + "/" + sha)
+	if before[4] != 1 || after[4] != 2 || !bytes.Equal(before[65:], after[65:]) {
+		t.Fatalf("key ids %d -> %d, content changed: %v", before[4], after[4], !bytes.Equal(before[65:], after[65:]))
+	}
+	if n := r.m.Count("DELETE", ""); n != 0 {
+		t.Fatalf("the object was deleted (%d) before it was replaced", n)
+	}
+	only2, _ := blob.NewEncrypted(r.s, 2, map[byte][]byte{2: k2})
+	if got, err := readAll(t, only2, sha); err != nil || !bytes.Equal(got, b) {
+		t.Fatalf("%v", err)
+	}
+}

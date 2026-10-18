@@ -552,6 +552,37 @@ func (s *S3) Commit(stagingID, sha string) (bool, error) {
 	return false, nil
 }
 
+// CommitRaw stores the staged bytes under name whatever they hash to: the checksum sent to the service is the one of the bytes
+// themselves, so the service still verifies what it receives.
+func (s *S3) CommitRaw(stagingID, name string, replace bool) (bool, error) {
+	key, err := objKey(name)
+	if err != nil {
+		return false, err
+	}
+	path, err := s.staging.StagingPath(stagingID)
+	if err != nil {
+		return false, err
+	}
+	ctx := context.Background()
+	if !replace {
+		if _, err := s.C.Stat(ctx, key); err == nil {
+			os.Remove(path)
+			return true, nil
+		} else if !errors.Is(err, ErrNotFound) {
+			return false, err
+		}
+	}
+	real, _, err := HashFile(path)
+	if err != nil {
+		return false, err
+	}
+	if err := s.C.PutFile(ctx, key, path, real); err != nil {
+		return false, err
+	}
+	os.Remove(path)
+	return replace, nil // a put replaces the object in one step
+}
+
 func (s *S3) Open(sha string) (Object, error) {
 	key, err := objKey(sha)
 	if err != nil {

@@ -722,6 +722,11 @@ func rows() []row {
 			return J("POST", "/api/v1/orgs", map[string]any{"name": fmt.Sprint("Org ", f.n), "admin_email": fmt.Sprint("boss", f.n, "@org.example"), "admin_name": "Boss", "admin_password": "password123"})
 		}},
 		{"GET /api/v1/me/org", authed, func(f *fixture) req { return J("GET", "/api/v1/me/org", nil) }},
+		{"GET /api/v1/admin/storage/tiering", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/storage/tiering", nil) }},
+		{"PUT /api/v1/admin/storage/tiering/rules", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/admin/storage/tiering/rules", map[string]any{"rules": []any{map[string]any{"name": "old logs", "class": "log", "min_age_days": 30, "enabled": true}}})
+		}},
+		{"POST /api/v1/admin/storage/tiering/run", adminer, func(f *fixture) req { return J("POST", "/api/v1/admin/storage/tiering/run", nil) }},
 		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
 		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
 		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},

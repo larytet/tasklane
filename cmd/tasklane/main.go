@@ -227,6 +227,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	}
 	go svc.RunBlobWorkers(ctx, log.Printf)
 	go svc.RunLifecycle(ctx, log.Printf)
+	go svc.RunTierWorker(ctx, 10*time.Minute, log.Printf)
 	go svc.RunGitWorkers(ctx, log.Printf)
 	go svc.RunJiraWorkers(ctx, log.Printf)
 	go svc.RunWorkflowJobs(ctx, log.Printf)

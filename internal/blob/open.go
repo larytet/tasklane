@@ -11,6 +11,11 @@ import (
 )
 
 func openBackend(c config.Config, backend, fsDir string) (Store, error) {
+	return openBackendStaging(c, backend, fsDir, c.BlobDir)
+}
+
+// openBackendStaging opens a backend; an S3 one stages uploads in its own local directory.
+func openBackendStaging(c config.Config, backend, fsDir, staging string) (Store, error) {
 	if backend != "s3" {
 		return NewFS(fsDir)
 	}
@@ -22,12 +27,15 @@ func openBackend(c config.Config, backend, fsDir string) (Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewS3(cl, c.BlobDir)
+	return NewS3(cl, staging)
 }
 
 // OpenPair opens the configured backend and, during a migration, the old one. secondary is nil when no migration is set up.
 func OpenPair(c config.Config) (primary, secondary Store, err error) {
 	if primary, err = openBackend(c, c.BlobBackend, c.BlobDir); err != nil {
+		return nil, nil, err
+	}
+	if primary, err = withTiering(c, primary); err != nil {
 		return nil, nil, err
 	}
 	if primary, err = withEncryption(c, primary); err != nil {
@@ -94,4 +102,25 @@ func withEncryption(c config.Config, s Store) (Store, error) {
 		return nil, errors.New("blob_encryption_keys needs blob_encryption_current, the id of the key to use (0-255)")
 	}
 	return NewEncrypted(s, byte(cur), keys)
+}
+
+// withTiering puts a cold tier behind the configured backend. The cold tier must be a different place: the other kind of
+// backend, or another directory.
+func withTiering(c config.Config, hot Store) (Store, error) {
+	if c.BlobCold == "" || c.BlobCold == "none" {
+		return hot, nil
+	}
+	switch {
+	case c.BlobCold == "fs" && c.BlobColdDir == "":
+		return nil, errors.New("blob_cold_backend=fs needs blob_cold_dir")
+	case c.BlobCold == "fs" && c.BlobBackend == "fs" && (c.BlobColdDir == c.BlobDir):
+		return nil, errors.New("blob_cold_dir must be a different directory from blob_dir")
+	case c.BlobCold == "s3" && c.BlobBackend == "s3":
+		return nil, errors.New("blob_cold_backend=s3 needs blob_backend=fs: there is one set of s3_* settings, so both tiers cannot be S3")
+	}
+	cold, err := openBackendStaging(c, c.BlobCold, c.BlobColdDir, strings.TrimRight(c.BlobDir, "/")+"/cold-staging")
+	if err != nil {
+		return nil, fmt.Errorf("cold tier: %w", err)
+	}
+	return NewTiered(hot, cold), nil
 }

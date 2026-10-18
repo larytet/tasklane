@@ -11,6 +11,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/blob"
 	"github.com/larytet/tasklane/internal/config"
+	"github.com/larytet/tasklane/internal/domain"
 )
 
 // blobsCmd implements `tasklane blobs migrate [--verify] | verify | rewrap`.
@@ -82,6 +83,36 @@ func blobsCmd(ctx context.Context, cfg config.Config) {
 		if bad > 0 {
 			os.Exit(1)
 		}
+	case "tier": // apply the tiering rules now, until nothing more matches
+		store, err := blob.NewFromConfig(cfg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if blob.AsTiered(store) == nil {
+			log.Fatal("set blob_cold_backend (and blob_cold_dir for fs) first")
+		}
+		svc := domain.New(st.Pool)
+		if err := svc.ConfigureBlobs(ctx, &domain.Blobs{Store: store}); err != nil {
+			log.Fatal(err)
+		}
+		moved, failed, bytes := 0, 0, int64(0)
+		for {
+			r, err := svc.RunTiering(ctx, 200)
+			if err != nil {
+				log.Fatal(err)
+			}
+			moved, failed, bytes = moved+r.Moved, failed+r.Failed, bytes+r.Bytes
+			if r.Moved == 0 {
+				if r.Error != "" {
+					fmt.Println("  " + r.Error)
+				}
+				break
+			}
+		}
+		fmt.Printf("%d objects moved to the cold tier (%d bytes), %d failed\n", moved, bytes, failed)
+		if failed > 0 {
+			os.Exit(1)
+		}
 	case "rewrap":
 		p, _, err := blob.OpenPair(cfg)
 		if err != nil {
@@ -100,7 +131,7 @@ func blobsCmd(ctx context.Context, cfg config.Config) {
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: tasklane blobs migrate [--verify] | tasklane blobs verify | tasklane blobs rewrap")
+		fmt.Fprintln(os.Stderr, "usage: tasklane blobs migrate [--verify] | verify | rewrap | tier")
 		os.Exit(2)
 	}
 }

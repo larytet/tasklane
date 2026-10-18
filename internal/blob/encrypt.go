@@ -168,7 +168,7 @@ func (e *Encrypted) Commit(stagingID, sha string) (bool, error) {
 		return false, err
 	}
 	os.Remove(p)
-	return e.Inner.Commit(sid, sha)
+	return CommitRaw(e.Inner, sid, sha, false)
 }
 
 func (e *Encrypted) Put(data []byte) (string, error) {
@@ -330,11 +330,8 @@ func (e *Encrypted) Rewrap(sha string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	// the new copy is complete before the old one goes
-	if err := e.Inner.Remove(sha); err != nil {
-		return false, err
-	}
-	_, err = e.Inner.Commit(sid, sha)
+	// the new copy is complete, and replaces the old one in a single step
+	_, err = CommitRaw(e.Inner, sid, sha, true)
 	return err == nil, err
 }
 
