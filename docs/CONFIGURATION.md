@@ -31,6 +31,7 @@ Precedence, lowest to highest: built-in default, config file (`--config PATH`, `
 | `opensearch_allow_private` | `TASKLANE_OPENSEARCH_ALLOW_PRIVATE` | `--opensearch-allow-private` | `false` | Allow the cluster to be on a private or loopback address (the usual case in a private network) |
 | `webhook_allow_private` | `TASKLANE_WEBHOOK_ALLOW_PRIVATE` | `--webhook-allow-private` | `false` | Allow workflow webhook post-functions to call private or loopback addresses (refused by default so a webhook cannot reach internal services) |
 | `password_min_length` | `TASKLANE_PASSWORD_MIN_LENGTH` | `--password-min-length` | `8` | Shortest accepted password for local accounts (at least 8) |
+| `sso_allow_private` | `TASKLANE_SSO_ALLOW_PRIVATE` | `--sso-allow-private` | `false` | Allow single sign-on identity providers on private or loopback addresses (for a provider inside your network); refused by default |
 | `opensearch_index` | `TASKLANE_OPENSEARCH_INDEX` | `--opensearch-index` | `tasklane-issues` | Alias name for the issue index; versioned indexes are created behind it |
 | `opensearch_shards` | `TASKLANE_OPENSEARCH_SHARDS` | `--opensearch-shards` | `1` | Primary shards for new indexes |
 | `opensearch_replicas` | `TASKLANE_OPENSEARCH_REPLICAS` | `--opensearch-replicas` | `0` | Replicas for new indexes (use at least 1 on a multi-node cluster) |

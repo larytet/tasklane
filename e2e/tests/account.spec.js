@@ -141,3 +141,57 @@ test('SEC-04: sessions, API tokens and the password on the account page', async 
   await expect(page.getByText('Password changed.')).toBeVisible();
   await ctx.close(); await other.close(); await bare.close();
 });
+
+test('SEC-04: administrators set up single sign-on and SCIM tokens; the sign-in page offers the provider', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await page.getByLabel('Email').fill('admin@example.com');
+  await page.getByLabel('Password').fill('adminpass1');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await page.goto('/#/admin/identity');
+  await expect(page.getByRole('heading', { name: 'Single sign-on (OpenID Connect)' })).toBeVisible();
+  const name = 'idp' + uniq();
+  await page.getByRole('button', { name: 'Add a provider' }).click();
+  const dlg = page.getByRole('dialog');
+  await dlg.getByLabel('Name', { exact: true }).fill(name);
+  await dlg.getByLabel('Button label').fill('Acme login');
+  await dlg.getByLabel('Issuer address').fill('not a url');
+  await dlg.getByLabel('Client id').fill('tasklane');
+  await dlg.getByRole('button', { name: 'Save' }).click();
+  await expect(dlg.getByRole('alert')).toContainText('issuer');
+  await dlg.getByLabel('Issuer address').fill('https://login.acme.example');
+  await dlg.getByLabel('Client secret').fill('s3cret');
+  await dlg.getByLabel('Allowed email domains').fill('acme.example');
+  const a11y = await new AxeBuilder({ page }).analyze();
+  expect(a11y.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await dlg.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Acme login' })).toBeVisible();
+  // a SCIM token is shown once
+  await page.getByRole('button', { name: 'Create a SCIM token' }).click();
+  await page.getByRole('dialog').getByLabel('Token name').fill('okta ' + uniq());
+  await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+  const token = (await page.getByRole('dialog').getByLabel('SCIM token').textContent()).trim();
+  expect(token).toMatch(/^scim_/);
+  await page.getByRole('button', { name: 'Done' }).click();
+  const scim = await page.request.get('/scim/v2/Users', { headers: { Authorization: 'Bearer ' + token } });
+  expect(scim.status()).toBe(200);
+  expect(scim.headers()['content-type']).toContain('application/scim+json');
+  await page.getByRole('button', { name: /^Revoke SCIM token/ }).first().click();
+  await expect.poll(async () => (await page.request.get('/scim/v2/Users', { headers: { Authorization: 'Bearer ' + token }, failOnStatusCode: false })).status()).toBe(401);
+  // the sign-in page offers the provider (a signed-out visitor sees only its name)
+  const out = await browser.newContext();
+  const op = await out.newPage();
+  await op.goto('/');
+  await expect(op.getByRole('link', { name: 'Sign in with Acme login' })).toBeVisible();
+  await expect(op.getByRole('link', { name: 'Sign in with Acme login' })).toHaveAttribute('href', new RegExp('/api/v1/auth/sso/' + name + '/start'));
+  await op.goto('/?sso=denied');
+  await expect(op.getByRole('alert')).toContainText('Single sign-on was not allowed');
+  // delete the provider so later tests see a plain sign-in page
+  await page.getByRole('button', { name: 'Delete Acme login' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Acme login' })).toHaveCount(0);
+  await ctx.close(); await out.close();
+});

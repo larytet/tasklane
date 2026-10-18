@@ -541,6 +541,32 @@ func rows() []row {
 			return J("POST", "/api/v1/users/"+f.spare.ID+"/revoke-access", map[string]any{"tokens": true})
 		}},
 		{"POST /api/v1/users/{id}/2fa/reset", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("POST", "/api/v1/users/"+f.spare.ID+"/2fa/reset", nil) }},
+		{"GET /api/v1/admin/sso/providers", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/sso/providers", nil) }},
+		{"POST /api/v1/admin/sso/providers", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/admin/sso/providers", map[string]any{"name": fmt.Sprint("idp", f.n), "issuer": "https://idp.example.com", "client_id": "abc"})
+		}},
+		{"PUT /api/v1/admin/sso/providers/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/admin/sso/providers/999999", map[string]any{"name": "x", "issuer": "https://idp.example.com", "client_id": "abc"})
+		}},
+		{"DELETE /api/v1/admin/sso/providers/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/admin/sso/providers/999999", nil) }},
+		{"GET /api/v1/auth/sso/providers", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/auth/sso/providers", nil) }},
+		{"GET /api/v1/auth/sso/{name}/start", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/auth/sso/nosuch/start", nil) }},
+		{"GET /api/v1/auth/sso/callback", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/auth/sso/callback?code=x&state=y", nil) }}, // a failed sign-in is a redirect to the sign-in page, which the client follows
+		{"GET /api/v1/admin/scim/tokens", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/scim/tokens", nil) }},
+		{"POST /api/v1/admin/scim/tokens", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req { return J("POST", "/api/v1/admin/scim/tokens", map[string]any{"name": "okta"}) }},
+		{"DELETE /api/v1/admin/scim/tokens/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/admin/scim/tokens/999999", nil) }},
+		{"GET /scim/v2/ServiceProviderConfig", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/scim/v2/ServiceProviderConfig", nil) }},
+		{"GET /scim/v2/Users", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/scim/v2/Users", nil) }},
+		{"POST /scim/v2/Users", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("POST", "/scim/v2/Users", map[string]any{"userName": "x@example.com"}) }},
+		{"GET /scim/v2/Users/{id}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/scim/v2/Users/"+f.spare.ID, nil) }},
+		{"PUT /scim/v2/Users/{id}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("PUT", "/scim/v2/Users/"+f.spare.ID, map[string]any{"displayName": "x"})
+		}},
+		{"PATCH /scim/v2/Users/{id}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("PATCH", "/scim/v2/Users/"+f.spare.ID, map[string]any{"Operations": []map[string]any{{"op": "replace", "path": "active", "value": false}}})
+		}},
+		{"DELETE /scim/v2/Users/{id}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("DELETE", "/scim/v2/Users/"+f.spare.ID, nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

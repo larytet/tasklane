@@ -1,0 +1,104 @@
+package api
+
+import (
+	"errors"
+	"net/http"
+
+	"github.com/larytet/tasklane/internal/domain"
+)
+
+func (s *Server) registerSSO(mux *http.ServeMux) {
+	adm := func(next http.HandlerFunc) http.HandlerFunc {
+		return s.auth(func(w http.ResponseWriter, r *http.Request) {
+			if !actorOf(r).Admin {
+				s.fail(w, 403, "forbidden", "administrators only", nil)
+				return
+			}
+			next(w, r)
+		})
+	}
+	ok := map[string]bool{"ok": true}
+	s.handle(mux, "GET /api/v1/admin/sso/providers", adm(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListSSOProviders(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/admin/sso/providers", adm(func(w http.ResponseWriter, r *http.Request) {
+		in := domain.SSOProvider{JIT: true, Enabled: true}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.SaveSSOProvider(r.Context(), actorOf(r), 0, in)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "PUT /api/v1/admin/sso/providers/{id}", adm(func(w http.ResponseWriter, r *http.Request) {
+		id, good := pathID(r, "id")
+		in := domain.SSOProvider{JIT: true, Enabled: true}
+		if good && s.decode(w, r, &in) {
+			v, err := s.Svc.SaveSSOProvider(r.Context(), actorOf(r), id, in)
+			s.reply(w, v, err)
+		} else if !good {
+			s.fail(w, 404, "not_found", "not found", nil)
+		}
+	}))
+	s.handle(mux, "DELETE /api/v1/admin/sso/providers/{id}", adm(func(w http.ResponseWriter, r *http.Request) {
+		if id, good := pathID(r, "id"); good {
+			s.reply(w, ok, s.Svc.DeleteSSOProvider(r.Context(), actorOf(r), id))
+		} else {
+			s.fail(w, 404, "not_found", "not found", nil)
+		}
+	}))
+	// the sign-in page asks which buttons to show: enabled providers' names only
+	s.handle(mux, "GET /api/v1/auth/sso/providers", func(w http.ResponseWriter, r *http.Request) {
+		s.json(w, 200, s.Svc.SSOChoices(r.Context()))
+	})
+	s.handle(mux, "GET /api/v1/auth/sso/{name}/start", func(w http.ResponseWriter, r *http.Request) {
+		to, err := s.Svc.SSOStart(r.Context(), r.PathValue("name"), r.URL.Query().Get("redirect"))
+		if errors.Is(err, domain.ErrNotFound) {
+			s.fail(w, 404, "not_found", "no such sign-in provider", nil)
+			return
+		}
+		if err != nil {
+			s.fail(w, 502, "sso_unavailable", "the identity provider could not be reached", nil)
+			return
+		}
+		http.Redirect(w, r, to, http.StatusFound)
+	})
+	s.handle(mux, "GET /api/v1/auth/sso/callback", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("error") != "" || q.Get("code") == "" || q.Get("state") == "" {
+			http.Redirect(w, r, "/?sso=denied", http.StatusFound)
+			return
+		}
+		res, err := s.Svc.SSOCallback(r.Context(), q.Get("state"), q.Get("code"), s.SessionTTL, clientMeta(r))
+		if err != nil {
+			http.Redirect(w, r, "/?sso=denied", http.StatusFound) // the reason is not shown: it would help a guesser
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: res.Token, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
+		http.Redirect(w, r, res.Redirect, http.StatusFound) // a path on this server: the domain only stores addresses that start with one slash
+	})
+	s.handle(mux, "GET /api/v1/admin/scim/tokens", adm(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListSCIMTokens(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/admin/scim/tokens", adm(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		tok, info, err := s.Svc.CreateSCIMToken(r.Context(), actorOf(r), in.Name)
+		if err != nil {
+			s.reply(w, nil, err)
+			return
+		}
+		s.json(w, 201, map[string]any{"token": tok, "info": info}) // shown once
+	}))
+	s.handle(mux, "DELETE /api/v1/admin/scim/tokens/{id}", adm(func(w http.ResponseWriter, r *http.Request) {
+		if id, good := pathID(r, "id"); good {
+			s.reply(w, ok, s.Svc.RevokeSCIMToken(r.Context(), actorOf(r), id))
+		} else {
+			s.fail(w, 404, "not_found", "not found", nil)
+		}
+	}))
+}

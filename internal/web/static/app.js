@@ -114,10 +114,16 @@
       if (r.status === 200 && r.data.mfa_required) { codeStep(r.data.mfa_token); return; }
       if (r.status === 200) { await boot(); } else msg.textContent = r.status === 429 ? 'Too many failed attempts. Try again in a few minutes.' : (r.data && r.data.error) || 'Sign in failed';
     };
+    const sso = h('div', { class: 'sso' });
+    if (new URLSearchParams(location.search).get('sso') === 'denied') msg.textContent = 'Single sign-on was not allowed for this account.';
     clear($app).append(h('form', { class: 'login card', onsubmit: go },
       h('h1', {}, 'Tasklane'), h('label', { for: 'email' }, 'Email'), email, h('label', { for: 'pw' }, 'Password'), pw, msg,
-      h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Sign in'))));
+      h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Sign in')), sso));
     email.focus();
+    api('GET', '/api/v1/auth/sso/providers').then(r => {
+      if (r.status !== 200) return;
+      for (const p of r.data) sso.append(h('a', { class: 'btn', style: 'display:block;text-align:center;margin-top:8px', href: '/api/v1/auth/sso/' + encodeURIComponent(p.name) + '/start?redirect=' + encodeURIComponent('/' + (location.hash || '')) }, 'Sign in with ' + p.label));
+    });
   }
 
   // ---------- issue list ----------

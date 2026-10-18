@@ -102,6 +102,10 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 				if strings.HasSuffix(p, "internal/domain/trules.go") && strings.Contains(m, "http.NewRequest") {
 					continue
 				}
+				// single sign-on talks to the identity provider an administrator configured, through the egress policy
+				if strings.HasSuffix(p, "internal/domain/sso.go") && strings.Contains(m, "http.NewRequest") {
+					continue
+				}
 				// the S3 backend talks to the bucket the operator configured and nothing else
 				if strings.HasSuffix(p, "internal/blob/s3.go") {
 					continue

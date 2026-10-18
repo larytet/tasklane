@@ -32,10 +32,14 @@ type Service struct {
 	Matcher IssueMatcher
 	// PasswordMinLength is the shortest accepted password (default 8)
 	PasswordMinLength int
-	secretMu          sync.Mutex
-	derived           []byte
-	gateOnce          sync.Once
-	gate              *gate
+	// BaseURL is the address people reach the server at (single sign-on redirects come back to it); SSOAllowPrivate and SSOEgress shape the egress policy for identity providers
+	BaseURL         string
+	SSOAllowPrivate bool
+	SSOEgress       func(egress.Policy) egress.Policy
+	secretMu        sync.Mutex
+	derived         []byte
+	gateOnce        sync.Once
+	gate            *gate
 	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
 	TrashRetention time.Duration
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:

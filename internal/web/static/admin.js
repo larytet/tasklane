@@ -12,6 +12,7 @@
     return h('nav', { class: 'tabs', 'aria-label': 'Administration' }, h('span', { class: 'tabs-title' }, 'Administration'),
       h('a', { href: '#/admin/workflows', class: 'tab', 'aria-current': active === 'workflows' ? 'page' : null }, 'Workflows'),
       h('a', { href: '#/admin/automation', class: 'tab', 'aria-current': active === 'automation' ? 'page' : null }, 'Automation'),
+      h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
   }
 
@@ -147,6 +148,64 @@
         h('button', { class: 'btn', onclick: () => close() }, 'Keep it'), h('button', { class: 'btn primary', onclick: async () => { const r = await api('DELETE', '/api/v1/automation/rules/' + ru.id); close(); if (r.status === 200) load(); else toast(errText(r)); } }, 'Delete'))));
     }
     await load();
+  }
+
+
+  // ---------- identity: single sign-on providers and SCIM tokens ----------
+  async function identityView() {
+    const app = clear(document.getElementById('app'));
+    if (!S.me.admin) { app.append(topbar(), h('div', { class: 'page' }, h('p', {}, 'Only administrators can configure sign-in.'))); return; }
+    const provList = h('div', { role: 'list' }), tokList = h('div', { role: 'list' });
+    const section = (title, ...kids) => h('section', { class: 'card', style: 'padding:12px;margin:12px 0', 'aria-label': title }, h('h2', { style: 'margin:0 0 8px' }, title), ...kids);
+    app.append(topbar(), adminTabs('identity'), h('div', { class: 'page' },
+      section('Single sign-on (OpenID Connect)', h('p', { class: 'muted' }, 'People sign in at your identity provider; Tasklane never sees their password. The redirect address to register there is ' + location.origin + '/api/v1/auth/sso/callback'), provList, h('button', { class: 'btn primary', onclick: () => editProvider(null) }, 'Add a provider')),
+      section('SCIM provisioning', h('p', { class: 'muted' }, 'Point your identity provider at ' + location.origin + '/scim/v2 with one of these tokens. Deactivating a person there ends their sessions and tokens here at once.'), tokList,
+        h('button', { class: 'btn', onclick: newToken }, 'Create a SCIM token'))));
+    async function loadProviders() {
+      clear(provList);
+      const r = await api('GET', '/api/v1/admin/sso/providers');
+      if (r.status !== 200) { provList.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      if (!r.data.length) provList.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No providers yet.')));
+      for (const p of r.data) provList.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, p.label), ' ', h('span', { class: 'muted' }, p.issuer + (p.enabled ? '' : ' (off)'))),
+        h('button', { class: 'btn ghost', 'aria-label': 'Edit ' + p.label, onclick: () => editProvider(p) }, 'Edit'),
+        h('button', { class: 'btn ghost', 'aria-label': 'Delete ' + p.label, onclick: () => { const close = modal(h('div', {}, h('h2', {}, 'Delete ' + p.label + '?'), h('p', {}, 'People who sign in only through it will not be able to until another is set up.'),
+          h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Keep it'), h('button', { class: 'btn primary', onclick: async () => { const x = await api('DELETE', '/api/v1/admin/sso/providers/' + p.id); close(); if (x.status === 200) loadProviders(); else toast(errText(x)); } }, 'Delete')))); } }, 'Delete')));
+    }
+    function editProvider(p) {
+      const f = (label, value, type) => { const i = h('input', { type: type || 'text', 'aria-label': label, value: value || '', style: 'width:100%' }); return i; };
+      const name = f('Name', p && p.name), label = f('Button label', p && p.label), issuer = f('Issuer address', p && p.issuer), client = f('Client id', p && p.client_id), secret = f('Client secret', '', 'password');
+      secret.placeholder = p && p.secret_set ? 'unchanged' : '';
+      const domains = f('Allowed email domains', p && (p.allowed_domains || []).join(', ')), scopes = f('Scopes', p ? p.scopes : 'openid email profile');
+      const jit = h('input', { type: 'checkbox', checked: p ? p.jit : true }), on = h('input', { type: 'checkbox', checked: p ? p.enabled : true }), msg = h('div', { class: 'err', role: 'alert' });
+      const row = (l, el) => h('label', { style: 'display:block;margin-top:6px' }, h('span', { class: 'muted' }, l), el);
+      const close = modal(h('div', {}, h('h2', {}, p ? 'Edit ' + p.label : 'Add a provider'), row('Name (letters, digits, hyphens)', name), row('Button label', label), row('Issuer address', issuer), row('Client id', client), row('Client secret', secret),
+        row('Allowed email domains (empty: any the provider vouches for)', domains), row('Scopes', scopes),
+        h('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:6px' }, jit, 'Create accounts at first sign-in'), h('label', { style: 'display:flex;gap:6px;align-items:center' }, on, 'Enabled'), msg,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
+          const body = { name: name.value, label: label.value, issuer: issuer.value, client_id: client.value, client_secret: secret.value, scopes: scopes.value, allowed_domains: domains.value.split(/[\s,]+/).filter(Boolean), jit: jit.checked, enabled: on.checked };
+          const r = p ? await api('PUT', '/api/v1/admin/sso/providers/' + p.id, body) : await api('POST', '/api/v1/admin/sso/providers', body);
+          if (r.status === 200 || r.status === 201) { close(); toast('Provider saved'); loadProviders(); } else msg.textContent = errText(r);
+        } }, 'Save'))));
+    }
+    async function loadTokens() {
+      clear(tokList);
+      const r = await api('GET', '/api/v1/admin/scim/tokens');
+      if (r.status !== 200) { tokList.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      if (!r.data.length) tokList.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No SCIM tokens.')));
+      for (const t of r.data) tokList.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, t.name + (t.revoked ? ' (revoked)' : '')), h('span', { class: 'muted' }, 'created ' + new Date(t.created).toLocaleString()),
+        t.revoked ? null : h('button', { class: 'btn ghost', 'aria-label': 'Revoke SCIM token ' + t.name, onclick: async () => { const x = await api('DELETE', '/api/v1/admin/scim/tokens/' + t.id); if (x.status === 200) loadTokens(); else toast(errText(x)); } }, 'Revoke')));
+    }
+    function newToken() {
+      const name = h('input', { type: 'text', 'aria-label': 'Token name', placeholder: 'Name, such as okta', style: 'width:100%' }), msg = h('div', { class: 'err', role: 'alert' });
+      const close = modal(h('div', {}, h('h2', {}, 'Create a SCIM token'), name, msg, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
+        const r = await api('POST', '/api/v1/admin/scim/tokens', { name: name.value });
+        if (r.status !== 201) { msg.textContent = errText(r); return; }
+        close(); loadTokens();
+        const c2 = modal(h('div', {}, h('h2', {}, 'Your SCIM token'), h('p', {}, 'Copy it now. It is not shown again.'), h('pre', { 'aria-label': 'SCIM token', style: 'user-select:all;white-space:pre-wrap;word-break:break-all' }, r.data.token),
+          h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => c2() }, 'Done'))));
+      } }, 'Create'))));
+    }
+    await Promise.all([loadProviders(), loadTokens()]);
   }
 
   // ---------- the diagram ----------
@@ -324,5 +383,6 @@
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/([0-9a-f-]{36})/, run: m => editorView(m[1]) });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/?$/, run: () => listView() });
   A.EXT.routes.push({ re: /^#\/admin\/audit\/?$/, run: () => auditView() });
+  A.EXT.routes.push({ re: /^#\/admin\/identity\/?$/, run: () => identityView() });
   A.EXT.routes.push({ re: /^#\/admin\/automation(?:\/([A-Za-z0-9]+))?\/?$/, run: m => automationView(m[1] ? m[1].toUpperCase() : '') });
 })();
