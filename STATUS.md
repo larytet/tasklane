@@ -25,8 +25,8 @@ this file is updated, and the work is committed and pushed.
 | M1a.3 Text and concurrency | `text_seq` compare-and-set, idempotent saves, anchored patch, conditional and bare replace, versions and restore, drafts, comments, advisory presence, sanitization | done |
 | M1a.4 HTTP API and server | REST + UI bootstrap endpoints, cookie and bearer auth with CSRF guard, security headers, `Server-Timing`, ETag revalidation, `tasklane serve`, `migrate`, `doctor`, `create-admin`, health and readiness | done |
 | M1a.5 TQL and search | TQL parser (positioned errors, depth and size limits, fuzzed), compiler with mandatory permission scope, `issue_search` and `comment_search` maintained by an outbox indexer that skips unchanged text, ranking, typeahead, `WAS` and `CHANGED` on status, priority and assignee, `tasklane reindex`, 100,000-issue benchmark and plan-shape tests | done |
-| M1a.6 Attachments | blob store interface, local filesystem backend, uploads, hash, size limits | next |
-| M1a.7 UI | embedded SPA: inbox, thread view, conflict dialog, drafts, presence, dark and light themes | planned |
+| M1a.6 Attachments | content-addressed `fs` blob store (no user input in paths), single-request and resumable uploads with constant memory, dedup with refcount and GC, type sniffing and spoof flag, class limits, zip-bomb refusal, built-in EICAR scanning, asynchronous thumbnails with failure fallback, range and ETag downloads, short-lived signed links, forced download for risky types, bounded upload capacity, staging janitor, `fsck` | done |
+| M1a.7 UI | embedded SPA: inbox, thread view, conflict dialog, drafts, presence, dark and light themes | next |
 | M1a.8 Email and packaging | SMTP outbound, Dockerfile, Compose (written in M1a.5, not yet exercised), tarball, configuration reference (written), exit gate | planned |
 
 ## Deviations from the spec (deliberate, to be revisited)
@@ -37,6 +37,9 @@ this file is updated, and the work is committed and pushed.
 | History | Written asynchronously from the outbox | Written in the same transaction as the change | Removes a class of lost-history bugs (E1 and HIST-06 risk) at no cost on one node. The outbox still carries the events; an async history writer can replace this later |
 | Tenancy | Organization root | Single organization | Multi-org is optional in the spec; a migration adds it |
 | Presence | WebSocket channel | In-process store with a heartbeat API | WebSocket gateway arrives with the UI milestone; the semantics (10 s heartbeat, 30 s expiry, appear-offline) are implemented and tested |
+
+| Malware scanning | Pluggable scanner (ClamAV class), asynchronous `scanning` state | Built-in streaming EICAR signature check at commit, so a blob is `clean` or `blocked` immediately | The `scanning` state, the download refusal and the scan column exist; an external scanner replaces the signature check behind the same call |
+| Upload modes | Proxy and direct-to-S3 | Proxy only, `fs` backend | S3 and direct upload are M2 |
 
 ## Issues discovered and how they were addressed
 
@@ -50,3 +53,6 @@ this file is updated, and the work is committed and pushed.
 | 6 | M1a.5 | `CREATE EXTENSION` without a schema installed `pg_trgm` into the first schema on the search path; in the test harness that schema was dropped, breaking every later migration | Both extensions are created `SCHEMA public` in the migrations. Pre-release, so migration 0001 was edited in place; from the first release migrations are immutable |
 | 7 | M1a.5 | First plan-shape test used a term present in every row, where a sequential scan is the correct plan | Test changed to selective terms; the assertion is about indexes being usable, not forced |
 | 8 | M1a.5 | PostgreSQL 16 `unaccent` expands `ß` to `ss`, so a documented limitation (no expansion) was wrong | The test pins the real behaviour; the contract is per PostgreSQL version (TQL-22) |
+| 9 | M1a.6 | GC and the janitor compared the injected service clock with `now()` from the database and with file mtimes, so blobs were collected inside the retention window in tests | Blob `zero_since` is stamped with the service clock; the janitor test uses real time for file mtimes. One clock source per decision |
+| 10 | M1a.6 | Test image was a smooth gradient that compresses below the class limit under test, so the limit never triggered | Test limit lowered; the limit code was correct |
+| 11 | M1a.6 | Minting a link for a blocked file returned 500: `NotDownloadable` was mapped only on the serving path | Mapped centrally to 423 in the error translation; `TestHTTP_BLOB05_SignedLinksAndBlockedFiles` is the regression test |

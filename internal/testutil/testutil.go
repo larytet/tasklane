@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/larytet/tasklane/internal/blob"
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/store"
 )
@@ -107,3 +108,15 @@ func (e *Env) Issue(summary, desc string) domain.Issue {
 
 // Ctx is a convenience for tests that need a context value.
 func Ctx() context.Context { return context.Background() }
+
+// WithBlobs gives the service a filesystem blob store in a temp dir and zero GC retention.
+func (e *Env) WithBlobs() *blob.FS {
+	fs, err := blob.NewFS(e.T.TempDir())
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	if err := e.Svc.ConfigureBlobs(context.Background(), &domain.Blobs{Store: fs}); err != nil {
+		e.T.Fatal(err)
+	}
+	return fs
+}

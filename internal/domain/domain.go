@@ -17,6 +17,7 @@ type Service struct {
 	DB       *pgxpool.Pool
 	Now      func() time.Time
 	Presence *Presence
+	Blobs    *Blobs
 }
 
 func New(db *pgxpool.Pool) *Service {

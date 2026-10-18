@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/larytet/tasklane/internal/api"
+	"github.com/larytet/tasklane/internal/blob"
 	"github.com/larytet/tasklane/internal/config"
 	"github.com/larytet/tasklane/internal/doctor"
 	"github.com/larytet/tasklane/internal/domain"
@@ -63,6 +64,25 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println("search index rebuilt")
+	case "fsck":
+		st := mustOpen(ctx, cfg)
+		defer st.Close()
+		svc := domain.New(st.Pool)
+		fs, err := blob.NewFS(cfg.BlobDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := svc.ConfigureBlobs(ctx, &domain.Blobs{Store: fs}); err != nil {
+			log.Fatal(err)
+		}
+		rep, err := svc.Fsck(ctx, len(os.Args) > 2 && os.Args[2] == "--repair")
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("checked %d objects: %d missing, %d orphaned, %d corrupt\n", rep.Checked, len(rep.Missing), len(rep.Orphans), len(rep.Corrupt))
+		if !rep.Clean() {
+			os.Exit(1)
+		}
 	case "create-admin":
 		if len(os.Args) < 4 {
 			log.Fatal("usage: tasklane create-admin EMAIL NAME   (password from TASKLANE_ADMIN_PASSWORD)")
@@ -80,7 +100,7 @@ func main() {
 	case "version":
 		fmt.Println(version)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex create-admin version\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck create-admin version\n", cmd)
 		os.Exit(2)
 	}
 }
@@ -108,6 +128,14 @@ func serve(ctx context.Context, cfg config.Config) {
 	if err := svc.EnsureDefaults(ctx); err != nil {
 		log.Fatalf("defaults: %v", err)
 	}
+	fs, err := blob.NewFS(cfg.BlobDir)
+	if err != nil {
+		log.Fatalf("blob store: %v", err)
+	}
+	if err := svc.ConfigureBlobs(ctx, &domain.Blobs{Store: fs, Retention: 7 * 24 * time.Hour}); err != nil {
+		log.Fatalf("blobs: %v", err)
+	}
+	go svc.RunBlobWorkers(ctx, log.Printf)
 	if cfg.AdminEmail != "" && cfg.AdminPassword != "" {
 		if _, err := svc.CreateUser(ctx, cfg.AdminEmail, "Administrator", cfg.AdminPassword, true); err == nil {
 			log.Printf("created administrator %s", cfg.AdminEmail)

@@ -23,6 +23,7 @@ type Server struct {
 	Extra      func(mux *http.ServeMux, s *Server)
 	Ready      func(ctx context.Context) error
 	Search     *search.Postgres
+	BlobOrigin string // optional separate origin for signed file links
 }
 
 type ctxKey struct{}
@@ -181,6 +182,7 @@ func (s *Server) Handler() http.Handler {
 		s.Search = &search.Postgres{DB: s.Svc.DB}
 	}
 	s.registerSearch(mux)
+	s.registerAttachments(mux)
 	if s.Extra != nil {
 		s.Extra(mux, s)
 	}
@@ -394,6 +396,8 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		vc  *domain.VersionConflict
 		tp  *domain.TextPrecondition
 		pm  *domain.PatchMismatch
+		om  *domain.OffsetMismatch
+		nd  *domain.NotDownloadable
 	)
 	switch {
 	case err == nil:
@@ -410,6 +414,14 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.fail(w, 409, "version_conflict", err.Error(), vc)
 	case errors.As(err, &tp):
 		s.fail(w, 412, "precondition_failed", err.Error(), tp)
+	case errors.As(err, &nd):
+		s.fail(w, 423, "not_downloadable", "this file is "+nd.State+" and cannot be downloaded", nil)
+	case errors.Is(err, domain.ErrBusy):
+		w.Header().Set("Retry-After", "2")
+		s.fail(w, 503, "busy", "too many uploads in progress; retry shortly", nil)
+	case errors.As(err, &om):
+		w.Header().Set("Upload-Offset", strconv.FormatInt(om.Offset, 10))
+		s.fail(w, 409, "offset_mismatch", err.Error(), om)
 	case errors.As(err, &pm):
 		s.fail(w, 409, "patch_mismatch", err.Error(), pm)
 	default:
