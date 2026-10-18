@@ -98,6 +98,10 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 				if strings.HasSuffix(p, "internal/git/client.go") || strings.HasSuffix(p, "internal/jira/client.go") || strings.HasSuffix(p, "internal/search/os_client.go") || strings.HasSuffix(p, "internal/egress/egress.go") {
 					continue
 				}
+				// the IMAP reader connects to the mailbox an administrator configured, through the egress policy, and nothing else
+				if strings.HasSuffix(p, "internal/mail/imap.go") && strings.Contains(m, "net.Dial") {
+					continue
+				}
 				// a workflow webhook post-function calls the URL an administrator put in a transition, through the egress policy
 				if strings.HasSuffix(p, "internal/domain/trules.go") && strings.Contains(m, "http.NewRequest") {
 					continue

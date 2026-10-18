@@ -50,3 +50,33 @@ test('MAIL-21: review and release a quarantined email in the Email tab', async (
   await expect(page.getByText('This came by email.')).toBeVisible();
   await expect(page.getByText('via email')).toBeVisible();
 });
+
+// MAIL-09: a mailbox is added in the Email tab, its failure is visible to the administrator, and it can be removed.
+test('MAIL-09: add an IMAP mailbox in the Email tab, see its state, remove it', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await page.getByLabel('Email').fill('admin@example.com');
+  await page.getByLabel('Password').fill('adminpass1');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await page.goto('/#/admin/email');
+  const name = 'Box ' + uniq();
+  await page.getByLabel('Mailbox name').fill(name);
+  await page.getByLabel('IMAP host').fill('imap.invalid');
+  await page.getByLabel('IMAP port').fill('993');
+  await page.getByLabel('IMAP user').fill('support');
+  await page.getByLabel('IMAP password').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Add mailbox' }).click();
+  const row = page.getByRole('listitem').filter({ hasText: name });
+  await expect(row).toContainText('support@imap.invalid:993');
+  // the password is never shown back
+  await expect(page.getByText('not-a-real-password')).toHaveCount(0);
+  const a11y = await new AxeBuilder({ page }).analyze();
+  expect(a11y.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await row.getByRole('button', { name: /^Check mailbox/ }).click();
+  await expect(page.getByText(/imap|resolve|egress|connect/i).first()).toBeVisible();
+  await row.getByRole('button', { name: /^Delete mailbox/ }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: name })).toHaveCount(0);
+});

@@ -33,6 +33,7 @@ type Config struct {
 	BlobFallback        string
 	BlobFallbackDir     string
 	BlobEncKeys         string
+	IMAPAllowPrivate    bool
 	BlobEncCurrent      string
 	S3Endpoint          string
 	S3Region            string
@@ -81,6 +82,7 @@ var Schema = []Key{
 	{Name: "blob_fallback", Default: "none", Kind: "enum", Enum: []string{"none", "fs", "s3"}, Doc: "While moving attachments from one backend to another: the old backend. Reads that are not in `blob_backend` are answered from it (and copied across), writes go to `blob_backend` only. `fs` uses `blob_fallback_dir`; `s3` uses the `s3_*` settings. Run `tasklane blobs migrate` to copy the rest, then set this back to `none`"},
 	{Name: "blob_encryption_keys", Default: "", Kind: "string", Secret: true, Doc: "Encrypt attachments at rest. A comma-separated list of `id:hex` master keys (id 0-255, 64 hex characters = 32 bytes each), e.g. `1:ab12...`. Generate one with `openssl rand -hex 32`. Keep old keys in the list until `tasklane blobs rewrap` has moved every object to the current one. Empty: attachments are stored as they are"},
 	{Name: "blob_encryption_current", Default: "", Kind: "string", Doc: "The id of the master key new and rewrapped attachments use. Required when `blob_encryption_keys` is set"},
+	{Name: "imap_allow_private", Default: "false", Kind: "enum", Enum: []string{"true", "false"}, Doc: "Allow inbound-mail mailboxes (IMAP) on loopback and private addresses. Off by default so a mailbox setting cannot be used to reach internal services; cloud metadata addresses stay blocked either way"},
 	{Name: "blob_fallback_dir", Default: "", Kind: "string", Doc: "The old attachment directory when `blob_fallback=fs`"},
 	{Name: "s3_bucket", Default: "", Kind: "string", Doc: "S3 bucket (required with `blob_backend=s3`; it must already exist)"},
 	{Name: "s3_prefix", Default: "", Kind: "string", Doc: "Optional key prefix, so a bucket can be shared, for example `tasklane/`"},
@@ -384,7 +386,7 @@ func Load(o Options) (Config, error) {
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
 	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], SearchEngine: m["search_engine"], OSURL: m["opensearch_url"], OSUser: m["opensearch_user"], OSPassword: m["opensearch_password"],
 		OSAPIKey: m["opensearch_api_key"], OSAllowPrivate: m["opensearch_allow_private"] == "true", WebhookAllowPrivate: m["webhook_allow_private"] == "true", PasswordMinLength: n("password_min_length"), SSOAllowPrivate: m["sso_allow_private"] == "true", OSIndex: m["opensearch_index"], OSShards: n("opensearch_shards"), OSReplicas: n("opensearch_replicas"), MaxUploadMB: n("max_upload_mb"),
-		BlobBackend: m["blob_backend"], BlobFallback: m["blob_fallback"], BlobFallbackDir: m["blob_fallback_dir"], BlobEncKeys: m["blob_encryption_keys"], BlobEncCurrent: m["blob_encryption_current"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
+		BlobBackend: m["blob_backend"], BlobFallback: m["blob_fallback"], BlobFallbackDir: m["blob_fallback_dir"], BlobEncKeys: m["blob_encryption_keys"], IMAPAllowPrivate: m["imap_allow_private"] == "true", BlobEncCurrent: m["blob_encryption_current"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
 		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],
 		SMTPTLS: m["smtp_tls"], SMTPUser: m["smtp_user"], SMTPPass: m["smtp_pass"], AdminEmail: m["admin_email"], AdminPassword: m["admin_password"],

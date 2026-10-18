@@ -1,6 +1,14 @@
 # Inbound email
 
-People reply to a notification to comment on the issue. This page covers what is built: reply by email and create an issue by email, over a webhook source. IMAP and the SMTP listener are not yet.
+People reply to a notification to comment on the issue. This page covers what is built: reply by email and create an issue by email, over a webhook source. IMAP polling is built too; the SMTP listener is not yet.
+
+## Sources
+
+- **Webhook**: `POST /api/v1/mail/inbound/{id}`, signed (below).
+- **IMAP mailbox** (Admin, Email, Mailboxes): Tasklane logs in, opens a folder and reads each message by UID from a **checkpoint**. Each message goes through the same pipeline as a webhook delivery, and the checkpoint moves only after it was handled, so a crash loses nothing and at worst reads one message again, which its Message-ID makes harmless. If the server changes the folder's UIDVALIDITY the old UIDs mean nothing: the folder is read again from the start and the duplicates are ignored (the reset is counted and shown). A message that was removed from the folder under us is skipped; one Tasklane could not keep (the store or the database failed) stops the pass and is tried again. Messages are read without marking them read and are left in the folder.
+  - With **IDLE** the server tells Tasklane about new mail at once (a delivery takes well under a second in tests); without it the folder is polled every 30 seconds. A connection that fails is retried after 10 seconds, doubling to 5 minutes; the last error shows next to the mailbox.
+  - Connections are TLS (certificates always verified) or, for a server on this machine only, plain text; a password is never sent without TLS to another host. Mailboxes on loopback or private addresses need `imap_allow_private`; cloud metadata addresses are always blocked. The password is sealed at rest and never shown. Only one node reads a mailbox at a time.
+  - Mark a mailbox **trusted** only if mail reaches it through a server you run whose `Authentication-Results` header you believe; otherwise Tasklane relies on its own DKIM check.
 
 ## How a message is handled
 

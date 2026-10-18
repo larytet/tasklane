@@ -705,6 +705,17 @@ func rows() []row {
 		}},
 		{"GET /api/v1/admin/mail/suppressions", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/suppressions", nil) }},
 		{"DELETE /api/v1/admin/mail/suppressions/{email}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/admin/mail/suppressions/nobody@example.org", nil) }},
+		{"GET /api/v1/admin/mail/imap", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/imap", nil) }},
+		{"POST /api/v1/admin/mail/imap", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/admin/mail/imap", map[string]any{"name": fmt.Sprint("box", f.n), "host": "mail.example.org", "port": 993, "username": "u", "password": "p"})
+		}},
+		{"DELETE /api/v1/admin/mail/imap/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/admin/mail/imap/00000000-0000-0000-0000-000000000000", nil)
+		}},
+		{"POST /api/v1/admin/mail/imap/{id}/check", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/admin/mail/imap/00000000-0000-0000-0000-000000000000/check", nil)
+		}},
 		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
 		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
 		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},

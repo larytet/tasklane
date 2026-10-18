@@ -389,6 +389,12 @@
     const queue = h('div', { class: 'card', role: 'list', 'aria-label': 'Inbound messages' });
     const sources = h('div', { class: 'card', role: 'list', 'aria-label': 'Mail sources' });
     const supp = h('div', { class: 'card', role: 'list', 'aria-label': 'Suppressed addresses' });
+    const boxes = h('div', { class: 'card', role: 'list', 'aria-label': 'Mailboxes' });
+    const bmsg = h('div', { class: 'err', role: 'alert' });
+    const bf = {};
+    for (const [k, label, type, ph] of [['name', 'Mailbox name', 'text', 'Support'], ['host', 'IMAP host', 'text', 'imap.example.com'], ['port', 'IMAP port', 'number', '993'], ['username', 'IMAP user', 'text', 'user'], ['password', 'IMAP password', 'password', 'password'], ['mailbox', 'Folder', 'text', 'INBOX']]) bf[k] = h('input', { type, 'aria-label': label, placeholder: ph, autocomplete: 'off', style: k === 'port' ? 'width:90px' : '' });
+    const btls = h('select', { 'aria-label': 'Connection security' }, h('option', { value: 'tls' }, 'TLS'), h('option', { value: 'none' }, 'None (this machine only)'));
+    const btrust = h('input', { type: 'checkbox', 'aria-label': 'Trusted mailbox' });
     const msg = h('div', { class: 'err', role: 'alert' });
     const name = h('input', { type: 'text', 'aria-label': 'New source name', placeholder: 'Source name' });
     const trusted = h('input', { type: 'checkbox', 'aria-label': 'Trusted receiver' });
@@ -399,6 +405,15 @@
       if (!r.data.length) sources.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No sources. Add one to receive mail by webhook.')));
       for (const x of r.data) sources.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, x.name), ' ', h('span', { class: 'muted' }, (x.trusted ? 'trusted receiver' : 'untrusted') + ' · POST /api/v1/mail/inbound/' + x.id)),
         h('button', { class: 'btn ghost', 'aria-label': 'Delete source ' + x.name, onclick: async () => { const d = await api('DELETE', '/api/v1/admin/mail/sources/' + x.id); if (d.status === 200) loadSources(); else toast(errText(d)); } }, 'Delete')));
+    }
+    async function loadBoxes() {
+      clear(boxes);
+      const r = await api('GET', '/api/v1/admin/mail/imap');
+      if (r.status !== 200) { boxes.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      if (!r.data.length) boxes.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No mailbox is read. Add one to receive replies by IMAP.')));
+      for (const x of r.data) boxes.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, x.name), ' ', h('span', { class: 'muted' }, x.username + '@' + x.host + ':' + x.port + ' · ' + x.mailbox + (x.trusted ? ' · trusted' : '') + ' · ' + x.received + ' received' + (x.uidvalidity_resets ? ' · ' + x.uidvalidity_resets + ' reset(s)' : '') + (x.last_ok ? ' · last read ' + new Date(x.last_ok).toLocaleTimeString() : ' · not read yet'))), x.last_error ? h('span', { class: 'err' }, x.last_error) : null,
+        h('button', { class: 'btn ghost', 'aria-label': 'Check mailbox ' + x.name, onclick: async () => { const d = await api('POST', '/api/v1/admin/mail/imap/' + x.id + '/check'); toast(d.status === 200 ? 'Connected: ' + d.data.messages + ' message(s)' + (d.data.idle ? ', IDLE available' : ', no IDLE (polled every 30 s)') : errText(d)); } }, 'Check'),
+        h('button', { class: 'btn ghost', 'aria-label': 'Delete mailbox ' + x.name, onclick: async () => { const d = await api('DELETE', '/api/v1/admin/mail/imap/' + x.id); if (d.status === 200) loadBoxes(); else toast(errText(d)); } }, 'Delete')));
     }
     async function loadSupp() {
       clear(supp);
@@ -434,11 +449,16 @@
         if (r.status === 201) { name.value = ''; msg.textContent = ''; loadSources(); const close = modal(h('div', {}, h('h2', {}, 'Signing secret'), h('p', {}, 'Sign each request body with this secret (HMAC-SHA256, header X-Tasklane-Signature: sha256=<hex>). It is shown once.'), h('pre', { class: 'code', 'aria-label': 'Signing secret' }, r.data.secret), h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => close() }, 'Done')))); }
         else msg.textContent = errText(r);
       } }, 'Add source')), msg,
+      h('h3', { style: 'margin-top:16px' }, 'Mailboxes (IMAP)'), h('p', { class: 'muted' }, 'Tasklane reads these folders (waiting with IDLE where the server has it) and treats each message like one delivered by webhook. Mark a mailbox trusted only if the mail reaches it through a server you run, whose Authentication-Results header you believe; otherwise Tasklane checks DKIM itself.'), boxes,
+      h('div', { class: 'chips', style: 'margin:8px 0' }, bf.name, bf.host, bf.port, btls, bf.username, bf.password, bf.mailbox, h('label', {}, btrust, ' Trusted'), h('button', { class: 'btn', onclick: async () => {
+        const r = await api('POST', '/api/v1/admin/mail/imap', { name: bf.name.value, host: bf.host.value, port: Number(bf.port.value) || 0, tls: btls.value, username: bf.username.value, password: bf.password.value, mailbox: bf.mailbox.value, trusted: btrust.checked });
+        if (r.status === 201) { bmsg.textContent = ''; for (const k in bf) bf[k].value = ''; loadBoxes(); } else bmsg.textContent = errText(r);
+      } }, 'Add mailbox')), bmsg,
       h('h3', { style: 'margin-top:16px' }, 'Suppressed addresses'), h('p', { class: 'muted' }, 'Email stops after a hard bounce, a complaint, or three soft bounces in a week. The in-app inbox is never affected.'), supp,
       h('div', { class: 'chips', style: 'margin-top:16px' }, h('h3', { style: 'margin:0' }, 'Messages'), outcome, h('span', { class: 'grow' }),
         h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/admin/mail/reply-keys'); toast(r.status === 201 ? 'New reply-address key ' + r.data.kid + ' is signing. Older addresses keep working until their key is revoked.' : errText(r)); } }, 'Rotate reply key')),
       queue));
-    await Promise.all([loadSources(), loadQueue(), loadSupp()]);
+    await Promise.all([loadSources(), loadQueue(), loadSupp(), loadBoxes()]);
   }
 
   A.EXT.routes.push({ re: /^#\/admin\/email\/?$/, run: () => emailView() });

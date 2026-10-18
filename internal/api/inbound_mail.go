@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
+	"github.com/larytet/tasklane/internal/domain"
 )
 
 func (s *Server) registerInboundMail(mux *http.ServeMux) {
@@ -101,5 +103,23 @@ func (s *Server) registerInboundMail(mux *http.ServeMux) {
 	}))
 	s.handle(mux, "DELETE /api/v1/admin/mail/suppressions/{email}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.ClearSuppression(r.Context(), actorOf(r), r.PathValue("email")))
+	}))
+	s.handle(mux, "GET /api/v1/admin/mail/imap", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListIMAP(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/admin/mail/imap", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.IMAPIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.CreateIMAP(r.Context(), actorOf(r), in)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "DELETE /api/v1/admin/mail/imap/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.DeleteIMAP(r.Context(), actorOf(r), r.PathValue("id")))
+	}))
+	s.handle(mux, "POST /api/v1/admin/mail/imap/{id}/check", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.CheckIMAP(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
 	}))
 }

@@ -4,6 +4,7 @@ package domain
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +26,12 @@ type Service struct {
 	// InboundDomain is the reply domain when email is received but not sent by this server (the outbound mail settings carry it otherwise).
 	InboundDomain string
 	// DNS answers TXT lookups for DKIM keys; when nil Tasklane does not verify DKIM and relies on a trusted receiver's verdict.
-	DNS           mail.TXTResolver
+	DNS mail.TXTResolver
+	// IMAP: whether a mailbox on a private or loopback address may be read, a TLS configuration for tests, and the waits (defaults: 25 minutes in IDLE, 30 seconds between polls without it).
+	IMAPAllowPrivate   bool
+	IMAPTLS            *tls.Config
+	IMAPIdle, IMAPPoll time.Duration
+
 	InboundLimits InboundLimits
 	// SecretKey (32 bytes) encrypts stored credentials; when unset a key kept in the database is used.
 	SecretKey []byte

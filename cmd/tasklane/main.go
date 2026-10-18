@@ -221,6 +221,8 @@ func serve(ctx context.Context, cfg config.Config) {
 	if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {
 		dom = u.Hostname()
 	}
+	svc.IMAPAllowPrivate = cfg.IMAPAllowPrivate
+	go svc.RunIMAP(ctx, log.Printf)
 	svc.DNS = net.DefaultResolver // DKIM keys are looked up in DNS
 	svc.InboundDomain = dom       // mail can be received (a webhook source) without this server sending any
 	if cfg.SMTPHost != "" {
