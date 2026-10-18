@@ -32,6 +32,19 @@ import (
 
 var version = "0.1.0-dev"
 
+// versionMarker is set by the release build with the version between a fixed label and a semicolon, so that `tasklane
+// verify-release` can read the version out of a binary without running it (Go does not record linker flags in the build
+// information). `tasklane version` prints it, which also keeps the linker from discarding it.
+var versionMarker = "tasklane-release-version=<none>;" // a build outside the release script: no marker a verifier would accept
+
+func releaseVersion() string {
+	v := strings.TrimSuffix(strings.TrimPrefix(versionMarker, "tasklane-release-version="), ";")
+	if strings.HasPrefix(v, "<") {
+		return version
+	}
+	return v
+}
+
 func main() {
 	cmd := "serve"
 	if len(os.Args) > 1 {
@@ -58,6 +71,13 @@ func main() {
 			os.Exit(2)
 		}
 		return
+	}
+	if cmd == "verify-release" { // check a downloaded release before installing it; it needs no configuration and no database
+		if len(os.Args) != 4 {
+			fmt.Fprintln(os.Stderr, "usage: tasklane verify-release PUBLIC_KEY_FILE RELEASE_DIR")
+			os.Exit(2)
+		}
+		os.Exit(verifyRelease(os.Args[2], os.Args[3]))
 	}
 	cfgArgs := os.Args[min(2, len(os.Args)):]
 	if cmd == "blobs" || cmd == "migrate" {
@@ -172,9 +192,9 @@ func main() {
 		}
 		fmt.Println("administrator created")
 	case "version":
-		fmt.Println(version)
+		fmt.Println(releaseVersion())
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck blobs config create-admin version\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck blobs config create-admin verify-release version\n", cmd)
 		os.Exit(2)
 	}
 }
