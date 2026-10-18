@@ -69,6 +69,9 @@ func Handler() http.Handler {
 				return
 			}
 			f = files["index.html"]
+			if name == "portal" || strings.HasPrefix(name, "portal/") { // the customer portal is its own small page: no staff app code
+				f = files["portal.html"]
+			}
 		}
 		h := w.Header()
 		h.Set("Content-Type", f.ctype)

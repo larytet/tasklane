@@ -61,7 +61,7 @@ func twoOrgs(t *testing.T) (*tenants, *testutilServer) {
 // tables a person of the other organization may legitimately touch while probing: their own session and token use, and the
 // records of what happened (the audit log, the outbox) which carry no organization-A content in a response
 // oauth_client: a client registers itself before anyone is signed in and belongs to no organization
-var neutralTables = map[string]bool{"oauth_client": true, "session": true, "api_token": true, "audit_event": true, "outbox": true, "outbox_cursor": true, "login_attempt": true, "rate_limit": true}
+var neutralTables = map[string]bool{"oauth_client": true, "session": true, "api_token": true, "audit_event": true, "outbox": true, "outbox_cursor": true, "login_attempt": true, "rate_limit": true, "portal_event": true}
 
 func snapshot(t *testing.T, e *testutil.Env) map[string]string {
 	ctx := context.Background()

@@ -1,5 +1,6 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,14 +14,54 @@ async function api(cookie, method, path, body) {
   return { status: r.status, cookie: (r.headers.get('set-cookie') || '').split(';')[0], data: text ? JSON.parse(text) : null };
 }
 
+// A plaintext SMTP sink on loopback: every message the server sends is written to a file, so a test can read what a customer would be
+// emailed (the portal's sign-in code).
+async function startMailSink(dir) {
+  mkdirSync(dir, { recursive: true });
+  let n = 0;
+  const server = net.createServer(sock => {
+    let data = '', inData = false, rcpt = [];
+    sock.write('220 sink ESMTP\r\n');
+    sock.on('data', chunk => {
+      data += chunk.toString('latin1');
+      for (;;) {
+        if (inData) {
+          const i = data.indexOf('\r\n.\r\n');
+          if (i < 0) return;
+          writeFileSync(join(dir, String(++n).padStart(6, '0') + '.eml'), 'X-Rcpt: ' + rcpt.join(',') + '\r\n' + data.slice(0, i));
+          data = data.slice(i + 5); inData = false; rcpt = [];
+          sock.write('250 queued\r\n');
+          continue;
+        }
+        const i = data.indexOf('\r\n');
+        if (i < 0) return;
+        const line = data.slice(0, i); data = data.slice(i + 2);
+        const cmd = line.slice(0, 4).toUpperCase();
+        if (cmd === 'EHLO' || cmd === 'HELO') sock.write('250 sink\r\n');
+        else if (cmd === 'RCPT') { rcpt.push(line.replace(/^RCPT TO:\s*/i, '')); sock.write('250 ok\r\n'); }
+        else if (cmd === 'DATA') { inData = true; sock.write('354 go\r\n'); }
+        else if (cmd === 'QUIT') { sock.write('221 bye\r\n'); sock.end(); }
+        else sock.write('250 ok\r\n');
+      }
+    });
+    sock.on('error', () => {});
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  globalThis.__mailsink = server;
+  return server.address().port;
+}
+
 export default async function globalSetup() {
   const db = 'tl_e2e';
   execFileSync('psql', [`${PG}/postgres`, '-qc', `DROP DATABASE IF EXISTS ${db} WITH (FORCE)`, '-c', `CREATE DATABASE ${db}`], { stdio: 'inherit' });
   const dir = mkdtempSync(join(tmpdir(), 'tasklane-e2e-'));
   const bin = join(dir, 'tasklane');
   execFileSync('go', ['build', '-o', bin, './cmd/tasklane'], { cwd: '..', stdio: 'inherit', env: { ...process.env, PATH: process.env.PATH + ':/usr/local/go/bin' } });
+  const mailDir = join(dir, 'mail');
+  const smtpPort = await startMailSink(mailDir);
+  process.env.E2E_MAIL_DIR = mailDir;
   const child = spawn(bin, ['serve'], {
-    env: { ...process.env, TASKLANE_DATABASE_URL: `${PG}/${db}`, TASKLANE_LISTEN: `127.0.0.1:${PORT}`, TASKLANE_BLOB_DIR: join(dir, 'blobs'), TASKLANE_ADMIN_EMAIL: 'admin@example.com', TASKLANE_ADMIN_PASSWORD: 'adminpass1', TASKLANE_BASE_URL: BASE, TASKLANE_WEBAUTHN_RP_ID: 'localhost', TASKLANE_SHUTDOWN_DRAIN_DELAY: '0s', TASKLANE_WEBAUTHN_ORIGINS: `http://localhost:${PORT}` },
+    env: { ...process.env, TASKLANE_DATABASE_URL: `${PG}/${db}`, TASKLANE_LISTEN: `127.0.0.1:${PORT}`, TASKLANE_BLOB_DIR: join(dir, 'blobs'), TASKLANE_ADMIN_EMAIL: 'admin@example.com', TASKLANE_ADMIN_PASSWORD: 'adminpass1', TASKLANE_BASE_URL: BASE, TASKLANE_WEBAUTHN_RP_ID: 'localhost', TASKLANE_SHUTDOWN_DRAIN_DELAY: '0s', TASKLANE_SMTP_HOST: '127.0.0.1', TASKLANE_SMTP_PORT: String(smtpPort), TASKLANE_SMTP_TLS: 'none', TASKLANE_WEBAUTHN_ORIGINS: `http://localhost:${PORT}` },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   writeFileSync(join(dir, 'pid'), String(child.pid));

@@ -9,7 +9,8 @@ const uniq = () => Math.random().toString(36).slice(2, 7);
 
 test('CORE-12: build a dashboard of gadgets, see each as the viewer, share it, and show hostile text as text', async ({ browser }) => {
   const jana = await newUser(browser, 'jana@example.com');
-  const sum = 'Dash issue ' + uniq();
+  const tag = 'dashtag' + uniq();
+  const sum = 'Dash issue ' + tag;
   const key = await createIssue(jana.page, sum, 'for the dashboard');
   const p = jana.page;
   await p.goto('/#/dashboards');
@@ -33,9 +34,13 @@ test('CORE-12: build a dashboard of gadgets, see each as the viewer, share it, a
   await expect(p.getByRole('region', { name: 'By status' }).getByRole('listitem').first()).toBeVisible();
   await p.getByLabel('Gadget type').selectOption('filter_results');
   await p.getByLabel('Gadget title').fill('Everything');
-  await p.getByLabel('Query').fill('text ~ "Dash issue"');
+  await p.getByLabel('Query').fill('text ~ "' + tag + '"');
   await p.getByRole('button', { name: 'Add gadget' }).click();
-  await expect(p.getByRole('region', { name: 'Everything' }).getByRole('link', { name: key })).toBeVisible();
+  // a search sees a new issue a moment after it is made: refresh the gadget until it does
+  await expect(async () => {
+    await p.getByRole('button', { name: 'Refresh Everything' }).click();
+    await expect(p.getByRole('region', { name: 'Everything' }).getByRole('link', { name: key })).toBeVisible({ timeout: 1500 });
+  }).toPass({ timeout: 15000 });
   await p.getByRole('button', { name: 'Done editing' }).click();
   const a11y = await new AxeBuilder({ page: p }).analyze();
   expect(a11y.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
