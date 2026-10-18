@@ -22,8 +22,10 @@ type Prop struct {
 type Tool struct {
 	Name, Description, Scope string
 	Write, Idempotent        bool
-	Props                    []Prop
-	Handler                  func(ctx context.Context, s *Server, a domain.Actor, args map[string]any) (toolResult, error)
+	// DryRun marks a bulk tool: dry_run defaults to true, a dry run is a read, and a real run spends one write per issue it changes
+	DryRun  bool
+	Props   []Prop
+	Handler func(ctx context.Context, s *Server, a domain.Actor, args map[string]any) (toolResult, error)
 }
 
 func (t *Tool) schema() map[string]any {
@@ -46,7 +48,13 @@ func (t *Tool) schema() map[string]any {
 	return out
 }
 
-func (s *Server) add(t *Tool) { s.tools[t.Name] = t; s.order = append(s.order, t.Name) }
+func (s *Server) add(t *Tool) {
+	if t.Write { // every write can be retried safely with a key of the caller's choosing
+		t.Props = append(t.Props, Prop{"idempotency_key", "string", "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.", false, nil})
+	}
+	s.tools[t.Name] = t
+	s.order = append(s.order, t.Name)
+}
 
 func str(a map[string]any, k string) string { v, _ := a[k].(string); return strings.TrimSpace(v) }
 func num(a map[string]any, k string, def int) int {
@@ -485,6 +493,7 @@ func (s *Server) registerTools() {
 			}
 			return toolResult{Data: map[string]any{"key": is.Key, "status": is.Status}}, nil
 		}})
+	s.registerBulk()
 }
 
 // resolveAssignee turns me, none or a name into a user id, looking only among people who belong to the issue's project.

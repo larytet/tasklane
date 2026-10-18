@@ -338,9 +338,52 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request, req rpcReq, ac
 		finish(toolResult{Text: fmt.Sprintf("rate limited: too many calls; retry in %d s", int(wait.Seconds())+1), IsError: true})
 		return
 	}
-	if t.Write {
+	// a retried write with the same key and arguments returns the first result and does nothing more
+	isDry := t.DryRun && boolArg(p.Arguments, "dry_run", true)
+	idemKey := ""
+	if t.Write && !isDry {
+		idemKey = strings.TrimSpace(str(p.Arguments, "idempotency_key"))
+	}
+	if idemKey != "" {
+		if len(idemKey) < 8 || len(idemKey) > 128 {
+			finish(toolResult{Text: "the idempotency_key must be 8 to 128 characters", IsError: true})
+			return
+		}
+		state, stored, err := s.Svc.IdempotencyBegin(r.Context(), actor.ID, idemKey, requestHash(t.Name, p.Arguments))
+		if err != nil {
+			finish(toolResult{Text: "the call failed", IsError: true})
+			return
+		}
+		switch state {
+		case "mismatch":
+			finish(toolResult{Text: "this idempotency_key was already used with different arguments; use a new key for a different request", IsError: true})
+			return
+		case "inflight":
+			finish(toolResult{Text: "a request with this idempotency_key is still running; retry in a few seconds", IsError: true})
+			return
+		case "replay":
+			var st struct {
+				Text string          `json:"text"`
+				Data json.RawMessage `json:"data"`
+			}
+			json.Unmarshal(stored, &st)
+			res := toolResult{Text: st.Text}
+			var m map[string]any
+			if len(st.Data) > 0 && json.Unmarshal(st.Data, &m) == nil {
+				m["idempotent_replay"] = true
+				res.Data = m
+			}
+			outcome = "replay"
+			finish(res)
+			return
+		}
+	}
+	if t.Write && !t.DryRun { // a bulk tool spends its budget itself, one write per issue it changes
 		if ok, wait := s.allowWrite(actor.ID); !ok {
 			outcome = "limited"
+			if idemKey != "" {
+				s.Svc.IdempotencyAbort(r.Context(), actor.ID, idemKey)
+			}
 			finish(toolResult{Text: fmt.Sprintf("write budget used up for this hour; retry in %d min", int(wait.Minutes())+1), IsError: true})
 			return
 		}
@@ -352,7 +395,62 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request, req rpcReq, ac
 			outcome = "denied"
 		}
 	}
+	if idemKey != "" {
+		if res.IsError {
+			s.Svc.IdempotencyAbort(r.Context(), actor.ID, idemKey) // a failure does not pin the key
+		} else {
+			data, _ := json.Marshal(res.Data)
+			stored, _ := json.Marshal(map[string]any{"text": res.Text, "data": json.RawMessage(data)})
+			s.Svc.IdempotencyFinish(r.Context(), actor.ID, idemKey, stored)
+		}
+	}
 	finish(res)
+}
+
+func boolArg(a map[string]any, k string, def bool) bool {
+	if v, ok := a[k].(bool); ok {
+		return v
+	}
+	return def
+}
+
+// requestHash identifies a request by tool and arguments, ignoring the key itself, so only a true retry matches.
+func requestHash(tool string, args map[string]any) string {
+	c := map[string]any{}
+	for k, v := range args {
+		if k != "idempotency_key" {
+			c[k] = v
+		}
+	}
+	b, _ := json.Marshal(c) // map keys are written in sorted order
+	h := sha256.Sum256(append([]byte(tool+"\n"), b...))
+	return hex.EncodeToString(h[:])
+}
+
+// allowWriteN spends n writes from the hour's budget at once, or none.
+func (s *Server) allowWriteN(agent string, n int) (bool, time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.Now()
+	cut := now.Add(-time.Hour)
+	var keep []time.Time
+	for _, t := range s.writes[agent] {
+		if t.After(cut) {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep)+n > s.WritesPerHour {
+		s.writes[agent] = keep
+		if len(keep) == 0 {
+			return false, time.Hour
+		}
+		return false, keep[0].Add(time.Hour).Sub(now)
+	}
+	for i := 0; i < n; i++ {
+		keep = append(keep, now)
+	}
+	s.writes[agent] = keep
+	return true, 0
 }
 
 // errorText turns a domain error into a message that helps the agent and reveals nothing the caller may not know.

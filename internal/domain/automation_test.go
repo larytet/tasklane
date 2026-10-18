@@ -358,3 +358,48 @@ func TestCORE10_AutomationRulesPermissionsAndValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// MCP-20: a cycle that runs through something outside Tasklane (here, an agent that comments whenever a rule comments)
+// carries no chain, so the per-issue limit is what stops it.
+func TestMCP20_ACycleThroughAnAgentIsStoppedByThePerIssueLimit(t *testing.T) {
+	r := newAuto(t)
+	e := r.Env
+	rule := r.rule(t, "ack", domain.Spec{"type": "comment.added", "contains": "please ack"}, nil, domain.Spec{"kind": "comment", "text": "acknowledged"})
+	k := mk(t, e, e.Alice, "Task", "ping", "")
+	agent, _ := e.Svc.CreateAgent(ctx, e.Admin, "echo agent")
+	e.Svc.AddMember(ctx, e.Admin, "ABC", agent.ID, "member")
+	ag := domain.Actor{ID: agent.ID, Label: "Agent: echo", Kind: "agent"}
+	for i := 0; i < 14; i++ { // the agent answers every acknowledgement with another request, as a webhook-driven agent could
+		if _, err := e.Svc.AddComment(ctx, ag, k, "please ack", false); err != nil {
+			t.Fatal(err)
+		}
+		r.run()
+	}
+	v, _ := e.Svc.View(ctx, e.Admin, k)
+	acks := 0
+	for _, c := range v.Comments {
+		if c.Body == "acknowledged" {
+			acks++
+		}
+	}
+	if acks != 10 {
+		t.Fatalf("the rule acknowledged %d times; the limit is 10 an hour", acks)
+	}
+	if got := states(r.runs(t, rule.ID)); !strings.HasPrefix(got, "throttled,throttled,throttled,throttled,done") {
+		t.Fatalf("%q", got)
+	}
+	// an hour later the rule works again
+	e.Clock.T = e.Clock.T.Add(61 * time.Minute)
+	e.Svc.AddComment(ctx, ag, k, "please ack", false)
+	r.run()
+	v, _ = e.Svc.View(ctx, e.Admin, k)
+	after := 0
+	for _, c := range v.Comments {
+		if c.Body == "acknowledged" {
+			after++
+		}
+	}
+	if after != 11 {
+		t.Fatalf("%d", after)
+	}
+}

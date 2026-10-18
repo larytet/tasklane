@@ -94,7 +94,9 @@ deploy/compose/
 | `multi` | `app1..3`, `lb`, `postgres`, `redis`, `minio` + bucket init | DUR-06, PRES-07, LOAD-04, BLOB (S3), cross-node PERF-12 |
 | `ha` | `postgres-primary`, `postgres-standby` (synchronous), `redis` + replica + sentinel | CHAOS-01..05, DUR-03, RPO tests, backup and restore |
 | `chaos` | `toxiproxy` between app and postgres, redis, minio, and between runner and `lb`; `docker compose kill/pause/stop`; size-limited `tmpfs` volume for disk-full | CHAOS, DUR, LIVE-09 |
-| `sso` | `keycloak` (OIDC and SAML), SCIM test client | SEC-04 |
+| `sso` | `keycloak` (OIDC and SAML), SCIM test client | MCP-12 | done (partial: no forced race test) | `TestMCP12_IdempotencyKeysMakeRetriesSafe`, `_BulkUpdateDryRunIsExactAndChangesNothing`, `_BulkReportsEachIssueAndRespectsLimitsAndGates`, `_BulkTransitionHonoursTheWorkflowAndHumanGates` |
+| MCP-20 | partial (chain and per-issue limit; no real webhook cycle) | `TestCORE10_AutomationLoopsAreCut`, `TestMCP20_ACycleThroughAnAgentIsStoppedByThePerIssueLimit` |
+| SEC-04 |
 | `mail` | `mailpit` (SMTP **mock**: sink with API, optional auth and TLS, scripted failures), `greenmail` (real IMAP and SMTP server for inbound mailboxes), provider-webhook fake, raw-message injector | Notifications, MAIL cases |
 | `upgrade` | Previous and next release images side by side, scripted rolling replace and offline N-2 upgrade | UPG cases |
 | `av` | `clamav` | BLOB-08 |

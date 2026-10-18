@@ -14,6 +14,10 @@
           "description": "The comment text",
           "type": "string"
         },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
         "internal": {
           "description": "Visible only to people who can edit the issue",
           "type": "boolean"
@@ -34,6 +38,93 @@
   {
     "annotations": {
       "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Move many issues along the same workflow transition (by name). A dry run (the default) shows which issues can take it and which cannot, and why; a real run does the ones that can. Transitions that need a person are refused for agents.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "description": "Default true: show what would change and change nothing. Set false to apply",
+          "type": "boolean"
+        },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
+        "keys": {
+          "description": "Issue keys (up to 50). Use this or query",
+          "type": "array"
+        },
+        "query": {
+          "description": "A TQL query that picks the issues (up to 50). Use this or keys",
+          "type": "string"
+        },
+        "transition": {
+          "description": "Transition name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "transition"
+      ],
+      "type": "object"
+    },
+    "name": "bulk_transition"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false
+    },
+    "description": "Change priority, labels or assignee on many issues at once. A dry run (the default) shows each issue's before and after; a real run applies that plan issue by issue and reports each one. Labels are changed with labels_add and labels_remove.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "description": "me, none, or a project member's name",
+          "type": "string"
+        },
+        "dry_run": {
+          "description": "Default true: show what would change and change nothing. Set false to apply",
+          "type": "boolean"
+        },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
+        "keys": {
+          "description": "Issue keys (up to 50). Use this or query",
+          "type": "array"
+        },
+        "labels_add": {
+          "description": "Labels to add",
+          "type": "array"
+        },
+        "labels_remove": {
+          "description": "Labels to remove",
+          "type": "array"
+        },
+        "priority": {
+          "description": "lowest, low, medium, high, highest",
+          "type": "string"
+        },
+        "query": {
+          "description": "A TQL query that picks the issues (up to 50). Use this or keys",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "bulk_update_fields"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": false
@@ -42,6 +133,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
         "key": {
           "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
           "type": "string"
@@ -71,6 +166,10 @@
       "properties": {
         "description": {
           "description": "Description text",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
           "type": "string"
         },
         "labels": {
@@ -117,6 +216,10 @@
           "description": "Description text",
           "type": "string"
         },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
         "parent": {
           "description": "Key of the parent issue",
           "type": "string"
@@ -151,6 +254,10 @@
             "summary",
             "description"
           ],
+          "type": "string"
+        },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
           "type": "string"
         },
         "key": {
@@ -310,6 +417,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
         "key": {
           "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
           "type": "string"
@@ -341,6 +452,10 @@
           "description": "What was done",
           "type": "string"
         },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
         "key": {
           "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
           "type": "string"
@@ -369,6 +484,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
         "key": {
           "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
           "type": "string"
@@ -425,6 +544,10 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
+        },
         "key": {
           "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",
           "type": "string"
@@ -460,6 +583,10 @@
         "base_version": {
           "description": "Version you read",
           "type": "integer"
+        },
+        "idempotency_key": {
+          "description": "Optional: a unique key of 8 to 128 characters. A retry with the same key and the same arguments returns the first result and does not do it again.",
+          "type": "string"
         },
         "key": {
           "description": "Issue key, e.g. ABC-123 (an old key after a move also works)",

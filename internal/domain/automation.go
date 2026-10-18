@@ -30,6 +30,7 @@ const (
 	maxActionsPerRule    = 10
 	maxAutoDepth         = 3
 	defaultRunsPerHour   = 300
+	runsPerIssueHour     = 10 // a rule acts on one issue at most this often: a cycle through systems outside Tasklane (a webhook that makes an agent comment again) runs into it
 	maxScheduledPerTick  = 200
 	autoActorKind        = "automation"
 	maxAutomationEventsN = 100
@@ -623,6 +624,12 @@ func (s *Service) runRule(ctx context.Context, r AutoRule, issueID string, event
 	s.DB.QueryRow(ctx, `SELECT count(*) FROM automation_run WHERE rule_id=$1 AND started_at > $2 AND state IN ('done','failed')`, r.ID, s.Now().Add(-time.Hour)).Scan(&recent)
 	if recent >= defaultRunsPerHour {
 		s.finishRun(ctx, runID, "throttled", map[string]any{"reason": fmt.Sprintf("the rule ran %d times in the last hour", recent)})
+		return true, nil
+	}
+	var onIssue int
+	s.DB.QueryRow(ctx, `SELECT count(*) FROM automation_run WHERE rule_id=$1 AND issue_id::text=$2 AND started_at > $3 AND state IN ('done','failed')`, r.ID, issueID, s.Now().Add(-time.Hour)).Scan(&onIssue)
+	if onIssue >= runsPerIssueHour {
+		s.finishRun(ctx, runID, "throttled", map[string]any{"reason": fmt.Sprintf("the rule ran %d times on this issue in the last hour", onIssue)})
 		return true, nil
 	}
 	t, err := s.loadTctx(ctx, s.DB, Actor{Admin: true}, issueID, "admin")
