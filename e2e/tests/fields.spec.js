@@ -53,3 +53,37 @@ test('custom fields: set in the create dialog, edited on the ticket, validated, 
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
 });
+
+test('behavior rules: a field becomes required and another is hidden as the values change', async ({ browser }) => {
+  const call = await admin(browser);
+  const why = 'Why ' + uniq(), note = 'Note ' + uniq();
+  const f1 = (await call('POST', '/api/v1/fields', { name: why, type: 'text' })).body;
+  await call('POST', `/api/v1/fields/${f1.id}/contexts`, { projects: ['ABC'], types: ['Epic'] });
+  const f2 = (await call('POST', '/api/v1/fields', { name: note, type: 'text' })).body;
+  await call('POST', `/api/v1/fields/${f2.id}/contexts`, { projects: ['ABC'], types: ['Epic'] });
+  // highest priority requires a reason; a low priority hides the note
+  await call('POST', '/api/v1/behavior-rules', { name: 'reason', project: 'ABC', type: 'Epic', when_field: 'priority', when_op: 'eq', when_value: 'highest', action: 'require', target: f1.key });
+  await call('POST', '/api/v1/behavior-rules', { name: 'note', project: 'ABC', type: 'Epic', when_field: 'priority', when_op: 'in', when_value: ['low', 'lowest'], action: 'hide', target: f2.key });
+
+  const { page } = await newUser(browser, 'jana@example.com');
+  await page.getByRole('button', { name: '+ Create' }).click();
+  const dlg = page.getByRole('dialog');
+  await dlg.getByLabel('Type').selectOption('Epic');
+  await dlg.getByLabel('Summary').fill('Rules ' + uniq());
+  await expect(dlg.getByLabel(why)).toHaveAttribute('aria-required', 'false');
+  await dlg.getByLabel('Priority').selectOption('highest');
+  await expect(dlg.getByLabel(why)).toHaveAttribute('aria-required', 'true');
+  await expect(dlg.getByText(why + ' *')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Create' }).click();
+  await expect(dlg.getByRole('alert')).toContainText(why);
+  await dlg.getByLabel('Priority').selectOption('low');
+  await expect(dlg.getByLabel(note)).toBeHidden();
+  await expect(dlg.getByLabel(why)).toHaveAttribute('aria-required', 'false');
+  await dlg.getByLabel('Priority').selectOption('medium');
+  await expect(dlg.getByLabel(note)).toBeVisible();
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await dlg.getByLabel(note).fill('hello');
+  await dlg.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByLabel(note)).toHaveValue('hello');
+});

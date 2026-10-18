@@ -135,6 +135,7 @@
     const asList = v => Array.isArray(v) ? v : (v == null || v === '' ? [] : [v]);
     let el, get;
     switch (f.type) {
+      case 'priority': el = h('select', base, Object.keys(PRI).map(p => h('option', { value: p }, PRI[p] + ' ' + p))); el.value = value || 'medium'; get = () => el.value; break;
       case 'textarea': el = h('textarea', Object.assign({ rows: 3 }, base)); el.value = value == null ? '' : value; get = () => el.value || null; break;
       case 'number': case 'float': case 'integer': case 'rating':
         el = h('input', Object.assign({ type: 'number', step: f.type === 'float' || f.type === 'number' ? 'any' : '1', style: 'width:120px' }, base, f.type === 'rating' ? { min: 0, max: 5 } : {}));
@@ -159,8 +160,33 @@
     }
     return { el, get, name: lab };
   }
+  // behavior rules, evaluated on the client as values change (the server enforces the same rules)
+  function ruleHolds(r, vals, role) {
+    if (r.when_role && r.when_role !== role) return false;
+    if (!r.when_field) return true;
+    const v = vals[r.when_field], empty = v == null || v === '' || (Array.isArray(v) && !v.length);
+    const list = x => Array.isArray(x) ? x.map(String) : (x == null ? [] : [String(x)]);
+    switch (r.when_op) {
+      case 'empty': return empty;
+      case 'notempty': return !empty;
+      case 'eq': return !empty && (Array.isArray(v) ? list(v).includes(String(r.when_value)) : String(v) === String(r.when_value));
+      case 'ne': return empty || (Array.isArray(v) ? !list(v).includes(String(r.when_value)) : String(v) !== String(r.when_value));
+      case 'in': return !empty && list(v).some(x => list(r.when_value).includes(x));
+    }
+    return false;
+  }
+  function ruleState(rules, f, vals, role) {
+    const st = { hidden: !!f.hidden, required: !!f.required };
+    for (const r of rules || []) {
+      if (r.target !== f.key || !r.enabled || !ruleHolds(r, vals, role)) continue;
+      if (r.action === 'hide') st.hidden = true; else if (r.action === 'show') st.hidden = false; else if (r.action === 'require') st.required = true;
+    }
+    return st;
+  }
   function fieldRow(f, ctl) {
-    return h('label', { class: 'cf-row' }, h('span', { class: 'cf-name' }, f.name + (f.required ? ' *' : '')), ctl.el, f.help_text ? h('span', { class: 'muted' }, f.help_text) : null);
+    const star = h('span', { class: 'cf-name' }, f.name + (f.required ? ' *' : ''));
+    ctl.star = star; ctl.base = f.name;
+    return h('label', { class: 'cf-row' }, star, ctl.el, f.help_text ? h('span', { class: 'muted' }, f.help_text) : null);
   }
 
   function createDialog() {
@@ -169,21 +195,51 @@
     const sum = h('input', { type: 'text', placeholder: 'Summary', 'aria-label': 'Summary', style: 'width:100%' });
     const desc = h('textarea', { placeholder: 'Description', 'aria-label': 'Description' }), msg = h('div', { class: 'err', role: 'alert' });
     const cfBox = h('div', { class: 'cf-box' });
-    let cfCtl = [];
+    let cfCtl = [], form = { rules: [], role: 'member' };
+    const descCtl = { el: desc, get: () => desc.value.trim() || null, star: null };
+    const values = () => { const vals = { summary: sum.value }; for (const [f, c] of cfCtl) vals[f.key] = c.get(); return vals; };
+    // required and hidden follow the rules as the values change
+    function applyRules() {
+      const vals = values();
+      for (const [f, c] of cfCtl) {
+        const st = ruleState(form.rules, f, vals, form.role), row = c.row;
+        if (row) row.hidden = st.hidden;
+        if (c.star) c.star.textContent = f.name + (st.required ? ' *' : '');
+        c.el.setAttribute('aria-required', st.required ? 'true' : 'false');
+      }
+    }
     async function loadFields() {
-      const r = await api('GET', '/api/v1/projects/' + proj.value + '/fields?type=' + encodeURIComponent(type.value));
+      const r = await api('GET', '/api/v1/projects/' + proj.value + '/form?op=create&type=' + encodeURIComponent(type.value));
       clear(cfBox); cfCtl = [];
       if (r.status !== 200) return;
-      for (const f of r.data || []) { const c = fieldControl(f, f.default, false); if (f.default != null && c.get() == null) c.el.value = f.default; cfCtl.push([f, c]); cfBox.append(fieldRow(f, c)); }
+      form = r.data;
+      for (const tab of form.tabs) {
+        const box = h('fieldset', { class: 'cf-tab' }, h('legend', {}, tab.name));
+        let any = false;
+        for (const f of tab.fields) {
+          if (f.key === 'description') { cfCtl.push([f, descCtl]); desc.hidden = !!f.hidden; continue; } // the description has its own box above
+          const c = fieldControl(f, f.default, false);
+          const row = fieldRow(f, c); c.row = row;
+          c.el.addEventListener('change', applyRules); c.el.addEventListener('input', applyRules);
+          cfCtl.push([f, c]); box.append(row); any = true;
+        }
+        if (any) cfBox.append(box);
+      }
+      applyRules();
     }
-    proj.addEventListener('change', loadFields); type.addEventListener('change', loadFields);
+    proj.addEventListener('change', loadFields); type.addEventListener('change', loadFields); sum.addEventListener('input', applyRules);
     loadFields();
     const close = modal(h('div', {}, h('h2', {}, 'Create issue'), h('div', { class: 'chips' }, proj, type), sum, h('div', { style: 'height:8px' }), desc, cfBox, msg,
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'),
         h('button', { class: 'btn primary', onclick: async () => {
-          const custom = {};
-          for (const [f, c] of cfCtl) { const x = c.get(); if (x != null) custom[f.key] = x; }
-          const r = await api('POST', '/api/v1/issues', { project: proj.value, type: type.value, summary: sum.value, description: desc.value, custom });
+          const body = { project: proj.value, type: type.value, summary: sum.value, description: desc.value, custom: {} };
+          const vals = values();
+          for (const [f, c] of cfCtl) {
+            if (ruleState(form.rules, f, vals, form.role).hidden) continue;
+            const x = c.get(); if (x == null) continue;
+            if (f.key === 'priority' || f.key === 'assignee' || f.key === 'labels') body[f.key] = x; else if (!f.builtin) body.custom[f.key] = x;
+          }
+          const r = await api('POST', '/api/v1/issues', body);
           if (r.status === 201) { close(); location.hash = '#/issue/' + r.data.key; } else msg.textContent = r.data.error;
         } }, 'Create'))));
     sum.focus();
@@ -233,6 +289,8 @@
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     }
+    const dlgEl = scrim.firstChild, hd = dlgEl.querySelector('h1,h2,h3'); // the dialog is named by its heading
+    if (hd) { hd.id = hd.id || 'dlg-' + Math.random().toString(36).slice(2, 8); dlgEl.setAttribute('aria-labelledby', hd.id); } else dlgEl.setAttribute('aria-label', 'Dialog');
     document.addEventListener('keydown', key);
     document.body.append(scrim);
     const first = scrim.querySelector('input,textarea,button'); if (first) first.focus();
@@ -406,22 +464,25 @@
       if (!cache[ck]) {
         if (!cache['pending:' + ck]) {
           cache['pending:' + ck] = true;
-          api('GET', '/api/v1/projects/' + is.project + '/fields?type=' + encodeURIComponent(is.type)).then(r => { cache[ck] = r.status === 200 ? (r.data || []) : []; delete cache['pending:' + ck]; render(); });
+          api('GET', '/api/v1/projects/' + is.project + '/form?op=edit&type=' + encodeURIComponent(is.type)).then(r => { cache[ck] = r.status === 200 ? r.data : { tabs: [], rules: [] }; delete cache['pending:' + ck]; render(); });
         }
         return box;
       }
-      const fs = cache[ck];
-      if (!fs.length) return box;
-      box.hidden = false;
-      box.append(h('strong', {}, 'Fields'));
-      for (const f of fs) {
-        const ctl = fieldControl(f, (is.custom || {})[f.key], !canEdit()); // the server enforces per-field edit roles
-        const err = h('span', { class: 'err', role: 'alert' });
-        ctl.el.addEventListener('change', async () => {
-          const r2 = await api('PATCH', '/api/v1/issues/' + key, { custom: { [f.key]: ctl.get() } });
-          if (r2.status === 200) { err.textContent = ''; await reloadAll(); } else err.textContent = (r2.data && r2.data.error) || 'Could not save';
-        });
-        box.append(h('div', {}, fieldRow(f, ctl), err));
+      const form = cache[ck], vals = Object.assign({ priority: is.priority, labels: is.labels || [], assignee: is.assignee && is.assignee.id }, is.custom || {});
+      for (const tab of form.tabs) {
+        const fs = tab.fields.filter(f => !f.builtin && !ruleState(form.rules, f, vals, form.role).hidden);
+        if (!fs.length) continue;
+        box.hidden = false;
+        box.append(h('strong', {}, tab.name === 'Details' ? 'Fields' : tab.name));
+        for (const f of fs) {
+          const ctl = fieldControl(f, (is.custom || {})[f.key], !canEdit()); // the server enforces per-field edit roles
+          const err = h('span', { class: 'err', role: 'alert' });
+          ctl.el.addEventListener('change', async () => {
+            const r2 = await api('PATCH', '/api/v1/issues/' + key, { custom: { [f.key]: ctl.get() } });
+            if (r2.status === 200) { err.textContent = ''; await reloadAll(); } else err.textContent = (r2.data && r2.data.error) || 'Could not save';
+          });
+          box.append(h('div', {}, fieldRow(Object.assign({}, f, { required: ruleState(form.rules, f, vals, form.role).required }), ctl), err));
+        }
       }
       return box;
     }

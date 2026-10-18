@@ -182,6 +182,32 @@ func (f *fixture) field() int64 {
 	return fd.ID
 }
 
+func (f *fixture) screen() int64 {
+	f.n++
+	sc, err := f.e.Svc.SaveScreen(testutil.Ctx(), f.e.Admin, 0, domain.Screen{Name: fmt.Sprint("Screen ", f.n), Tabs: []domain.ScreenTab{{Name: "Main", Fields: []string{"priority"}}}})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return sc.ID
+}
+
+func (f *fixture) scheme() int64 {
+	f.n++
+	sc, err := f.e.Svc.SaveScheme(testutil.Ctx(), f.e.Admin, 0, domain.Scheme{Name: fmt.Sprint("Scheme ", f.n)})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return sc.ID
+}
+
+func (f *fixture) rule() int64 {
+	r, err := f.e.Svc.SaveRule(testutil.Ctx(), f.e.Admin, 0, domain.Rule{Enabled: false, Action: "require", Target: "labels"})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return r.ID
+}
+
 func (f *fixture) attachment(key string) string {
 	a, err := f.e.Svc.AttachStream(testutil.Ctx(), f.e.Alice, key, "n.txt", "text/plain", strings.NewReader("hello matrix"))
 	if err != nil {
@@ -370,6 +396,41 @@ func rows() []row {
 		}},
 		{"GET /api/v1/fields/warnings", adminer, func(f *fixture) req { return J("GET", "/api/v1/fields/warnings", nil) }},
 		{"GET /api/v1/projects/{key}/fields", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/fields?type=Task", nil) }},
+		{"GET /api/v1/screens", adminer, func(f *fixture) req { return J("GET", "/api/v1/screens", nil) }},
+		{"POST /api/v1/screens", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/screens", map[string]any{"name": fmt.Sprint("S ", f.n), "tabs": []map[string]any{{"name": "T", "fields": []string{"labels"}}}})
+		}},
+		{"PUT /api/v1/screens/{id}", adminer, func(f *fixture) req {
+			return J("PUT", fmt.Sprintf("/api/v1/screens/%d", f.screen()), map[string]any{"name": fmt.Sprint("Renamed ", f.n), "tabs": []any{}})
+		}},
+		{"DELETE /api/v1/screens/{id}", adminer, func(f *fixture) req { return J("DELETE", fmt.Sprintf("/api/v1/screens/%d", f.screen()), nil) }},
+		{"GET /api/v1/screen-schemes", adminer, func(f *fixture) req { return J("GET", "/api/v1/screen-schemes", nil) }},
+		{"POST /api/v1/screen-schemes", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/screen-schemes", map[string]any{"name": fmt.Sprint("Scheme ", f.n)})
+		}},
+		{"PUT /api/v1/screen-schemes/{id}", adminer, func(f *fixture) req {
+			return J("PUT", fmt.Sprintf("/api/v1/screen-schemes/%d", f.scheme()), map[string]any{"name": fmt.Sprint("Renamed ", f.n)})
+		}},
+		{"DELETE /api/v1/screen-schemes/{id}", adminer, func(f *fixture) req { return J("DELETE", fmt.Sprintf("/api/v1/screen-schemes/%d", f.scheme()), nil) }},
+		{"PUT /api/v1/projects/{key}/screen-scheme", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/screen-scheme", map[string]any{"scheme": nil})
+		}},
+		{"GET /api/v1/field-configs", adminer, func(f *fixture) req { return J("GET", "/api/v1/field-configs", nil) }},
+		{"PUT /api/v1/field-configs", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/field-configs", map[string]any{"field": "labels", "required": false})
+		}},
+		{"DELETE /api/v1/field-configs/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/field-configs/999999", nil) }},
+		{"GET /api/v1/behavior-rules", adminer, func(f *fixture) req { return J("GET", "/api/v1/behavior-rules", nil) }},
+		{"POST /api/v1/behavior-rules", adminer, func(f *fixture) req {
+			return J("POST", "/api/v1/behavior-rules", map[string]any{"action": "hide", "target": "labels", "enabled": false})
+		}},
+		{"PUT /api/v1/behavior-rules/{id}", adminer, func(f *fixture) req {
+			return J("PUT", fmt.Sprintf("/api/v1/behavior-rules/%d", f.rule()), map[string]any{"action": "show", "target": "labels", "enabled": false})
+		}},
+		{"DELETE /api/v1/behavior-rules/{id}", adminer, func(f *fixture) req { return J("DELETE", fmt.Sprintf("/api/v1/behavior-rules/%d", f.rule()), nil) }},
+		{"GET /api/v1/projects/{key}/form", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/form?type=Task", nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

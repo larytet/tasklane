@@ -135,3 +135,5 @@ table.data{border-collapse:collapse;margin:8px 0}table.data th,table.data td{bor
 .cf-row{display:grid;grid-template-columns:140px 1fr;gap:8px;align-items:start}
 .cf-name{color:var(--subtle);padding-top:4px}
 .cf-card[hidden]{display:none}
+.cf-tab{border:1px solid var(--border);border-radius:6px;margin:6px 0;padding:6px 10px}.cf-tab legend{color:var(--subtle);padding:0 4px}
+.cf-row[hidden]{display:none}

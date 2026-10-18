@@ -157,6 +157,9 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 		if cerr != nil {
 			return cerr
 		}
+		if cerr := s.checkCreateForm(ctx, tx, pid, typeID, creatorRole, in, customVals, cfgs); cerr != nil {
+			return cerr
+		}
 		if in.Parent != "" {
 			var p string
 			var pl int
@@ -467,6 +470,9 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	}
 	if len(changed) == 0 {
 		return is, invalid("no changes")
+	}
+	if err := s.checkEditForm(ctx, a, is, role, pid, ch); err != nil {
+		return is, err
 	}
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		var cur int64
