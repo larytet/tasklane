@@ -103,13 +103,45 @@
         h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => close() }, 'Done'))));
     } }, 'Create token');
 
+    // ----- connected apps (OAuth)
+    const appsBox = h('div', { role: 'list' });
+    async function loadApps() {
+      clear(appsBox);
+      const r = await api('GET', '/api/v1/me/oauth/grants');
+      if (r.status !== 200) { appsBox.append(h('p', { class: 'err' }, errText(r))); return; }
+      if (!r.data.length) appsBox.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No applications are connected to your account.')));
+      for (const g of r.data) appsBox.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, g.client), ' ', h('span', { class: 'muted' }, 'can ' + g.scopes.join(', '))),
+        h('span', { class: 'muted' }, 'last used ' + when(g.last_used)),
+        h('button', { class: 'btn ghost', 'aria-label': 'Disconnect ' + g.client, onclick: async () => { const x = await api('DELETE', '/api/v1/me/oauth/grants/' + g.id); if (x.status === 200) loadApps(); else toast(errText(x)); } }, 'Disconnect')));
+    }
+
     body.append(
       section('Two-factor authentication', mfaBox),
       section('Password', pwBox),
       section('Sessions', h('div', { class: 'chips' }, others), sessBox),
+      section('Connected applications', h('p', { class: 'muted' }, 'Applications such as AI assistants that you allowed to act for you, with the permissions you gave them. They never do more than you can.'), appsBox),
       section('API tokens', h('div', { class: 'chips' }, tname, tdays, newTok), tmsg, tokBox));
-    await Promise.all([loadMFA(), loadSessions(), loadTokens()]);
+    await Promise.all([loadMFA(), loadSessions(), loadTokens(), loadApps()]);
   }
 
+  // the screen an application sends a person to when it asks for access (OAuth authorization)
+  async function consentView(query) {
+    const app = clear(document.getElementById('app'));
+    const params = Object.fromEntries(new URLSearchParams(query));
+    const box = h('div', { class: 'login card', role: 'region', 'aria-label': 'Connect an application' });
+    app.append(topbar(), h('div', { class: 'page' }, box));
+    const r = await api('GET', '/api/v1/oauth/consent?' + query);
+    if (r.status !== 200) { box.append(h('h1', {}, 'Cannot connect'), h('p', { class: 'err', role: 'alert' }, errText(r)), h('p', {}, h('a', { href: '#/' }, 'Back to Tasklane'))); return; }
+    const decide = async approve => {
+      const x = await api('POST', '/api/v1/oauth/authorize', Object.assign({}, params, { approve }));
+      if (x.status === 200) { location.href = x.data.redirect; } else { toast(errText(x)); }
+    };
+    box.append(h('h1', {}, 'Connect ' + r.data.client), h('p', {}, h('strong', {}, r.data.client), ' wants to act for you in Tasklane. It will be able to:'),
+      h('ul', {}, r.data.scopes.map(s => h('li', {}, s.description || s.name))),
+      h('p', { class: 'muted' }, 'It never does more than you are allowed to do yourself, and you can disconnect it at any time under Account. After you decide you go back to ' + r.data.redirect_to + '.'),
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => decide(false) }, 'Deny'), h('button', { class: 'btn primary', onclick: () => decide(true) }, 'Allow')));
+  }
+
+  A.EXT.routes.push({ re: /^#\/oauth\/consent\?(.*)$/, run: m => consentView(m[1]) });
   A.EXT.routes.push({ re: /^#\/account\/?$/, run: () => accountView() });
 })();

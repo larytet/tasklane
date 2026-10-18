@@ -94,7 +94,8 @@ deploy/compose/
 | `multi` | `app1..3`, `lb`, `postgres`, `redis`, `minio` + bucket init | DUR-06, PRES-07, LOAD-04, BLOB (S3), cross-node PERF-12 |
 | `ha` | `postgres-primary`, `postgres-standby` (synchronous), `redis` + replica + sentinel | CHAOS-01..05, DUR-03, RPO tests, backup and restore |
 | `chaos` | `toxiproxy` between app and postgres, redis, minio, and between runner and `lb`; `docker compose kill/pause/stop`; size-limited `tmpfs` volume for disk-full | CHAOS, DUR, LIVE-09 |
-| `sso` | `keycloak` (OIDC and SAML), SCIM test client | MCP-12 | done (partial: no forced race test) | `TestMCP12_IdempotencyKeysMakeRetriesSafe`, `_BulkUpdateDryRunIsExactAndChangesNothing`, `_BulkReportsEachIssueAndRespectsLimitsAndGates`, `_BulkTransitionHonoursTheWorkflowAndHumanGates` |
+| `sso` | `keycloak` (OIDC and SAML), SCIM test client | MCP-04 | done (partial: public clients only) | `TestMCP04_AuthorizationCodeWithPKCEGivesAScopedTokenForThePerson`, `_CodeExchangeChecksEverythingItWasIssuedFor`, `_AuthorizationRequestsAreValidatedAndRedirectsAreExact`, `_RefreshTokensRotateAndReuseRevokesTheGrant`, `_RevocationEndsAccessAtOnce`, `_AClientNeverExceedsThePerson`, `_HTTPDiscoveryAndTokenEndpoint`, e2e `account.spec.js` (the whole flow in a browser) |
+| MCP-12 | done (partial: no forced race test) | `TestMCP12_IdempotencyKeysMakeRetriesSafe`, `_BulkUpdateDryRunIsExactAndChangesNothing`, `_BulkReportsEachIssueAndRespectsLimitsAndGates`, `_BulkTransitionHonoursTheWorkflowAndHumanGates` |
 | MCP-20 | partial (chain and per-issue limit; no real webhook cycle) | `TestCORE10_AutomationLoopsAreCut`, `TestMCP20_ACycleThroughAnAgentIsStoppedByThePerIssueLimit` |
 | SEC-04 |
 | `mail` | `mailpit` (SMTP **mock**: sink with API, optional auth and TLS, scripted failures), `greenmail` (real IMAP and SMTP server for inbound mailboxes), provider-webhook fake, raw-message injector | Notifications, MAIL cases |

@@ -408,6 +408,9 @@ func (s *Service) RevokeUserAccess(ctx context.Context, a Actor, userID string, 
 				return err
 			}
 			n += int(tag.RowsAffected())
+			if _, err := tx.Exec(ctx, `UPDATE oauth_grant SET revoked_at=$2 WHERE user_id::text=$1 AND revoked_at IS NULL`, userID, s.Now()); err != nil {
+				return err
+			}
 		}
 		return s.audit(ctx, tx, a, "security.access_revoked", userID, map[string]any{"tokens": tokens, "ended": n})
 	})

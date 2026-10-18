@@ -567,6 +567,25 @@ func rows() []row {
 			return J("PATCH", "/scim/v2/Users/"+f.spare.ID, map[string]any{"Operations": []map[string]any{{"op": "replace", "path": "active", "value": false}}})
 		}},
 		{"DELETE /scim/v2/Users/{id}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("DELETE", "/scim/v2/Users/"+f.spare.ID, nil) }},
+		{"GET /.well-known/oauth-protected-resource", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/.well-known/oauth-protected-resource", nil) }},
+		{"GET /.well-known/oauth-protected-resource/mcp", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/.well-known/oauth-protected-resource/mcp", nil) }},
+		{"GET /.well-known/oauth-authorization-server", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/.well-known/oauth-authorization-server", nil) }},
+		{"POST /oauth/register", exp{anon: codes(201), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/oauth/register", map[string]any{"client_name": "matrix client", "redirect_uris": []string{"http://127.0.0.1:9999/cb"}})
+		}},
+		{"GET /oauth/authorize", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("GET", "/oauth/authorize?client_id=nope&redirect_uri=http://127.0.0.1/cb", nil)
+		}},
+		{"GET /api/v1/oauth/consent", exp{anon: codes(401), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req {
+			return J("GET", "/api/v1/oauth/consent?client_id=nope&redirect_uri=http://127.0.0.1/cb", nil)
+		}},
+		{"POST /api/v1/oauth/authorize", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req {
+			return J("POST", "/api/v1/oauth/authorize", map[string]any{"client_id": "nope", "redirect_uri": "http://127.0.0.1/cb", "approve": true})
+		}},
+		{"POST /oauth/token", exp{anon: codes(400), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req { return J("POST", "/oauth/token", map[string]any{}) }},
+		{"POST /oauth/revoke", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("POST", "/oauth/revoke", map[string]any{}) }},
+		{"GET /api/v1/me/oauth/grants", authed, func(f *fixture) req { return J("GET", "/api/v1/me/oauth/grants", nil) }},
+		{"DELETE /api/v1/me/oauth/grants/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/me/oauth/grants/999999", nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

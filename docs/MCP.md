@@ -19,3 +19,14 @@ Write tools accept an optional **`idempotency_key`** (8 to 128 characters, your 
 ## Loops
 
 An agent's own writes can set off automation rules. A rule never runs on an event it caused, directly or through other rules, and a rule acts on one issue at most ten times an hour, so a cycle that runs through something outside Tasklane (an agent that answers every automated comment) is stopped by that limit.
+
+## Connecting with OAuth
+
+MCP clients that support it connect without a pasted token: point the client at `<your address>/mcp` and it finds the rest.
+
+- **Discovery.** An unauthenticated call to `/mcp` answers `401` with `WWW-Authenticate: Bearer resource_metadata=".../.well-known/oauth-protected-resource"`. That document names the authorization server, whose metadata is at `/.well-known/oauth-authorization-server`.
+- **Registration.** The client registers itself (`POST /oauth/register`, RFC 7591) with a name and redirect addresses: https, http on localhost, or a custom application scheme (never `javascript:`, `data:`, `file:` and the like, never a fragment). It is a public client: there is no client secret, PKCE protects the exchange.
+- **Consent.** The client sends the person to `/oauth/authorize` with a PKCE challenge (S256 only) and the scopes it wants. The person signs in if needed and sees the client's name, the scopes in plain words and where they will be sent back to, and allows or denies. Only a person signed in with a password or single sign-on can approve; an API token or an agent cannot approve another client. A redirect address that was not registered, even one character off, is an error page and never a redirect.
+- **Tokens.** The client exchanges the single-use code (valid for two minutes, bound to the client and the redirect address) plus its PKCE verifier for an access token (one hour) and a refresh token (thirty days) that **changes on every use**. Using an old refresh token again revokes the whole grant, the access tokens it issued included.
+- **What the client can do.** The access token is the person's own scoped token: the scopes they approved are a ceiling, and the person's own rights are applied as well, so a client never does more than the person (a viewer's client cannot change anything whatever scopes it was given). In history and comments it shows as "Agent: <client name> (via <person>)", and agent rules such as transitions that need a person and write budgets apply.
+- **Disconnecting.** Account → Connected applications shows each client and what it may do, and disconnects it at once (its tokens stop on their next request). `POST /oauth/revoke` does the same for a client that signs out; an administrator ending a person's access, or deactivating the account, ends their grants too.

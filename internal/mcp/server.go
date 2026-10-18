@@ -124,7 +124,14 @@ func (s *Server) Handler() http.HandlerFunc {
 		}
 		actor, scopes, err := s.Svc.AuthenticateAgent(r.Context(), tok)
 		if err != nil {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="tasklane"`)
+			base := strings.TrimRight(s.Svc.BaseURL, "/")
+			if base == "" {
+				base = "http://" + r.Host
+				if r.TLS != nil {
+					base = "https://" + r.Host
+				}
+			}
+			w.Header().Set("WWW-Authenticate", `Bearer realm="tasklane", resource_metadata="`+base+`/.well-known/oauth-protected-resource"`) // how a client finds where to sign in
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

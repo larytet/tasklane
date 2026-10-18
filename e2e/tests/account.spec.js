@@ -195,3 +195,63 @@ test('SEC-04: administrators set up single sign-on and SCIM tokens; the sign-in 
   await expect(page.getByRole('listitem').filter({ hasText: 'Acme login' })).toHaveCount(0);
   await ctx.close(); await out.close();
 });
+
+test('MCP-04: an application asks for access, the person approves, and the token works over MCP and can be disconnected', async ({ browser }) => {
+  const { page, ctx } = await newAccount(browser);
+  const base = 'http://127.0.0.1:18181';
+  const reg = await page.request.post(base + '/oauth/register', { data: { client_name: 'Claude Desktop', redirect_uris: ['http://127.0.0.1:7788/callback'] }, headers: { 'Content-Type': 'application/json' } });
+  expect(reg.status()).toBe(201);
+  const clientId = (await reg.json()).client_id;
+  const verifier = 'v'.repeat(60);
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const authUrl = `${base}/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent('http://127.0.0.1:7788/callback')}&scope=${encodeURIComponent('read comment')}&state=abc123&code_challenge=${challenge}&code_challenge_method=S256`;
+  // the application's own address is where the browser ends up: capture it instead of loading it
+  let landed = '';
+  await page.route('http://127.0.0.1:7788/**', route => { landed = route.request().url(); route.fulfill({ status: 200, body: 'ok' }); });
+  await page.goto(authUrl);
+  await expect(page.getByRole('heading', { name: 'Connect Claude Desktop' })).toBeVisible();
+  await expect(page.getByText('Read issues, comments and attachments you can see')).toBeVisible();
+  await expect(page.getByText('Add comments')).toBeVisible();
+  const a11y = await new AxeBuilder({ page }).analyze();
+  expect(a11y.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await page.getByRole('button', { name: 'Allow' }).click();
+  await expect.poll(() => landed).toContain('code=');
+  const back = new URL(landed);
+  expect(back.searchParams.get('state')).toBe('abc123');
+  // the application exchanges the code; a wrong verifier would not have worked
+  const bad = await page.request.post(base + '/oauth/token', { form: { grant_type: 'authorization_code', code: back.searchParams.get('code'), code_verifier: 'wrong'.repeat(10), client_id: clientId, redirect_uri: 'http://127.0.0.1:7788/callback' }, failOnStatusCode: false });
+  expect(bad.status()).toBe(400); // and that spent the code
+  // a second approval gives a fresh code
+  landed = '';
+  await page.goto(authUrl);
+  await page.getByRole('button', { name: 'Allow' }).click();
+  await expect.poll(() => landed).toContain('code=');
+  const code2 = new URL(landed).searchParams.get('code');
+  const tok = await page.request.post(base + '/oauth/token', { form: { grant_type: 'authorization_code', code: code2, code_verifier: verifier, client_id: clientId, redirect_uri: 'http://127.0.0.1:7788/callback' } });
+  expect(tok.status()).toBe(200);
+  const t = await tok.json();
+  expect(t.token_type).toBe('Bearer');
+  const bare = await browser.newContext();
+  const mcp = await bare.request.post(base + '/mcp', { headers: { Authorization: 'Bearer ' + t.access_token, 'Content-Type': 'application/json' }, data: { jsonrpc: '2.0', id: 1, method: 'tools/list' }, failOnStatusCode: false });
+  expect(mcp.status()).toBe(200);
+  // it is listed under Account and disconnecting ends it at once
+  await page.goto('/#/account');
+  const row = page.getByRole('region', { name: 'Connected applications' }).getByRole('listitem').filter({ hasText: 'Claude Desktop' });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Disconnect Claude Desktop' }).click();
+  await expect(page.getByRole('region', { name: 'Connected applications' }).getByText('Claude Desktop')).toHaveCount(0);
+  const after = await bare.request.post(base + '/mcp', { headers: { Authorization: 'Bearer ' + t.access_token, 'Content-Type': 'application/json' }, data: { jsonrpc: '2.0', id: 2, method: 'tools/list' }, failOnStatusCode: false });
+  expect(after.status()).toBe(401);
+  const refresh = await page.request.post(base + '/oauth/token', { form: { grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: clientId }, failOnStatusCode: false });
+  expect(refresh.status()).toBe(400);
+  // denying sends the application back with access_denied and no code
+  landed = '';
+  await page.goto(authUrl);
+  await page.getByRole('button', { name: 'Deny' }).click();
+  await expect.poll(() => landed).toContain('error=access_denied');
+  expect(landed).not.toContain('code=');
+  // an unregistered redirect address is an error page, not a redirect
+  const evil = await page.request.get(`${base}/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent('http://127.0.0.1:7788/evil')}&code_challenge=${challenge}&code_challenge_method=S256`, { maxRedirects: 0, failOnStatusCode: false });
+  expect(evil.status()).toBeGreaterThanOrEqual(400);
+  await ctx.close(); await bare.close();
+});
