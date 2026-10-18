@@ -379,6 +379,8 @@ func TestPRES06_TrafficOnlyOnStateChange(t *testing.T) {
 		wg.Wait()
 		time.Sleep(500 * time.Millisecond)
 	}
+	// let every connection's own subscribe confirmation and snapshot finish before measuring
+	time.Sleep(500 * time.Millisecond)
 	// round one: two people become present, which is two state changes, each sent to the 50 subscribers
 	_, before := e.hub.Stats()
 	heartbeats()

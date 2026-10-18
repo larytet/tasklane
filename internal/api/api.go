@@ -250,6 +250,37 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.SetFieldTracking(r.Context(), actorOf(r), r.PathValue("field"), in.Track))
 	}))
+	s.handle(mux, "POST /api/v1/issues/{key}/lifecycle", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.LifecycleIn
+		if !s.decode(w, r, &in) {
+			return
+		}
+		plan, err := s.Svc.Lifecycle(r.Context(), actorOf(r), r.PathValue("key"), in)
+		s.reply(w, plan, err)
+	}))
+	s.handle(mux, "GET /api/v1/projects/{key}/trash", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		t, err := s.Svc.Trash(r.Context(), actorOf(r), r.PathValue("key"))
+		s.reply(w, t, err)
+	}))
+	s.handle(mux, "POST /api/v1/issues/{key}/links", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Type   string `json:"type"`
+			Target string `json:"target"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.AddLink(r.Context(), actorOf(r), r.PathValue("key"), in.Type, in.Target))
+	}))
+	s.handle(mux, "PUT /api/v1/issues/{key}/legal-hold", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Hold bool `json:"hold"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.SetLegalHold(r.Context(), actorOf(r), r.PathValue("key"), in.Hold))
+	}))
 	s.registerSearch(mux)
 	s.registerAttachments(mux)
 	if s.Extra != nil {
@@ -483,6 +514,8 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		tp  *domain.TextPrecondition
 		pm  *domain.PatchMismatch
 		om  *domain.OffsetMismatch
+		be  *domain.BlockedError
+		ce  *domain.ConflictError
 		nd  *domain.NotDownloadable
 	)
 	switch {
@@ -494,12 +527,18 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.fail(w, 403, "forbidden", "you do not have permission to do this", nil)
 	case errors.Is(err, domain.ErrNotFound):
 		s.fail(w, 404, "not_found", "not found", nil)
+	case errors.Is(err, domain.ErrGone):
+		s.fail(w, 410, "gone", "this issue was deleted; its text stays in your draft", nil)
 	case errors.As(err, &tc):
 		s.fail(w, 409, "text_conflict", "the text was changed by "+tc.By+" while you were editing", tc)
 	case errors.As(err, &vc):
 		s.fail(w, 409, "version_conflict", err.Error(), vc)
 	case errors.As(err, &tp):
 		s.fail(w, 412, "precondition_failed", err.Error(), tp)
+	case errors.As(err, &be):
+		s.fail(w, 409, "blocked", be.Error(), be.Plan)
+	case errors.As(err, &ce):
+		s.fail(w, 409, "conflict", ce.Error(), nil)
 	case errors.As(err, &nd):
 		s.fail(w, 423, "not_downloadable", "this file is "+nd.State+" and cannot be downloaded", nil)
 	case errors.Is(err, domain.ErrBusy):

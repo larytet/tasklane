@@ -12,9 +12,17 @@ this file is updated, and the work is committed and pushed.
 | Phase | State | Notes |
 |---|---|---|
 | M1a Tracker | **built, exit gate not passed** | milestones M1a.1 to M1a.9 below; see the exit gate audit for what is still open |
-| M1b Lifecycle and exchange | not started | |
+| M1b Lifecycle and exchange | in progress | milestones M1b.1 to M1b.3 below |
 | M1c Agents | not started | |
 | M2 to M5 | not started | |
+
+## M1b milestones
+
+| Milestone | Scope | State |
+|---|---|---|
+| M1b.1 Lifecycle operations | plan-then-execute convert, move (key aliases that resolve forever in REST, TQL and the browser), clone (option matrix, blobs shared by reference), delete to trash, restore, purge (retention job, legal hold, never for agents), removed-values records, issue links, hierarchy rules, `410` for trashed issues, UI dialogs and trash page | done |
+| M1b.2 Pause state | `running`, `draining`, `paused` scopes for imports and restores, deadline and abort, `503` with `Retry-After` for API writers | next |
+| M1b.3 Exchange | JSON and CSV bundle export, import into an empty instance, generic CSV import with column mapping, dry run, idempotency | planned |
 
 ## M1a milestones
 
@@ -144,3 +152,23 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | 37 | M1a.13 | The matrix found two existence leaks: creating an issue in, or adding a member to, a project the caller cannot see answered 403 for an existing project and 404 for a missing one, so project keys could be probed | Both answer 404 when the caller has no role in the project; the leak test covers them |
 
 **Decision needed.** `GET /api/v1/users` and the assignee picker return every active user (name and email) to any signed-in person, including someone who belongs to no project. The matrix records this as the current behaviour. Jira does the same for its user picker, but a self-hosted installation with several unrelated teams may want the list limited to people who share a project, or an admin setting. Not changed without a decision.
+| 38 | M1b.1 | The move code ran statements while a `rows` cursor on the same connection was still open (pgx refuses) | Rows are read completely before any other statement; found while writing the code, covered by the move tests |
+| 39 | M1b.1 | The clone's attachments could list in a different order than the original's: they were inserted in one transaction with identical timestamps and the tiebreak was a random id | Each copy keeps the original attachment's timestamp |
+| 40 | M1b.1 | A save refused with 410 after the issue was deleted re-rendered the page and lost the explanation; the handler ignored the returned message | A toast says the issue was deleted and the text is kept in the draft; the editor and draft stay |
+| 41 | M1b.1 | `TestPRES06` became flaky under load after an earlier refactor removed its settling pause: the last connection's own subscribe messages landed inside the measuring window | The settling pause is back; the gateway was right |
+
+## M1b.1 audit against the plan (TESTPLAN section 5.15)
+
+| Id | State | Notes |
+|---|---|---|
+| LIFE-04 | done | convert with hierarchy rules, plan equals result, converting back restores the parent link and detached children. Per-status mapping UI and bulk convert are open (one workflow exists) |
+| LIFE-05 | partial | old key resolves in REST, the browser (URL corrected), TQL and search, and for people with the old key open. Not yet: MCP, Git linking, email subject and reply tokens, webhooks (those subsystems do not exist yet) |
+| LIFE-06 | partial | single move with subtasks, type mapping, status mapping, assignee clearing, epic link drop, permission and blocker cases, plan equals result. Bulk move is open (LIFE-16); sprint, security level, components and versions arrive with their features |
+| LIFE-07 | done | open editors follow the issue; drafts keep; saves through the old key follow the move |
+| LIFE-08 | done | option matrix, blobs shared by reference with correct reference counts, independent text copy, recursion with the cap of 50, cross-project clone, nothing copied that must not be |
+| LIFE-09 | done | hidden from lists, search, TQL, counts and links (placeholder); key reserved; subtask and epic handling; open editors get a notice and keep their drafts |
+| LIFE-10 | done | previous status, comments, attachments, key, subtasks; permissions. Sprint rule arrives with sprints (M2) |
+| LIFE-11 | partial | scheduled and manual purge, legal hold, agents refused, blobs released and collected, audit kept. The GDPR immediate path is M4 |
+| LIFE-13 | done | double move (one winner), move versus transition, delete versus edit, repeated under the race detector |
+| LIFE-14 | partial | every operation audited and emitted in order, dry runs leave no trace; webhooks and automation triggers do not exist yet; MCP has no delete or purge tool because there is no MCP server yet |
+| LIFE-16, LIFE-17 | open | bulk operations as resumable jobs, import and export of aliases and removed values |

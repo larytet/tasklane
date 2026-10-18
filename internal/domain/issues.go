@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +44,8 @@ type IssueView struct {
 	Transitions []TransitionOpt `json:"transitions"`
 	Comments    []Comment       `json:"comments"`
 	Attachments []Attachment    `json:"attachments"`
+	Links       []Link          `json:"links"`
+	Alias       string          `json:"alias,omitempty"` // the old key the caller used, when it differs from the current one
 	Role        string          `json:"role"`
 	Presence    []PresenceEntry `json:"presence"`
 }
@@ -125,12 +128,20 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 			return invalid("unknown issue type %q", in.Type)
 		}
 		var parentID *string
+		var childLevel int
+		tx.QueryRow(ctx, `SELECT level FROM issue_type WHERE id=$1`, typeID).Scan(&childLevel)
 		if in.Parent != "" {
 			var p string
-			if err := tx.QueryRow(ctx, `SELECT id FROM issue WHERE key=$1 AND project_id=$2 AND deleted_at IS NULL`, strings.ToUpper(in.Parent), pid).Scan(&p); err != nil {
+			var pl int
+			if err := tx.QueryRow(ctx, `SELECT i.id,t.level FROM issue i JOIN issue_type t ON t.id=i.issue_type_id WHERE i.key=$1 AND i.project_id=$2 AND i.deleted_at IS NULL`, strings.ToUpper(in.Parent), pid).Scan(&p, &pl); err != nil {
 				return invalid("parent %s not found in this project", in.Parent)
 			}
+			if pl != childLevel+1 {
+				return invalid("a %s cannot be placed under %s: a parent sits exactly one level above its child (Epic, then Story, Task or Bug, then Subtask)", in.Type, in.Parent)
+			}
 			parentID = &p
+		} else if childLevel == -1 {
+			return invalid("a Subtask needs a parent")
 		}
 		var assignee any
 		if in.Assignee != "" {
@@ -221,13 +232,41 @@ func scanIssue(row pgx.Row) (Issue, error) {
 	return i, err
 }
 
+// getIssue finds a live issue by its key or by an old key (alias). A trashed issue answers ErrGone.
 func (s *Service) getIssue(ctx context.Context, key string) (Issue, error) {
-	return scanIssue(s.DB.QueryRow(ctx, issueSelect+`WHERE i.key=$1 AND i.deleted_at IS NULL`, strings.ToUpper(key)))
+	key = strings.ToUpper(key)
+	is, err := scanIssue(s.DB.QueryRow(ctx, issueSelect+`WHERE i.key=$1 AND i.deleted_at IS NULL`, key))
+	if err != ErrNotFound {
+		return is, err
+	}
+	var cur string
+	if s.DB.QueryRow(ctx, `SELECT i.key FROM issue_key_alias a JOIN issue i ON i.id=a.issue_id WHERE a.old_key=$1 AND i.deleted_at IS NULL`, key).Scan(&cur) == nil {
+		return scanIssue(s.DB.QueryRow(ctx, issueSelect+`WHERE i.key=$1 AND i.deleted_at IS NULL`, cur))
+	}
+	var trashed bool
+	if s.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM issue i WHERE i.deleted_at IS NOT NULL AND (i.key=$1 OR i.id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1)))`, key).Scan(&trashed) == nil && trashed {
+		return is, ErrGone
+	}
+	return is, ErrNotFound
+}
+
+// ResolveKey returns the current key for a key or an old key, or ErrNotFound.
+func (s *Service) ResolveKey(ctx context.Context, key string) (string, error) {
+	is, err := s.getIssue(ctx, key)
+	return is.Key, err
 }
 
 // access loads the issue and checks the actor may at least read it; returns the role.
 func (s *Service) access(ctx context.Context, a Actor, key string) (Issue, string, error) {
 	is, err := s.getIssue(ctx, key)
+	if errors.Is(err, ErrGone) { // only people who can see the project learn that an issue is in the trash
+		var pid string
+		s.DB.QueryRow(ctx, `SELECT project_id FROM issue WHERE key=$1 OR id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1) LIMIT 1`, strings.ToUpper(key)).Scan(&pid)
+		if pid == "" || s.role(ctx, a, pid) == "" {
+			return is, "", ErrNotFound
+		}
+		return is, "", ErrGone
+	}
 	if err != nil {
 		return is, "", err
 	}
@@ -266,6 +305,12 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 	}
 	if v.Attachments, err = s.listAttachments(ctx, is.ID); err != nil {
 		return v, err
+	}
+	if v.Links, err = s.listLinks(ctx, is.ID); err != nil {
+		return v, err
+	}
+	if !strings.EqualFold(key, is.Key) {
+		v.Alias = strings.ToUpper(key)
 	}
 	v.Presence = s.Presence.List(is.Key, a.ID)
 	return v, nil

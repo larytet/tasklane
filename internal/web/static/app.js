@@ -84,6 +84,7 @@
       h('span', { class: 'brand', tabindex: 0, role: 'link', onclick: () => { location.hash = '#/'; }, onkeydown: e => { if (e.key === 'Enter') location.hash = '#/'; } }, 'Tasklane'),
       q,
       h('button', { class: 'btn primary', onclick: createDialog }, '+ Create'),
+      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
       h('span', { class: 'muted' }, S.me ? S.me.label : ''),
       h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/logout'); S.me = null; route(); } }, 'Sign out'));
@@ -137,6 +138,36 @@
     sum.focus();
   }
 
+  // A lifecycle operation: show the plan first (a dry run changes nothing), apply only when the person confirms.
+  function lifecycleDialog(key, op, title, controls, build, onDone) {
+    const out = h('div', { 'aria-live': 'polite' }), err = h('div', { class: 'err', role: 'alert' });
+    const apply = h('button', { class: 'btn primary', disabled: true }, 'Apply');
+    let latest = 0;
+    async function refresh() {
+      const n = ++latest;
+      clear(out).append(h('span', { class: 'muted' }, 'Planning…'));
+      apply.disabled = true;
+      const body = Object.assign({ op, dry_run: true }, build());
+      const r = await api('POST', '/api/v1/issues/' + key + '/lifecycle', body);
+      if (n !== latest) return; // a newer plan is on its way
+      clear(out);
+      const plan = r.status === 200 ? r.data : (r.data && r.data.detail && r.data.detail.op ? r.data.detail : null);
+      if (!plan) { out.append(h('div', { class: 'err' }, (r.data && r.data.error) || 'Could not plan')); return; }
+      const list = (label, items, cls) => items && items.length ? h('div', { class: cls || '' }, h('strong', {}, label), h('ul', {}, items.map(i => h('li', {}, i)))) : null;
+      const counts = Object.entries(plan.counts || {}).map(([k2, v]) => k2.replace(/_/g, ' ') + ': ' + v).join(' · ');
+      out.append(list('Blocked', plan.blockers, 'err'), list('This will', plan.changes), list('Dropped', plan.drops), list('Warnings', plan.warnings), counts ? h('div', { class: 'muted' }, counts) : null);
+      apply.disabled = plan.blockers.length > 0;
+    }
+    apply.addEventListener('click', async () => {
+      apply.disabled = true;
+      const r = await api('POST', '/api/v1/issues/' + key + '/lifecycle', Object.assign({ op, expect_key: key }, build()));
+      if (r.status === 200) { close(); onDone(r.data); } else { err.textContent = (r.data && r.data.error) || 'Failed'; apply.disabled = false; }
+    });
+    const close = modal(h('div', {}, h('h2', {}, title), h('div', { class: 'chips' }, controls.map(c => { c.addEventListener('change', refresh); return c; })), out, err,
+      h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), apply)));
+    refresh();
+  }
+
   function modal(content) {
     const prev = document.activeElement;
     const scrim = h('div', { class: 'scrim', onmousedown: e => { if (e.target === scrim) close(); } }, h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true' }, content));
@@ -163,18 +194,21 @@
   function localDraft(key, f) { try { return JSON.parse(localStorage.getItem(draftKey(key, f))); } catch (e) { return null; } }
   function setLocalDraft(key, f, v) { try { if (v) localStorage.setItem(draftKey(key, f), JSON.stringify(v)); else localStorage.removeItem(draftKey(key, f)); } catch (e) { /* storage unavailable */ } }
 
-  async function issueView(key) {
+  async function issueView(requestedKey) {
+    let key = requestedKey;
     stopTimers();
     const root = h('div', { class: 'page' });
     clear($app).append(topbar(), root);
     let v = await load();
     async function load() {
       const r = await api('GET', '/api/v1/issues/' + key + '/view');
+      if (r.status === 410) { clear(root).append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted. ', h('a', { href: '#/trash/' + key.split('-')[0] }, 'Open the trash'))); return null; }
       if (r.status === 404) { clear(root).append(h('p', {}, 'Issue not found, or you do not have access.')); return null; }
       return r.data;
     }
     if (!v) return;
-    const st = { v, editing: null, dirty: false, saveId: null, serverTimer: 0, localTimer: 0, changedBy: null };
+    const st = { v, editing: null, dirty: false, saveId: null, serverTimer: 0, localTimer: 0, changedBy: null, deleted: null };
+    if (v.alias && v.issue.key !== key) { key = v.issue.key; history.replaceState(null, '', '#/issue/' + key); } // an old key redirects to the current one
     S.view = st;
     render();
 
@@ -186,7 +220,9 @@
       // header: presence stack
       root.append(h('div', { class: 'chips' },
         h('button', { class: 'btn ghost', onclick: () => history.back(), 'aria-label': 'Back' }, '←'),
-        h('span', { class: 'key' }, is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' })));
+        h('span', { class: 'key' }, is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' }),
+        canEdit() ? h('button', { class: 'btn', 'aria-haspopup': 'dialog', onclick: actionsMenu }, 'Actions ▾') : null));
+      if (st.deleted) root.append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted' + (st.deleted.by ? ' by ' + st.deleted.by : '') + '. Anything you were typing stays in your draft. ', h('a', { href: '#/trash/' + is.project }, 'Open the trash')));
       fillPresence();
       root.append(subjectEl(is));
       root.append(chipLine(is));
@@ -221,6 +257,39 @@
       document.querySelectorAll('[data-note]').forEach(fillNote);
       const warn = document.getElementById('editing-warning');
       if (warn) { const o = (v.presence || []).find(p => p.editing === 'description'); clear(warn); if (o) warn.append(h('div', { class: 'banner warn' }, o.name + ' is also editing this field. You can continue; if you both save you may need to merge.')); }
+    }
+
+    // ----- lifecycle actions: clone, move, convert, delete
+    function actionsMenu() {
+      const is = v.issue;
+      const close = modal(h('div', {}, h('h2', {}, 'Actions for ' + is.key),
+        h('div', { class: 'chips', style: 'flex-direction:column;align-items:stretch' },
+          h('button', { class: 'btn', onclick: () => { close(); cloneDialog(); } }, 'Clone…'),
+          h('button', { class: 'btn', onclick: () => { close(); moveDialog(); } }, 'Move to another project…'),
+          h('button', { class: 'btn', onclick: () => { close(); convertDialog(); } }, 'Change issue type…'),
+          h('button', { class: 'btn', onclick: () => { close(); deleteDialog(); } }, 'Delete…')),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Close'))));
+    }
+    const projectSelect = (exclude, label) => h('select', { 'aria-label': label }, S.projects.filter(p => p.key !== exclude).map(p => h('option', { value: p.key }, p.key + ' · ' + p.name)));
+    function cloneDialog() {
+      const proj = projectSelect('', 'Target project'); proj.value = v.issue.project;
+      const cb = (id, text, on) => h('label', { style: 'display:flex;gap:6px;align-items:center' }, h('input', { type: 'checkbox', id, checked: on }), text);
+      const att = cb('c-att', 'Attachments', true), subs = cb('c-sub', 'Subtasks', true), com = cb('c-com', 'Comments', false), lnk = cb('c-lnk', 'Links', false);
+      lifecycleDialog(key, 'clone', 'Clone ' + v.issue.key, [proj, att, subs, com, lnk],
+        () => ({ clone: { project: proj.value, attachments: att.querySelector('input').checked, subtasks: subs.querySelector('input').checked, comments: com.querySelector('input').checked, links: lnk.querySelector('input').checked } }),
+        r => { location.hash = '#/issue/' + r.result_key; });
+    }
+    function moveDialog() {
+      const proj = projectSelect(v.issue.project, 'Target project');
+      if (!proj.options.length) { toast('There is no other project to move to.'); return; }
+      lifecycleDialog(key, 'move', 'Move ' + v.issue.key, [proj], () => ({ project: proj.value }), r => { toast('Moved to ' + r.result_key + '. The old key keeps working.'); location.hash = '#/issue/' + r.result_key; });
+    }
+    function convertDialog() {
+      const type = h('select', { 'aria-label': 'New type' }, ['Epic', 'Story', 'Task', 'Bug', 'Subtask'].filter(t => t !== v.issue.type).map(t => h('option', {}, t)));
+      lifecycleDialog(key, 'convert', 'Change the type of ' + v.issue.key, [type], () => ({ type: type.value }), () => { toast('Type changed'); reloadAll(); });
+    }
+    function deleteDialog() {
+      lifecycleDialog(key, 'delete', 'Delete ' + v.issue.key, [], () => ({}), () => { toast('Moved to the trash. It can be restored for 30 days.'); location.hash = '#/'; });
     }
 
     // ----- subject (editable in place; same save protocol as the description)
@@ -323,7 +392,7 @@
         const r = await saveText('description', ed.body, ed.baseSeq, 'save', st.saveId);
         if (r.ok) { stopEditing(true); await reloadAll(); }
         else if (r.conflict) { st.saveId = null; await conflictDialog('description', r.conflict, ed.body, async () => { stopEditing(true); await reloadAll(); }); }
-        else { state.textContent = 'Offline, draft kept'; } // same save id on retry: a replay can never apply twice
+        else { state.textContent = r.msg || 'Offline, draft kept'; } // same save id on retry: a replay can never apply twice
       };
       box.append(h('div', { class: 'chips' }, state, h('span', { class: 'grow' }),
         h('button', { class: 'btn', onclick: () => { if (!st.dirty || confirm('Discard unsaved changes? Your draft is kept.')) stopEditing(false); render(); } }, 'Cancel'),
@@ -351,6 +420,12 @@
       catch (e) { return { msg: 'Offline, draft kept' }; }
       if (r.status === 200) return { ok: true, seq: r.data.seq, removed: r.data.removed };
       if (r.status === 409 && r.data.code === 'text_conflict') return { conflict: r.data.detail };
+      if (r.status === 410) {
+        st.deleted = st.deleted || {};
+        toast('This issue was deleted; your text is kept in your draft.');
+        render();
+        return { msg: 'This issue was deleted; your text is kept in your draft' };
+      }
       return { msg: (r.data && r.data.error) || 'Could not save' };
     }
 
@@ -520,6 +595,8 @@
     S.timers.push(setInterval(() => { if (!RT.up || ++tick % 8 === 0) poll(); }, 4000)); // fallback: every 4 s without the socket, every 32 s with it
     rtSub(key, m => {
       if (m.type === 'presence') { v.presence = m.presence; updatePresenceUI(); }
+      else if (m.type === 'event' && m.event.type === 'issue.deleted') { st.deleted = { by: m.event.actor }; render(); }
+      else if (m.type === 'event' && m.event.type === 'issue.moved') { const nk = (m.event.fields || [])[0]; if (nk) { toast(m.event.actor + ' moved this issue to ' + nk); location.replace('#/issue/' + nk); } }
       else if (m.type === 'event') { if (m.event.actor_id !== S.me.id || m.event.type === 'attachment.changed') poll(); }
       else if (m.type === 'error' && m.code === 'denied') toast('You no longer have access to this issue.');
     });
@@ -528,12 +605,33 @@
     window.onbeforeunload = e => { if (st.dirty) { e.preventDefault(); e.returnValue = ''; } };
   }
 
+  // ---------- trash ----------
+  async function trashView(projectKey) {
+    stopTimers();
+    const sel = h('select', { 'aria-label': 'Project' }, S.projects.map(p => h('option', { value: p.key, selected: p.key === projectKey }, p.key + ' · ' + p.name)));
+    sel.addEventListener('change', () => { location.hash = '#/trash/' + sel.value; });
+    const box = h('div', { class: 'card', role: 'list' });
+    clear($app).append(topbar(), h('div', { class: 'page' }, h('div', { class: 'chips' }, h('h2', { style: 'margin:0' }, 'Trash'), sel), h('p', { class: 'muted' }, 'Deleted issues can be restored until their retention ends; their keys stay reserved.'), box));
+    const r = await api('GET', '/api/v1/projects/' + projectKey + '/trash');
+    if (r.status !== 200) { box.append(h('div', { class: 'row' }, 'The trash could not be loaded.')); return; }
+    if (!r.data.length) box.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'The trash is empty.')));
+    for (const e of r.data) {
+      box.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'key' }, e.key), h('span', { class: 'sum' }, e.summary),
+        h('span', { class: 'muted' }, 'deleted by ' + e.deleted_by + ' · purged ' + new Date(e.purge_after).toISOString().slice(0, 10) + (e.legal_hold ? ' · legal hold' : '')),
+        h('button', { class: 'btn', onclick: async () => {
+          const rr = await api('POST', '/api/v1/issues/' + e.key + '/lifecycle', { op: 'restore' });
+          if (rr.status === 200) { toast('Restored ' + e.key); trashView(projectKey); } else toast((rr.data && rr.data.error) || 'Could not restore');
+        } }, 'Restore')));
+    }
+  }
+
   // ---------- routing ----------
   function route() {
     window.onbeforeunload = null;
     if (!S.me) return loginView();
     const hash = location.hash || '#/';
     let m;
+    if ((m = hash.match(/^#\/trash\/([A-Za-z0-9]*)/))) return trashView(m[1].toUpperCase() || (S.projects[0] && S.projects[0].key) || '');
     if ((m = hash.match(/^#\/issue\/([A-Za-z0-9-]+)/))) return issueView(m[1].toUpperCase());
     const q = hash.startsWith('#/?q=') ? decodeURIComponent(hash.slice(5)) : '';
     return listView(q);

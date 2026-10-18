@@ -198,6 +198,16 @@ func rows() []row {
 		}},
 		{"POST /api/v1/attachments/{id}/link", reader, func(f *fixture) req { return J("POST", "/api/v1/attachments/"+f.attachment(f.issue())+"/link", nil) }},
 		{"GET /api/v1/attachments/{id}/download", reader, func(f *fixture) req { return J("GET", "/api/v1/attachments/"+f.attachment(f.issue())+"/download", nil) }},
+		{"POST /api/v1/issues/{key}/lifecycle", writer, func(f *fixture) req {
+			return J("POST", "/api/v1/issues/"+f.issue()+"/lifecycle", map[string]any{"op": "clone"})
+		}},
+		{"GET /api/v1/projects/{key}/trash", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/trash", nil) }},
+		{"POST /api/v1/issues/{key}/links", writer, func(f *fixture) req {
+			return J("POST", "/api/v1/issues/"+f.issue()+"/links", map[string]any{"type": "relates", "target": "ABC-1"})
+		}},
+		{"PUT /api/v1/issues/{key}/legal-hold", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/issues/"+f.issue()+"/legal-hold", map[string]any{"hold": false})
+		}},
 		{"GET /files/{id}", exp{anon: codes(403), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req { return J("GET", "/files/"+f.attachment(f.issue()), nil) }},
 	}
 }

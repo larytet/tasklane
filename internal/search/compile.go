@@ -147,7 +147,12 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 				}
 				vs = append(vs, s)
 			}
-			return negate(isNeg, col+" = ANY("+c.arg(vs)+"::text[])"), nil
+			arg := c.arg(vs)
+			cond := col + " = ANY(" + arg + "::text[])"
+			if x.Field == "key" || x.Field == "issuekey" { // an old key finds the issue forever
+				cond = "(" + cond + " OR i.id IN (SELECT issue_id FROM issue_key_alias WHERE old_key = ANY(" + arg + "::text[])))"
+			}
+			return negate(isNeg, cond), nil
 		case "is", "isnot":
 			if x.Field == "parent" {
 				if x.Op == "is" {

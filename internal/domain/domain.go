@@ -19,6 +19,8 @@ type Service struct {
 	Presence *Presence
 	Blobs    *Blobs
 	Mail     *MailConfig
+	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
+	TrashRetention time.Duration
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:
 	// a lost event is repaired by a refetch, and nothing depends on delivery.
 	Publish func(Event)
@@ -41,6 +43,8 @@ type Actor struct {
 var (
 	ErrNotFound  = errors.New("not found")
 	ErrForbidden = errors.New("forbidden")
+	// ErrGone: the issue is in the trash (HTTP 410). Only people who can see its project are told.
+	ErrGone = errors.New("gone")
 )
 
 // InvalidError is a validation failure that is the caller's fault (HTTP 400).

@@ -33,11 +33,13 @@ export default async function globalSetup() {
   const admin = await api(null, 'POST', '/api/v1/login', { email: 'admin@example.com', password: 'adminpass1' });
   const ck = admin.cookie;
   await api(ck, 'POST', '/api/v1/projects', { key: 'ABC', name: 'Alpha' });
+  await api(ck, 'POST', '/api/v1/projects', { key: 'XYZ', name: 'Xray' });
   const ids = {};
   for (const [email, name] of [['jana@example.com', 'Jana K.'], ['arkady@example.com', 'Arkady M.'], ['viewer@example.com', 'Vera V.']]) {
     const u = await api(ck, 'POST', '/api/v1/users', { email, name, password: 'password123' });
     ids[email] = u.data.id;
     await api(ck, 'POST', '/api/v1/projects/ABC/members', { user: u.data.id, role: email.startsWith('viewer') ? 'viewer' : 'member' });
+    if (!email.startsWith('viewer')) await api(ck, 'POST', '/api/v1/projects/XYZ/members', { user: u.data.id, role: 'member' });
   }
   await api(ck, 'POST', '/api/v1/issues', { project: 'ABC', type: 'Bug', summary: 'Checkout fails on 3DS challenge', priority: 'high', labels: ['payments'],
     description: 'Steps:\n\n1. Use test card\n\nExpected: order created\n\nNotes: see https://example.com/runbook' });
