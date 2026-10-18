@@ -30,6 +30,8 @@ type Config struct {
 	OSReplicas          int64
 	SecretKey           string
 	BlobBackend         string
+	BlobFallback        string
+	BlobFallbackDir     string
 	S3Endpoint          string
 	S3Region            string
 	S3Bucket            string
@@ -74,6 +76,8 @@ var Schema = []Key{
 	{Name: "blob_backend", Default: "fs", Kind: "enum", Enum: []string{"fs", "s3"}, Doc: "Where attachments are kept: `fs` (a directory, `blob_dir`) or `s3` (any S3-compatible service; `blob_dir` then holds only upload staging)"},
 	{Name: "s3_endpoint", Default: "", Kind: "string", Doc: "S3 endpoint URL for MinIO and other compatible services, such as `http://minio:9000`. Empty means AWS S3. A custom endpoint implies path-style addressing"},
 	{Name: "s3_region", Default: "us-east-1", Kind: "string", Doc: "S3 region used for request signing"},
+	{Name: "blob_fallback", Default: "none", Kind: "enum", Enum: []string{"none", "fs", "s3"}, Doc: "While moving attachments from one backend to another: the old backend. Reads that are not in `blob_backend` are answered from it (and copied across), writes go to `blob_backend` only. `fs` uses `blob_fallback_dir`; `s3` uses the `s3_*` settings. Run `tasklane blobs migrate` to copy the rest, then set this back to `none`"},
+	{Name: "blob_fallback_dir", Default: "", Kind: "string", Doc: "The old attachment directory when `blob_fallback=fs`"},
 	{Name: "s3_bucket", Default: "", Kind: "string", Doc: "S3 bucket (required with `blob_backend=s3`; it must already exist)"},
 	{Name: "s3_prefix", Default: "", Kind: "string", Doc: "Optional key prefix, so a bucket can be shared, for example `tasklane/`"},
 	{Name: "s3_access_key", Default: "", Kind: "string", Secret: true, Doc: "S3 access key id"},
@@ -376,7 +380,7 @@ func Load(o Options) (Config, error) {
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
 	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], SearchEngine: m["search_engine"], OSURL: m["opensearch_url"], OSUser: m["opensearch_user"], OSPassword: m["opensearch_password"],
 		OSAPIKey: m["opensearch_api_key"], OSAllowPrivate: m["opensearch_allow_private"] == "true", WebhookAllowPrivate: m["webhook_allow_private"] == "true", PasswordMinLength: n("password_min_length"), SSOAllowPrivate: m["sso_allow_private"] == "true", OSIndex: m["opensearch_index"], OSShards: n("opensearch_shards"), OSReplicas: n("opensearch_replicas"), MaxUploadMB: n("max_upload_mb"),
-		BlobBackend: m["blob_backend"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
+		BlobBackend: m["blob_backend"], BlobFallback: m["blob_fallback"], BlobFallbackDir: m["blob_fallback_dir"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
 		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],
 		SMTPTLS: m["smtp_tls"], SMTPUser: m["smtp_user"], SMTPPass: m["smtp_pass"], AdminEmail: m["admin_email"], AdminPassword: m["admin_password"],

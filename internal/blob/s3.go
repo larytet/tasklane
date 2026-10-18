@@ -163,6 +163,10 @@ func (c *S3Client) do(ctx context.Context, op, method string, u *url.URL, hdr ma
 		}
 		if body != nil {
 			req.ContentLength = size
+			if size == 0 { // a non-nil body with length 0 is sent chunked, which S3 refuses: an empty object has no body at all
+				req.Body = http.NoBody
+				rc.Close()
+			}
 		}
 		for k, v := range hdr {
 			req.Header.Set(k, v)

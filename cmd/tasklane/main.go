@@ -158,7 +158,7 @@ func main() {
 	case "version":
 		fmt.Println(version)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck config create-admin version\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck blobs config create-admin version\n", cmd)
 		os.Exit(2)
 	}
 }

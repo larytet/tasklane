@@ -14,6 +14,8 @@ Precedence, lowest to highest: built-in default, config file (`--config PATH`, `
 | `blob_backend` | `TASKLANE_BLOB_BACKEND` | `--blob-backend` | `fs` | Where attachments are kept: `fs` (a directory, `blob_dir`) or `s3` (any S3-compatible service; `blob_dir` then holds only upload staging) |
 | `s3_endpoint` | `TASKLANE_S3_ENDPOINT` | `--s3-endpoint` | unset | S3 endpoint URL for MinIO and other compatible services, such as `http://minio:9000`. Empty means AWS S3. A custom endpoint implies path-style addressing |
 | `s3_region` | `TASKLANE_S3_REGION` | `--s3-region` | `us-east-1` | S3 region used for request signing |
+| `blob_fallback` | `TASKLANE_BLOB_FALLBACK` | `--blob-fallback` | `none` | While moving attachments from one backend to another: the old backend. Reads that are not in `blob_backend` are answered from it (and copied across), writes go to `blob_backend` only. `fs` uses `blob_fallback_dir`; `s3` uses the `s3_*` settings. Run `tasklane blobs migrate` to copy the rest, then set this back to `none` |
+| `blob_fallback_dir` | `TASKLANE_BLOB_FALLBACK_DIR` | `--blob-fallback-dir` | unset | The old attachment directory when `blob_fallback=fs` |
 | `s3_bucket` | `TASKLANE_S3_BUCKET` | `--s3-bucket` | unset | S3 bucket (required with `blob_backend=s3`; it must already exist) |
 | `s3_prefix` | `TASKLANE_S3_PREFIX` | `--s3-prefix` | unset | Optional key prefix, so a bucket can be shared, for example `tasklane/` |
 | `s3_access_key` | `TASKLANE_S3_ACCESS_KEY`, `TASKLANE_S3_ACCESS_KEY_FILE` | `--s3-access-key` | unset | S3 access key id |
