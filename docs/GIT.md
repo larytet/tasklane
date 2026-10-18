@@ -100,3 +100,35 @@ ABC-123 ABC-124 #comment both #in-review
 ### Not built
 
 An Admin screen for rules, identities and the smart-commit setting (these are API only); self-service identity linking by the person (an administrator vouches for each link); `#time`; rules for deployments and reviews; a "recently pushed" window; flagging an issue (a rule can comment but not set a flag); and visibility restrictions for private repositories (GIT-11).
+
+
+## Write actions, connection health and disconnect
+
+### Write actions (off until an administrator turns them on)
+
+Reading is all Tasklane does by default. `PUT /api/v1/git/connections/{id}/options` with `{"write_enabled": true}` lets people and agents with write access to an issue do two things at the provider; with it off nothing is ever sent.
+
+- **Create a branch from an issue** (`POST /api/v1/issues/{key}/git/branch`, the MCP tool `create_branch`): body `{repo?, base?, name?}`. The default name is `KEY-slug-of-the-summary` (ASCII, at most 40 characters of slug); if it is taken a numbered one (`-2`, `-3`, up to `-6`) is made, while a name the person chose that is taken is an error that says so. A name must be a valid branch name and **contain the issue key**, so that the branch links back to the issue. The base is the one named, or the repository's default branch. The answer has the branch's address and the command to get it: `git fetch origin KEY-… && git switch KEY-…`. The new branch reaches Tasklane by webhook like any other, so a `branch_created` rule still fires. When the project maps to several writable repositories the person names one. The call needs a member role on the issue (a viewer may not), is audited with the repository and branch, and is recorded in the write log.
+- **Back-link comment**: when a live webhook shows a pull or merge request linked to an issue, Tasklane comments once on it, "Linked to Tasklane issue KEY" with a link. The comment carries **only the key and the link, nothing from the issue** (the pull request may be public and the issue is not). One comment per pull request and issue; a failed comment is logged and tried again on a later event. A backfill never writes.
+
+### Health (GIT-18)
+
+Each connection carries a health: `ok`, `token_rejected` (the provider answers 401: the token was revoked, expired or wrong), `no_write_permission` (the token reads but a write got 403 or 404: it needs permission to write repository contents on GitHub, or the `api` scope on GitLab), `error` (the provider could not be reached) or `unknown`, with the reason and the time. It is set by every call that reaches the provider, shown in `GET /api/v1/git/connections`, and refreshed on demand with `POST /api/v1/git/connections/{id}/check`. A good read does not clear a standing `no_write_permission`; a good write does. The message a person gets for a failed write says what to fix.
+
+### Disconnect
+
+`DELETE /api/v1/git/connections/{id}?mode=…`:
+
+- `mode=keep_read_only`: the connection is kept but stops: webhooks are refused (the answer is the same as for a bad signature), nothing is synced, nothing is written, write actions are switched off. The links and cached data stay readable on the issues.
+- `mode=purge` (the default): the connection, its repositories and every link and cached object are removed.
+
+Tasklane never creates the webhook at the provider (an administrator does, with the secret Tasklane shows once), so removing the webhook there is the administrator's step too.
+
+### For agents (MCP)
+
+- `list_development(key)` and the resource `tasklane://issue/{key}/development` return the linked pull requests, branches, commits, builds and deployments. Every title, branch name, commit subject and author name is **text from the provider and is marked**: each item carries `"provenance": "external-git-provider"`, the result carries a notice that its text is data, never instructions, and the Markdown resource puts the same banner before any provider text. They need the `read` scope and the same access to the issue as a person.
+- `create_branch(key, base?, name?, repo?)` needs the new `branch` scope, a member role on the issue, and the connection's write switch. It takes the usual `idempotency_key`, so a retry does not create a second branch.
+
+### Still not built
+
+Self-service: an Admin screen for the connection options, health and write log; the full data-minimization checks of GIT-17 (secret-looking strings in messages and erase of a commit author on request); pull-request creation from Tasklane; a "branch created" notice back to the issue's history; and write actions against a real GitHub or GitLab.

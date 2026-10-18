@@ -30,3 +30,8 @@ MCP clients that support it connect without a pasted token: point the client at 
 - **Tokens.** The client exchanges the single-use code (valid for two minutes, bound to the client and the redirect address) plus its PKCE verifier for an access token (one hour) and a refresh token (thirty days) that **changes on every use**. Using an old refresh token again revokes the whole grant, the access tokens it issued included.
 - **What the client can do.** The access token is the person's own scoped token: the scopes they approved are a ceiling, and the person's own rights are applied as well, so a client never does more than the person (a viewer's client cannot change anything whatever scopes it was given). In history and comments it shows as "Agent: <client name> (via <person>)", and agent rules such as transitions that need a person and write budgets apply.
 - **Disconnecting.** Account → Connected applications shows each client and what it may do, and disconnects it at once (its tokens stop on their next request). `POST /oauth/revoke` does the same for a client that signs out; an administrator ending a person's access, or deactivating the account, ends their grants too.
+
+
+## Git tools
+
+`list_development` (scope `read`) and the resource `tasklane://issue/{key}/development` return the code linked to an issue; every piece of provider text in them is marked `external-git-provider` and is untrusted. `create_branch` (scope `branch`, a write: it takes an `idempotency_key`) creates a branch for the issue at the provider when an administrator has turned write actions on for the connection. See `docs/GIT.md`.

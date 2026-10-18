@@ -99,15 +99,20 @@ func fingerprint(secret string) string {
 // ---------- connections and repositories ----------
 
 type GitConnection struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Provider     string   `json:"provider"`
-	BaseURL      string   `json:"base_url"`
-	TokenFP      string   `json:"token_fingerprint"`
-	WebhookFP    string   `json:"webhook_fingerprint"`
-	AllowPrivate bool     `json:"allow_private"`
-	AllowedCIDRs []string `json:"allowed_cidrs"`
-	BackfillDays int      `json:"backfill_days"`
+	ID           string     `json:"id"`
+	WriteEnabled bool       `json:"write_enabled"`
+	Disabled     bool       `json:"disconnected"` // disconnected and kept read-only
+	Health       string     `json:"health"`       // unknown, ok, token_rejected, no_write_permission or error
+	HealthDetail string     `json:"health_detail,omitempty"`
+	HealthAt     *time.Time `json:"health_checked_at,omitempty"`
+	Name         string     `json:"name"`
+	Provider     string     `json:"provider"`
+	BaseURL      string     `json:"base_url"`
+	TokenFP      string     `json:"token_fingerprint"`
+	WebhookFP    string     `json:"webhook_fingerprint"`
+	AllowPrivate bool       `json:"allow_private"`
+	AllowedCIDRs []string   `json:"allowed_cidrs"`
+	BackfillDays int        `json:"backfill_days"`
 }
 
 type GitConnIn struct {
@@ -199,7 +204,7 @@ func (s *Service) ListGitConnections(ctx context.Context, a Actor) ([]GitConnect
 	if err := adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT id::text,name,provider,base_url,token_fp,webhook_fp,allow_private,allowed_cidrs,backfill_days FROM git_connection ORDER BY name`)
+	rows, err := s.DB.Query(ctx, `SELECT id::text,name,provider,base_url,token_fp,webhook_fp,allow_private,allowed_cidrs,backfill_days,write_enabled,disabled,health,health_detail,health_at FROM git_connection ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +212,7 @@ func (s *Service) ListGitConnections(ctx context.Context, a Actor) ([]GitConnect
 	out := []GitConnection{}
 	for rows.Next() {
 		var c GitConnection
-		rows.Scan(&c.ID, &c.Name, &c.Provider, &c.BaseURL, &c.TokenFP, &c.WebhookFP, &c.AllowPrivate, &c.AllowedCIDRs, &c.BackfillDays)
+		rows.Scan(&c.ID, &c.Name, &c.Provider, &c.BaseURL, &c.TokenFP, &c.WebhookFP, &c.AllowPrivate, &c.AllowedCIDRs, &c.BackfillDays, &c.WriteEnabled, &c.Disabled, &c.Health, &c.HealthDetail, &c.HealthAt)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -300,12 +305,16 @@ func (s *Service) ReceiveGitWebhook(ctx context.Context, connID, remoteIP string
 	var provider string
 	var whEnc []byte
 	var cidrs []string
-	err := s.DB.QueryRow(ctx, `SELECT provider,webhook_secret_enc,allowed_cidrs FROM git_connection WHERE id::text=$1`, connID).Scan(&provider, &whEnc, &cidrs)
+	var disabled bool
+	err := s.DB.QueryRow(ctx, `SELECT provider,webhook_secret_enc,allowed_cidrs,disabled FROM git_connection WHERE id::text=$1`, connID).Scan(&provider, &whEnc, &cidrs, &disabled)
 	if err == pgx.ErrNoRows || (err != nil && strings.Contains(err.Error(), "invalid input syntax")) {
 		return WebhookResult{}, ErrNotFound
 	}
 	if err != nil {
 		return WebhookResult{}, err
+	}
+	if disabled { // disconnected: nothing more is accepted, and the answer is the same as for a bad signature
+		return WebhookResult{}, ErrForbidden
 	}
 	if len(body) > MaxWebhookBytes {
 		return WebhookResult{}, &PayloadTooLarge{Limit: MaxWebhookBytes}
@@ -405,6 +414,9 @@ func trimErr(err error) string {
 }
 
 type repoInfo struct {
+	connID        string
+	write         bool // the connection has write actions on
+	disabled      bool
 	id            string
 	projects      map[string]string // project key -> project id
 	provider      string
@@ -413,7 +425,8 @@ type repoInfo struct {
 
 func (s *Service) repoFor(ctx context.Context, connID, full string) (*repoInfo, error) {
 	var r repoInfo
-	err := s.DB.QueryRow(ctx, `SELECT r.id::text,c.provider,r.default_branch FROM git_repo r JOIN git_connection c ON c.id=r.connection_id WHERE r.connection_id::text=$1 AND lower(r.full_name)=lower($2)`, connID, full).Scan(&r.id, &r.provider, &r.defaultBranch)
+	err := s.DB.QueryRow(ctx, `SELECT r.id::text,c.provider,r.default_branch,c.write_enabled,c.disabled FROM git_repo r JOIN git_connection c ON c.id=r.connection_id WHERE r.connection_id::text=$1 AND lower(r.full_name)=lower($2)`, connID, full).Scan(&r.id, &r.provider, &r.defaultBranch, &r.write, &r.disabled)
+	r.connID = connID
 	if err == pgx.ErrNoRows {
 		return nil, nil // an event for a repository nobody mapped: ignored
 	}
@@ -465,6 +478,7 @@ func (s *Service) applyGitEvents(ctx context.Context, connID string, evs []git.E
 		if live && ap != nil {
 			s.runGitRules(ctx, ri, *ap)
 			s.runSmartCommits(ctx, ri, *ap)
+			s.postBacklinks(ctx, ri, *ap)
 		}
 	}
 	for k := range touched {

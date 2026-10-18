@@ -14,7 +14,8 @@ import (
 )
 
 // Client reads a provider's REST API for backfill and reconcile. It respects the provider's rate limits (Retry-After and
-// the primary limit headers), sends conditional requests, and follows pagination. It only ever sends GET requests.
+// the primary limit headers), sends conditional requests, and follows pagination. Reading only ever sends GET requests; the
+// opt-in write actions are in write.go.
 type Client struct {
 	Provider string // github or gitlab
 	BaseURL  string // https://api.github.com, https://gitlab.example.com
@@ -106,6 +107,8 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, http.Header, error)
 		case resp.StatusCode >= 500 && attempt < 3:
 			c.sleep(time.Duration(200<<attempt) * time.Millisecond)
 			continue
+		case resp.StatusCode == 401:
+			return nil, nil, fmt.Errorf("%w (%s %s: 401)", ErrBadCredentials, c.Provider, safeURL(u))
 		default:
 			return nil, nil, fmt.Errorf("%s %s: %d %s", c.Provider, safeURL(u), resp.StatusCode, strings.TrimSpace(string(body[:min(len(body), 200)])))
 		}

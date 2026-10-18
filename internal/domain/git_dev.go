@@ -286,13 +286,17 @@ func (s *Service) syncGitRepo(ctx context.Context, repoID string) (int, error) {
 	var last *time.Time
 	var etagsRaw []byte
 	var days int
-	err := s.DB.QueryRow(ctx, `SELECT r.connection_id::text,r.full_name,r.last_sync_at,r.etags,c.backfill_days FROM git_repo r JOIN git_connection c ON c.id=r.connection_id WHERE r.id::text=$1`, repoID).
-		Scan(&connID, &full, &last, &etagsRaw, &days)
+	var disabled bool
+	err := s.DB.QueryRow(ctx, `SELECT r.connection_id::text,r.full_name,r.last_sync_at,r.etags,c.backfill_days,c.disabled FROM git_repo r JOIN git_connection c ON c.id=r.connection_id WHERE r.id::text=$1`, repoID).
+		Scan(&connID, &full, &last, &etagsRaw, &days, &disabled)
 	if err == pgx.ErrNoRows || (err != nil && strings.Contains(err.Error(), "invalid input syntax")) {
 		return 0, ErrNotFound
 	}
 	if err != nil {
 		return 0, err
+	}
+	if disabled {
+		return 0, invalid("this connection was disconnected and is kept read-only: nothing is synced")
 	}
 	cl, _, err := s.GitClientFor(ctx, connID)
 	if err != nil {
@@ -308,6 +312,7 @@ func (s *Service) syncGitRepo(ctx context.Context, repoID string) (int, error) {
 		since = last.Add(-time.Hour)
 	}
 	evs, err := cl.Backfill(ctx, full, since, 1000)
+	s.noteGitHealth(ctx, connID, err)
 	if err != nil {
 		s.DB.Exec(ctx, `UPDATE git_repo SET sync_error=$2 WHERE id::text=$1`, repoID, trimErr(err))
 		return 0, err

@@ -95,7 +95,7 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 					continue
 				}
 				// the Git client talks to the provider the administrator connected, through the egress policy
-				if strings.HasSuffix(p, "internal/git/client.go") || strings.HasSuffix(p, "internal/jira/client.go") || strings.HasSuffix(p, "internal/search/os_client.go") || strings.HasSuffix(p, "internal/egress/egress.go") {
+				if strings.HasSuffix(p, "internal/git/client.go") || strings.HasSuffix(p, "internal/git/write.go") || strings.HasSuffix(p, "internal/jira/client.go") || strings.HasSuffix(p, "internal/search/os_client.go") || strings.HasSuffix(p, "internal/egress/egress.go") {
 					continue
 				}
 				// the IMAP reader connects to the mailbox an administrator configured, through the egress policy, and nothing else

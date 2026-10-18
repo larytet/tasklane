@@ -12,7 +12,7 @@ import (
 )
 
 // Scopes an agent token can carry (SPEC 18.3). A scope is a ceiling; the permission scheme is enforced as well.
-var AllScopes = []string{"read", "comment", "edit-fields", "create", "transition", "claim"}
+var AllScopes = []string{"read", "comment", "edit-fields", "create", "transition", "claim", "branch"}
 
 const defaultLease = 30 * time.Minute
 

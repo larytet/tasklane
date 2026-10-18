@@ -40,7 +40,25 @@ func (s *Server) registerGit(mux *http.ServeMux) {
 		s.replyStatus(w, 201, map[string]any{"connection": c, "webhook_secret": secret, "webhook_url": "/api/v1/git/webhooks/" + c.ID}, err)
 	}))
 	s.handle(mux, "DELETE /api/v1/git/connections/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		s.reply(w, map[string]bool{"ok": true}, s.Svc.DeleteGitConnection(r.Context(), actorOf(r), r.PathValue("id")))
+		// ?mode=keep_read_only keeps the links and cached data readable and stops everything else; the default removes them
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.DisconnectGitConnection(r.Context(), actorOf(r), r.PathValue("id"), r.URL.Query().Get("mode")))
+	}))
+	s.handle(mux, "PUT /api/v1/git/connections/{id}/options", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.GitConnOptions
+		if s.decode(w, r, &in) {
+			s.reply(w, map[string]bool{"ok": true}, s.Svc.SetGitConnectionOptions(r.Context(), actorOf(r), r.PathValue("id"), in))
+		}
+	}))
+	s.handle(mux, "POST /api/v1/git/connections/{id}/check", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.CheckGitConnection(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/issues/{key}/git/branch", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.BranchIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.CreateGitBranch(r.Context(), actorOf(r), r.PathValue("key"), in)
+			s.replyStatus(w, 201, v, err)
+		}
 	}))
 	s.handle(mux, "POST /api/v1/git/connections/{id}/repos", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

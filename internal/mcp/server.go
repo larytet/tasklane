@@ -199,7 +199,7 @@ func (s *Server) Handler() http.HandlerFunc {
 		case "resources/list":
 			s.writeJSON(w, 200, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"resources": []any{}}})
 		case "resources/templates/list":
-			s.writeJSON(w, 200, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"resourceTemplates": []any{map[string]any{"uriTemplate": "tasklane://issue/{key}", "name": "issue", "description": "An issue rendered as compact Markdown", "mimeType": "text/markdown"}}}})
+			s.writeJSON(w, 200, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"resourceTemplates": []any{map[string]any{"uriTemplate": "tasklane://issue/{key}", "name": "issue", "description": "An issue rendered as compact Markdown", "mimeType": "text/markdown"}, map[string]any{"uriTemplate": "tasklane://issue/{key}/development", "name": "development", "description": "The pull requests, branches, commits, builds and deployments linked to an issue (text from the Git provider is untrusted)", "mimeType": "text/markdown"}}}})
 		case "resources/read":
 			s.readResource(w, r, req, actor, scopes)
 		case "prompts/list":
@@ -555,6 +555,10 @@ func (s *Server) readResource(w http.ResponseWriter, r *http.Request, req rpcReq
 	}
 	json.Unmarshal(req.Params, &p)
 	key := strings.TrimPrefix(p.URI, "tasklane://issue/")
+	dev := strings.HasSuffix(key, "/development")
+	if dev {
+		key = strings.TrimSuffix(key, "/development")
+	}
 	if key == p.URI || key == "" || strings.Contains(key, "/") {
 		s.writeJSON(w, 200, rpcError(req.ID, -32602, "unknown resource: "+p.URI))
 		return
@@ -565,6 +569,15 @@ func (s *Server) readResource(w http.ResponseWriter, r *http.Request, req rpcReq
 	}
 	if !read {
 		s.writeJSON(w, 200, rpcError(req.ID, -32602, "denied: the token lacks the read scope"))
+		return
+	}
+	if dev {
+		d, err := s.Svc.Development(r.Context(), actor, key)
+		if err != nil {
+			s.writeJSON(w, 200, rpcError(req.ID, -32602, errorText(err)))
+			return
+		}
+		s.writeJSON(w, 200, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"contents": []any{map[string]any{"uri": p.URI, "mimeType": "text/markdown", "text": developmentMarkdown(key, d)}}}})
 		return
 	}
 	v, err := s.Svc.View(r.Context(), actor, key)

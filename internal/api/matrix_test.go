@@ -745,6 +745,17 @@ func rows() []row {
 			return J("POST", "/api/v1/git/identities", map[string]any{"provider": "github", "login": fmt.Sprint("octo", f.n), "user": f.spare.ID})
 		}},
 		{"DELETE /api/v1/git/identities/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/git/identities/999999", nil) }},
+		{"PUT /api/v1/git/connections/{id}/options", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			c, _ := f.gitConn()
+			return J("PUT", "/api/v1/git/connections/"+c+"/options", map[string]any{"write_enabled": false})
+		}},
+		{"POST /api/v1/git/connections/{id}/check", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200, 400, 404, 500)}, func(f *fixture) req {
+			c, _ := f.gitConn()
+			return J("POST", "/api/v1/git/connections/"+c+"/check", nil)
+		}},
+		{"POST /api/v1/issues/{key}/git/branch", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(400), admin: codes(400)}, func(f *fixture) req {
+			return J("POST", "/api/v1/issues/"+f.issue()+"/git/branch", map[string]any{})
+		}},
 		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
 		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
 		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},

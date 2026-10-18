@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -117,10 +118,18 @@ type API struct {
 	PRs, Branches, Commits, Checks, Pipelines []M
 	PerPage                                   int
 	reqs                                      []string
-	limit                                     []limitRule
-	notModified                               bool
-	etag                                      string
-	Hits                                      int
+	// AllowWrites turns the write endpoints on (the integration is read-only otherwise: every other method is a 405). Posts records
+	// "METHOD path body" for each accepted write. ExistingBranches are names that answer "already exists"; WriteStatus, when set,
+	// makes every write answer with it (a token that may read but not write is 403).
+	AllowWrites      bool
+	Posts            []string
+	ExistingBranches map[string]bool
+	WriteStatus      int
+	DefaultBranch    string
+	limit            []limitRule
+	notModified      bool
+	etag             string
+	Hits             int
 }
 
 type limitRule struct {
@@ -172,6 +181,71 @@ func (a *API) page(w http.ResponseWriter, r *http.Request, items []M) {
 	json.NewEncoder(w).Encode(items[lo:hi])
 }
 
+func (a *API) write(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	allowed, status := a.AllowWrites, a.WriteStatus
+	a.mu.Unlock()
+	if !allowed {
+		w.WriteHeader(405) // the integration is read-only
+		return
+	}
+	if status != 0 {
+		w.WriteHeader(status)
+		fmt.Fprint(w, `{"message":"Resource not accessible by integration"}`)
+		return
+	}
+	b, _ := io.ReadAll(r.Body)
+	p := r.URL.Path
+	switch {
+	case strings.HasSuffix(p, "/git/refs"):
+		var in M
+		json.Unmarshal(b, &in)
+		name := strings.TrimPrefix(fmt.Sprint(in["ref"]), "refs/heads/")
+		a.mu.Lock()
+		exists := a.ExistingBranches[name]
+		if !exists {
+			a.Posts = append(a.Posts, "POST "+r.URL.RequestURI()+" "+string(b))
+		}
+		a.mu.Unlock()
+		if exists {
+			w.WriteHeader(422)
+			fmt.Fprint(w, `{"message":"Reference already exists"}`)
+			return
+		}
+		w.WriteHeader(201)
+		fmt.Fprint(w, `{}`)
+	case strings.HasSuffix(p, "/repository/branches"):
+		name := r.URL.Query().Get("branch")
+		a.mu.Lock()
+		exists := a.ExistingBranches[name]
+		if !exists {
+			a.Posts = append(a.Posts, "POST "+r.URL.RequestURI())
+		}
+		a.mu.Unlock()
+		if exists {
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"message":"Branch already exists"}`)
+			return
+		}
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(M{"name": name, "web_url": "https://gitlab.example/acme/shop/-/tree/" + name})
+	case strings.HasSuffix(p, "/comments") || strings.HasSuffix(p, "/notes"):
+		a.mu.Lock()
+		a.Posts = append(a.Posts, "POST "+p+" "+string(b))
+		a.mu.Unlock()
+		w.WriteHeader(201)
+		fmt.Fprint(w, `{}`)
+	default:
+		w.WriteHeader(404)
+	}
+}
+
+func (a *API) PostsMade() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.Posts...)
+}
+
 func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	a.Hits++
@@ -198,7 +272,28 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != "GET" {
-		w.WriteHeader(405) // the integration is read-only
+		a.write(w, r)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/user") {
+		login := "tasklane-bot"
+		if a.Provider == "gitlab" {
+			json.NewEncoder(w).Encode(M{"username": login})
+		} else {
+			json.NewEncoder(w).Encode(M{"login": login})
+		}
+		return
+	}
+	if strings.Contains(r.URL.Path, "/git/ref/heads/") {
+		json.NewEncoder(w).Encode(M{"object": M{"sha": "0123456789abcdef0123456789abcdef01234567"}})
+		return
+	}
+	if (a.Provider == "github" && strings.Count(strings.Trim(r.URL.Path, "/"), "/") == 2 && strings.HasPrefix(r.URL.Path, "/repos/")) || (a.Provider == "gitlab" && strings.HasPrefix(r.URL.EscapedPath(), "/api/v4/projects/") && strings.Count(strings.Trim(r.URL.EscapedPath(), "/"), "/") == 3) {
+		def := a.DefaultBranch
+		if def == "" {
+			def = "main"
+		}
+		json.NewEncoder(w).Encode(M{"default_branch": def})
 		return
 	}
 	if r.Header.Get("If-None-Match") == etag && strings.Contains(r.URL.Path, "/pulls") || r.Header.Get("If-None-Match") == etag && strings.Contains(r.URL.Path, "/merge_requests") {
