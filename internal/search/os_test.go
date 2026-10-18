@@ -349,7 +349,7 @@ func lifeDelete(t *testing.T, r *osRig, key string) {
 func (r *osRig) docsMatchPostgres() {
 	r.T.Helper()
 	want := map[string]bool{}
-	rows, _ := r.Store.Pool.Query(ctx, `SELECT id::text FROM issue WHERE deleted_at IS NULL`)
+	rows, _ := r.Store.Pool.Query(ctx, `SELECT id::text FROM issue WHERE deleted_at IS NULL AND archived_at IS NULL`)
 	for rows.Next() {
 		var id string
 		rows.Scan(&id)
@@ -670,5 +670,38 @@ func TestOpenSearchClientDefaultsToTheEgressPolicy(t *testing.T) {
 	}
 	if h, err := (&search.OSClient{BaseURL: m.URL, HTTP: egress.Policy{AllowPrivate: true}.Client()}).Health(ctx); err != nil || h != "green" {
 		t.Fatalf("%v %s", err, h)
+	}
+}
+
+// LIFE-12: archived issues leave the index (so an index query never returns them), come back when restored, and a query
+// that asks about archived work is answered by PostgreSQL.
+func TestLIFE12_ArchivedIssuesLeaveTheIndex(t *testing.T) {
+	r := newOS(t)
+	k := r.load()
+	r.both()
+	searches := func() int { return r.m.Count("POST", "_search") }
+	if res := r.via(r.router, r.Alice, `text ~ "export"`); res.Engine != "opensearch" || len(res.Rows) != 1 {
+		t.Fatalf("%s %v", res.Engine, keysOf(res))
+	}
+	if _, err := r.Svc.ArchiveIssue(ctx, r.Alice, k["export"]); err != nil {
+		t.Fatal(err)
+	}
+	r.both()
+	r.docsMatchPostgres()
+	if res := r.via(r.router, r.Alice, `text ~ "export"`); len(res.Rows) != 0 {
+		t.Fatalf("an archived issue is still found by the index: %v", keysOf(res))
+	}
+	before := searches()
+	res := r.via(r.router, r.Alice, `archived = true`)
+	if searches() != before || res.Engine == "opensearch" || len(res.Rows) != 1 || res.Rows[0].Key != k["export"] {
+		t.Fatalf("%s %v (%d index requests)", res.Engine, keysOf(res), searches()-before)
+	}
+	if _, err := r.Svc.UnarchiveIssue(ctx, r.Alice, k["export"]); err != nil {
+		t.Fatal(err)
+	}
+	r.both()
+	r.docsMatchPostgres()
+	if res := r.via(r.router, r.Alice, `text ~ "export"`); res.Engine != "opensearch" || len(res.Rows) != 1 {
+		t.Fatalf("a restored issue is not back in the index: %s %v", res.Engine, keysOf(res))
 	}
 }

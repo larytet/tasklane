@@ -225,7 +225,7 @@ func readCSVBundle(files bundleFiles, d *BundleData) error {
 		v, _ := strconv.ParseInt(get(r, 18), 10, 64)
 		d.Issues = append(d.Issues, BIssue{ExternalID: get(r, 0), ID: get(r, 0), Key: get(r, 1), Project: get(r, 2), Type: get(r, 3), Status: get(r, 4), Priority: get(r, 5), Reporter: get(r, 6), Assignee: get(r, 7),
 			Labels: splitNonEmpty(get(r, 8), ";"), Parent: get(r, 9), Rank: get(r, 10), Summary: get(r, 11), Description: get(r, 12), Created: ptime(get(r, 13)), Updated: ptime(get(r, 14)), Resolved: pptime(get(r, 15)),
-			Deleted: get(r, 16) == "true", DeletedAt: pptime(get(r, 17)), Version: v, Estimate: pfloat(get(r, 19))})
+			Deleted: get(r, 16) == "true", DeletedAt: pptime(get(r, 17)), Version: v, Estimate: pfloat(get(r, 19)), Archived: pptime(get(r, 20))})
 	}
 	if rows, err = readCSV(files, "comments.csv"); err != nil {
 		return err
@@ -669,7 +669,7 @@ func (c *importCtx) importIssue(ctx context.Context, i BIssue, pk, pid, ext stri
 			if asg != nil {
 				av = *asg
 			}
-			if _, err := c.tx.Exec(ctx, `UPDATE issue SET status_id=$2,priority=$3,issue_type_id=$4,assignee_id=$5,labels=$6,resolved_at=$7,version=version+1 WHERE id=$1`, id, sid, prio, typeID, av, labels, i.Resolved); err != nil {
+			if _, err := c.tx.Exec(ctx, `UPDATE issue SET status_id=$2,priority=$3,issue_type_id=$4,assignee_id=$5,labels=$6,resolved_at=$7,archived_at=$8,version=version+1 WHERE id=$1`, id, sid, prio, typeID, av, labels, i.Resolved, i.Archived); err != nil {
 				return err
 			}
 			changed = true
@@ -714,9 +714,9 @@ func (c *importCtx) importIssue(ctx context.Context, i BIssue, pk, pid, ext stri
 	if rank == "" {
 		rank = rankFor(num)
 	}
-	if err := c.tx.QueryRow(ctx, `INSERT INTO issue(project_id,number,key,issue_type_id,status_id,priority,reporter_id,assignee_id,labels,parent_id,rank,summary,created_at,updated_at,resolved_at,deleted_at,deleted_by,purge_after,delete_batch,external_id,import_id,estimate)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING id`,
-		pid, num, newKey, typeID, sid, prio, reporter, av, labels, parentID, rank, i.Summary, created, nonZeroOr(i.Updated, created), i.Resolved, i.DeletedAt, nilIfDeleted(i.Deleted, c.a.ID), i.PurgeAfter, nilIfDeletedBatch(i.Deleted), ext, c.jobID, i.Estimate).Scan(&id); err != nil {
+	if err := c.tx.QueryRow(ctx, `INSERT INTO issue(project_id,number,key,issue_type_id,status_id,priority,reporter_id,assignee_id,labels,parent_id,rank,summary,created_at,updated_at,resolved_at,deleted_at,deleted_by,purge_after,delete_batch,external_id,import_id,estimate,archived_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING id`,
+		pid, num, newKey, typeID, sid, prio, reporter, av, labels, parentID, rank, i.Summary, created, nonZeroOr(i.Updated, created), i.Resolved, i.DeletedAt, nilIfDeleted(i.Deleted, c.a.ID), i.PurgeAfter, nilIfDeletedBatch(i.Deleted), ext, c.jobID, i.Estimate, i.Archived).Scan(&id); err != nil {
 		return err
 	}
 	c.tx.Exec(ctx, `INSERT INTO issue_text(issue_id,field,body,updated_by,last_save_id) VALUES($1,'description',$2,$3,'')`, id, i.Description, c.a.ID)

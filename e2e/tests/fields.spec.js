@@ -87,3 +87,37 @@ test('behavior rules: a field becomes required and another is hidden as the valu
   await dlg.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByLabel(note)).toHaveValue('hello');
 });
+
+test('LIFE-12: archive a finished issue from the ticket, find it by query, restore it', async ({ browser }) => {
+  const call = await admin(browser);
+  const { page } = await newUser(browser, 'jana@example.com');
+  const sum = 'Archive me ' + uniq();
+  const key = await page.evaluate(async sum => {
+    const h = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
+    const c = await (await fetch('/api/v1/issues', { method: 'POST', credentials: 'same-origin', headers: h, body: JSON.stringify({ project: 'ABC', type: 'Task', summary: sum }) })).json();
+    const v = await (await fetch(`/api/v1/issues/${c.key}/view`, { credentials: 'same-origin' })).json();
+    await fetch(`/api/v1/issues/${c.key}/transitions`, { method: 'POST', credentials: 'same-origin', headers: h, body: JSON.stringify({ transition: v.transitions.find(t => t.name === 'Resolve').id }) });
+    return c.key;
+  }, sum);
+  await page.goto('/#/issue/' + key);
+  await page.getByRole('button', { name: 'Actions ▾' }).click();
+  await page.getByRole('button', { name: 'Archive', exact: true }).click();
+  await expect(page.getByText(/Archived .* and read-only/)).toBeVisible();
+  await expect(page.getByLabel('Summary')).toHaveAttribute('readonly', '');
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  // hidden from the default list, found by archived = true
+  await page.goto('/#/?q=' + encodeURIComponent('key = ' + key));
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByText(sum)).toHaveCount(0);
+  await page.goto('/#/?q=' + encodeURIComponent('archived = true AND key = ' + key));
+  await expect(page.getByText(sum)).toBeVisible();
+  // restore
+  await page.goto('/#/issue/' + key);
+  await page.getByRole('button', { name: 'Unarchive' }).click();
+  await expect(page.getByText(/Archived .* and read-only/)).toHaveCount(0);
+  await expect(page.getByLabel('Summary')).not.toHaveAttribute('readonly', '');
+  await page.goto('/#/?q=' + encodeURIComponent('key = ' + key));
+  await expect(page.getByText(sum)).toBeVisible(); // back in the default results
+  void call;
+});

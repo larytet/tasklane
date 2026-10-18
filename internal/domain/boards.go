@@ -461,7 +461,7 @@ func (s *Service) GetBoard(ctx context.Context, a Actor, id string, restrict []s
 	for i, c := range cols {
 		v.Columns[i] = ColumnView{Column: c, Cards: []Card{}}
 	}
-	q := cardSQL + ` WHERE i.project_id=$2 AND i.deleted_at IS NULL AND NOT i.restricted AND (st.category<>'done' OR i.resolved_at IS NULL OR i.resolved_at > $3)`
+	q := cardSQL + ` WHERE i.project_id=$2 AND i.deleted_at IS NULL AND i.archived_at IS NULL AND NOT i.restricted AND (st.category<>'done' OR i.resolved_at IS NULL OR i.resolved_at > $3)`
 	args := []any{b.ID, pid, s.Now().AddDate(0, 0, -b.DoneDays)}
 	if b.Kind == "scrum" { // a scrum board shows the active sprint(s) only
 		q += ` AND i.id IN (SELECT si.issue_id FROM sprint_issue si JOIN sprint sp ON sp.id=si.sprint_id WHERE sp.board_id=$1::uuid AND sp.state='active' AND si.removed_at IS NULL)`

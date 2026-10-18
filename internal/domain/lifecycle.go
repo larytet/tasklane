@@ -170,6 +170,13 @@ func (s *Service) Lifecycle(ctx context.Context, a Actor, key string, in Lifecyc
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	if op == "move" || op == "convert" { // archived work is read-only; moving or converting it would change it
+		var archived bool
+		tx.QueryRow(ctx, `SELECT archived_at IS NOT NULL FROM issue WHERE key=$1 OR id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1) LIMIT 1`, plan.Key).Scan(&archived)
+		if archived {
+			return plan, invalid("%s is archived and read-only: unarchive it first", plan.Key)
+		}
+	}
 	switch op {
 	case "delete":
 		err = s.opDelete(ctx, tx, a, key, in, plan, &events)
@@ -533,6 +540,11 @@ func (s *Service) RunLifecycle(ctx context.Context, logf func(string, ...any)) {
 			logf("purge: %v", err)
 		} else if n > 0 {
 			logf("purged %d expired issue(s) from the trash", n)
+		}
+		if n, err := s.AutoArchive(ctx, 500); err != nil && ctx.Err() == nil {
+			logf("auto-archive: %v", err)
+		} else if n > 0 {
+			logf("auto-archived %d issue(s)", n)
 		}
 		select {
 		case <-ctx.Done():

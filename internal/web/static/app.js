@@ -340,6 +340,10 @@
           'Mirrored from Jira and read-only here. Synced ' + ago + (m.stale && m.error ? ' (the last sync failed: ' + m.error + ')' : '') + '. ',
           h('a', { href: m.site_url.replace(/\/$/, '') + '/browse/' + encodeURIComponent(m.issue_key || is.key), rel: 'noopener noreferrer', target: '_blank' }, 'Edit in Jira')));
       }
+      if (is.archived) {
+        root.append(h('div', { class: 'banner info', role: 'status' }, 'Archived ' + L.relTime(is.archived) + ' and read-only. ',
+          h('button', { class: 'btn', onclick: async () => { const r = await api('DELETE', '/api/v1/issues/' + key + '/archive'); if (r.status === 200) { toast('Restored from the archive.'); await reloadAll(); } else toast((r.data && r.data.error) || 'Could not restore'); } }, 'Unarchive')));
+      }
       root.append(subjectEl(is));
       root.append(chipLine(is));
       root.append(descriptionEl(is));
@@ -385,6 +389,7 @@
           h('button', { class: 'btn', onclick: () => { close(); cloneDialog(); } }, 'Clone…'),
           h('button', { class: 'btn', onclick: () => { close(); moveDialog(); } }, 'Move to another project…'),
           h('button', { class: 'btn', onclick: () => { close(); convertDialog(); } }, 'Change issue type…'),
+          is.status_category === 'done' && !is.archived ? h('button', { class: 'btn', onclick: async () => { close(); const r = await api('POST', '/api/v1/issues/' + key + '/archive'); if (r.status === 200) { toast('Archived. It is hidden from boards and searches; find it with archived = true.'); await reloadAll(); } else toast((r.data && r.data.error) || 'Could not archive'); } }, 'Archive') : null,
           h('button', { class: 'btn', onclick: () => { close(); deleteDialog(); } }, 'Delete…')),
         h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Close'))));
     }

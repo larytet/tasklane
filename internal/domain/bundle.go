@@ -89,6 +89,7 @@ type BIssue struct {
 	Resolved    *time.Time `json:"resolved"`
 	Deleted     bool       `json:"deleted"`
 	DeletedAt   *time.Time `json:"deleted_at"`
+	Archived    *time.Time `json:"archived_at"`
 	PurgeAfter  *time.Time `json:"purge_after"`
 	Version     int64      `json:"version"`
 	Estimate    *float64   `json:"estimate,omitempty"`

@@ -78,6 +78,9 @@ func New(t *testing.T) *Env {
 	return e
 }
 
+// NewUser creates another account for tests that need a role of their own.
+func (e *Env) NewUser(email, name string, admin bool) domain.Actor { return e.user(email, name, admin) }
+
 func (e *Env) user(email, name string, admin bool) domain.Actor {
 	u, err := e.Svc.CreateUser(context.Background(), email, name, "password123", admin)
 	if err != nil {

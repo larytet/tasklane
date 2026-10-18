@@ -64,6 +64,13 @@ func (r *fieldRig) keys(t *testing.T, a domain.Actor, q string) string {
 	return strings.Join(ks, " ")
 }
 
+// tryKeys runs a query and returns only the error (for queries that must be refused).
+func (r *fieldRig) tryKeys(a domain.Actor, q string) error {
+	all, rd, wr, _ := r.e.Svc.SearchScope(ctx, a)
+	_, err := r.eng.Search(ctx, search.Scope{UserID: a.ID, All: all, Readable: rd, Writable: wr, WeekStart: time.Monday, Now: r.e.Svc.Now}, q, search.Page{Limit: 10})
+	return err
+}
+
 func jsonOf(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 // CORE-03: every type stores its canonical form, refuses what does not fit, and reads back.

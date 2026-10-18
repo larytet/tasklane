@@ -460,6 +460,12 @@ func rows() []row {
 			return J("POST", "/api/v1/workflows/"+f.workflow()+"/draft/check", map[string]any{})
 		}},
 		{"POST /api/v1/workflows/{id}/publish", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/workflows/"+f.workflow()+"/publish", map[string]any{}) }},
+		{"POST /api/v1/issues/{key}/archive", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(400), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/issues/"+f.issue()+"/archive", nil) }}, // an open issue is not archived
+		{"DELETE /api/v1/issues/{key}/archive", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(400), admin: codes(400)}, func(f *fixture) req { return J("DELETE", "/api/v1/issues/"+f.issue()+"/archive", nil) }},
+		{"GET /api/v1/projects/{key}/archive-policy", adminer, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/archive-policy", nil) }},
+		{"PUT /api/v1/projects/{key}/archive-policy", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/archive-policy", map[string]any{"days": nil})
+		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

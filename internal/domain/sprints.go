@@ -559,7 +559,7 @@ func (s *Service) containerCards(ctx context.Context, b Board, pid, sprintID str
 	if sprintID != "" {
 		arg = sprintID
 	}
-	rows, err := s.DB.Query(ctx, cardSQL+` WHERE i.project_id=$2 AND i.deleted_at IS NULL AND NOT i.restricted AND `+fmt.Sprintf(cond, 3)+` ORDER BY COALESCE(br.rank,i.rank) COLLATE "C", i.number`, b.ID, pid, arg)
+	rows, err := s.DB.Query(ctx, cardSQL+` WHERE i.project_id=$2 AND i.deleted_at IS NULL AND i.archived_at IS NULL AND NOT i.restricted AND `+fmt.Sprintf(cond, 3)+` ORDER BY COALESCE(br.rank,i.rank) COLLATE "C", i.number`, b.ID, pid, arg)
 	_ = extra
 	if err != nil {
 		return nil, err

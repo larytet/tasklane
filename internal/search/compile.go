@@ -38,6 +38,8 @@ type compiler struct {
 	rank  int
 	nowFn func() time.Time
 	users func(string) []string
+	// sawArchived: the query says something about archived work, so the default exclusion of archived issues is not applied
+	sawArchived bool
 }
 
 func (c *compiler) arg(v any) string {
@@ -72,6 +74,9 @@ func compile(q *tql.Query, sc Scope) (*compiled, error) {
 			return nil, err
 		}
 		where = append(where, "("+w+")")
+	}
+	if !c.sawArchived {
+		where = append(where, "i.archived_at IS NULL") // archived work stays out of the way unless the query asks for it
 	}
 	ord, err := c.order(q.Order)
 	if err != nil {
@@ -175,6 +180,28 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 			return c.histClause(x)
 		}
 		return "", errAt(x.Pos, "operator %s cannot be used with %s", opName(x.Op), x.Field)
+	case "archived":
+		c.sawArchived = true
+		switch x.Op {
+		case "is":
+			return "(i.archived_at IS NULL)", nil
+		case "isnot":
+			return "(i.archived_at IS NOT NULL)", nil
+		case "=", "!=":
+			var want bool
+			switch strings.ToLower(x.Vals[0].S) {
+			case "true", "yes":
+				want = true
+			case "false", "no":
+			default:
+				return "", errAt(x.Vals[0].Pos, "archived is true or false")
+			}
+			if (x.Op == "=") == want {
+				return "(i.archived_at IS NOT NULL)", nil
+			}
+			return "(i.archived_at IS NULL)", nil
+		}
+		return "", errAt(x.Pos, "use archived = true, archived = false, or archived is EMPTY")
 	case "statuscategory":
 		if x.Op != "=" && x.Op != "!=" && x.Op != "in" && x.Op != "notin" {
 			return "", errAt(x.Pos, "operator %s cannot be used with statusCategory", opName(x.Op))

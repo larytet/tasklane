@@ -33,6 +33,8 @@ type Issue struct {
 	Updated     time.Time  `json:"updated"`
 	Resolved    *time.Time `json:"resolved,omitempty"`
 	Estimate    *float64   `json:"estimate,omitempty"` // points, hours or nothing, by the board's estimation setting
+	// Archived is when the issue was archived; an archived issue is read-only
+	Archived *time.Time `json:"archived,omitempty"`
 	// Custom holds the custom field values the caller may see, by field key (customfield_<id>)
 	Custom map[string]any `json:"custom,omitempty"`
 }
@@ -250,7 +252,7 @@ func (s *Service) checkAssignable(ctx context.Context, tx pgx.Tx, pid, userID st
 }
 
 const issueSelect = `SELECT i.id,i.key,p.key,t.name,i.summary,i.summary_seq,COALESCE(d.body,''),COALESCE(d.text_seq,1),st.name,st.category,i.priority,
-	i.reporter_id,rp.name,rp.email,i.assignee_id,asg.name,asg.email,i.labels,COALESCE(par.key,''),i.version,i.created_at,i.updated_at,i.resolved_at,i.estimate
+	i.reporter_id,rp.name,rp.email,i.assignee_id,asg.name,asg.email,i.labels,COALESCE(par.key,''),i.version,i.created_at,i.updated_at,i.resolved_at,i.estimate,i.archived_at
 	FROM issue i JOIN project p ON p.id=i.project_id JOIN issue_type t ON t.id=i.issue_type_id JOIN status st ON st.id=i.status_id
 	LEFT JOIN issue_text d ON d.issue_id=i.id AND d.field='description' JOIN app_user rp ON rp.id=i.reporter_id
 	LEFT JOIN app_user asg ON asg.id=i.assignee_id LEFT JOIN issue par ON par.id=i.parent_id `
@@ -260,7 +262,7 @@ func scanIssue(row pgx.Row) (Issue, error) {
 	var rid, rname, remail string
 	var aid, aname, aemail *string
 	err := row.Scan(&i.ID, &i.Key, &i.Project, &i.Type, &i.Summary, &i.SummarySeq, &i.Description, &i.DescSeq, &i.Status, &i.StatusCat, &i.Priority,
-		&rid, &rname, &remail, &aid, &aname, &aemail, &i.Labels, &i.Parent, &i.Version, &i.Created, &i.Updated, &i.Resolved, &i.Estimate)
+		&rid, &rname, &remail, &aid, &aname, &aemail, &i.Labels, &i.Parent, &i.Version, &i.Created, &i.Updated, &i.Resolved, &i.Estimate, &i.Archived)
 	if err == pgx.ErrNoRows {
 		return i, ErrNotFound
 	}
@@ -323,6 +325,9 @@ func (s *Service) access(ctx context.Context, a Actor, key string) (Issue, strin
 		if restricted {
 			return is, "", ErrNotFound
 		}
+	}
+	if is.Archived != nil {
+		r = "viewer" // archived work is read-only for everyone; unarchiving looks the real role up itself
 	}
 	return is, r, nil
 }
