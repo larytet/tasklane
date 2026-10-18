@@ -769,6 +769,10 @@ func rows() []row {
 			f.n++
 			return J("POST", "/api/v1/import/asana", map[string]any{"project": "ABC", "dry_run": true, "data": "Task ID,Name\n" + fmt.Sprint(f.n) + ",A task\n"})
 		}},
+		{"GET /api/v1/auth/saml/{name}/metadata", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/auth/saml/nope/metadata", nil) }},
+		{"POST /api/v1/auth/saml/acs", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return req{method: "POST", path: "/api/v1/auth/saml/acs", raw: []byte("SAMLResponse=eA%3D%3D&RelayState=nope"), headers: map[string]string{"Content-Type": "application/x-www-form-urlencoded"}} // refused, and the browser is sent to the sign-in page
+		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {
 			return J("POST", "/api/v1/dashboards", map[string]any{"name": "Matrix dashboard"})

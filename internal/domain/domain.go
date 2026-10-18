@@ -71,6 +71,8 @@ type Service struct {
 	listeners   []func(Event)
 	// DashboardIframeHosts are the hosts an iframe gadget may embed (empty: none).
 	DashboardIframeHosts []string
+	// SAMLID makes the id of an AuthnRequest (tests make it fixed); by default a random one.
+	SAMLID func() string
 	// BackupHook, when set, is called at points of a backup ("snapshot": the snapshot is fixed, nothing is copied yet); for tests.
 	BackupHook func(stage string)
 	// WebAuthnRPID and WebAuthnOrigins override the relying party that passkeys are bound to (default: the host of BaseURL);

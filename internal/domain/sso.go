@@ -39,6 +39,17 @@ type SSOProvider struct {
 	AllowedDomains []string `json:"allowed_domains"`
 	JIT            bool     `json:"jit"`
 	Enabled        bool     `json:"enabled"`
+	// SAML 2.0 (Protocol "saml"): Issuer is then the identity provider's entity id and ClientID our entity id (filled in when empty)
+	Protocol      string   `json:"protocol"`
+	SAMLSSOURL    string   `json:"saml_sso_url"`
+	SAMLCerts     []string `json:"saml_certs"` // the identity provider's signing certificates, PEM
+	SAMLEmailAttr string   `json:"saml_email_attr"`
+	SAMLNameAttr  string   `json:"saml_name_attr"`
+	SAMLMetadata  string   `json:"saml_metadata,omitempty"` // accepted on save: the identity provider's metadata fills in the entity id, address and certificates
+	// shown, not saved
+	ACSURL      string     `json:"acs_url,omitempty"`
+	MetadataURL string     `json:"metadata_url,omitempty"`
+	CertInfo    []CertInfo `json:"certificates,omitempty"`
 }
 
 func (s *Service) ssoClient() *http.Client {
@@ -69,18 +80,30 @@ func (s *Service) SaveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 	if strings.TrimSpace(in.Label) == "" {
 		in.Label = in.Name
 	}
-	u, err := url.Parse(in.Issuer)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return in, invalid("the issuer is the identity provider's address, such as https://login.example.com")
+	if in.Protocol == "" {
+		in.Protocol = "oidc"
 	}
-	if strings.TrimSpace(in.ClientID) == "" {
-		return in, invalid("a provider needs a client id")
-	}
-	if in.Scopes == "" {
-		in.Scopes = "openid email profile"
-	}
-	if !strings.Contains(" "+in.Scopes+" ", " openid ") {
-		return in, invalid("the scopes must include openid")
+	switch in.Protocol {
+	case "saml":
+		if err := s.prepareSAML(ctx, &in); err != nil {
+			return in, err
+		}
+	case "oidc":
+		u, err := url.Parse(in.Issuer)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return in, invalid("the issuer is the identity provider's address, such as https://login.example.com")
+		}
+		if strings.TrimSpace(in.ClientID) == "" {
+			return in, invalid("a provider needs a client id")
+		}
+		if in.Scopes == "" {
+			in.Scopes = "openid email profile"
+		}
+		if !strings.Contains(" "+in.Scopes+" ", " openid ") {
+			return in, invalid("the scopes must include openid")
+		}
+	default:
+		return in, invalid("the protocol is oidc or saml")
 	}
 	for i, d := range in.AllowedDomains {
 		in.AllowedDomains[i] = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(d), "@"))
@@ -88,15 +111,18 @@ func (s *Service) SaveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 	if in.AllowedDomains == nil {
 		in.AllowedDomains = []string{}
 	}
+	if in.SAMLCerts == nil {
+		in.SAMLCerts = []string{}
+	}
 	var enc any
-	if in.ClientSecret != "" {
+	if in.ClientSecret != "" && in.Protocol == "oidc" {
 		b, err := s.seal(ctx, in.ClientSecret)
 		if err != nil {
 			return in, err
 		}
 		enc = b
 	}
-	err = s.tx(ctx, func(tx pgx.Tx) error {
+	err := s.tx(ctx, func(tx pgx.Tx) error {
 		dup := func(err error) error {
 			if err != nil && strings.Contains(err.Error(), "sso_provider_name_uq") {
 				return invalid("a provider named %q exists", in.Name)
@@ -104,13 +130,13 @@ func (s *Service) SaveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 			return err
 		}
 		if id == 0 {
-			if err := dup(tx.QueryRow(ctx, `INSERT INTO sso_provider(name,label,issuer,client_id,client_secret_enc,scopes,allowed_domains,jit,enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-				in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled).Scan(&id)); err != nil {
+			if err := dup(tx.QueryRow(ctx, `INSERT INTO sso_provider(name,label,issuer,client_id,client_secret_enc,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+				in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr).Scan(&id)); err != nil {
 				return err
 			}
 		} else {
-			tag, err := tx.Exec(ctx, `UPDATE sso_provider SET name=$2,label=$3,issuer=$4,client_id=$5,client_secret_enc=COALESCE($6,client_secret_enc),scopes=$7,allowed_domains=$8,jit=$9,enabled=$10 WHERE id=$1`,
-				id, in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled)
+			tag, err := tx.Exec(ctx, `UPDATE sso_provider SET name=$2,label=$3,issuer=$4,client_id=$5,client_secret_enc=COALESCE($6,client_secret_enc),scopes=$7,allowed_domains=$8,jit=$9,enabled=$10,protocol=$11,saml_sso_url=$12,saml_certs=$13,saml_email_attr=$14,saml_name_attr=$15 WHERE id=$1`,
+				id, in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr)
 			if err = dup(err); err != nil {
 				return err
 			}
@@ -136,7 +162,7 @@ func (s *Service) ListSSOProviders(ctx context.Context, a Actor) ([]SSOProvider,
 	if err := adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT id,name,label,issuer,client_id,client_secret_enc IS NOT NULL,scopes,allowed_domains,jit,enabled FROM sso_provider ORDER BY name`)
+	rows, err := s.DB.Query(ctx, `SELECT id,name,label,issuer,client_id,client_secret_enc IS NOT NULL,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr FROM sso_provider ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +170,11 @@ func (s *Service) ListSSOProviders(ctx context.Context, a Actor) ([]SSOProvider,
 	out := []SSOProvider{}
 	for rows.Next() {
 		var p SSOProvider
-		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Issuer, &p.ClientID, &p.SecretSet, &p.Scopes, &p.AllowedDomains, &p.JIT, &p.Enabled); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Issuer, &p.ClientID, &p.SecretSet, &p.Scopes, &p.AllowedDomains, &p.JIT, &p.Enabled, &p.Protocol, &p.SAMLSSOURL, &p.SAMLCerts, &p.SAMLEmailAttr, &p.SAMLNameAttr); err != nil {
 			return nil, err
+		}
+		if p.Protocol == "saml" {
+			p.ACSURL, p.MetadataURL, p.CertInfo = s.samlACS(), s.samlMetadataURL(p.Name), certInfo(p.SAMLCerts)
 		}
 		out = append(out, p)
 	}
@@ -387,9 +416,12 @@ func (s *Service) ssoRedirectURI() string {
 // SSOStart begins a sign-in and returns the address to send the browser to.
 func (s *Service) SSOStart(ctx context.Context, name, redirect string) (string, error) {
 	var p SSOProvider
-	err := s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,scopes FROM sso_provider WHERE lower(name)=lower($1) AND enabled`, name).Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &p.Scopes)
+	err := s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,scopes,protocol,saml_sso_url FROM sso_provider WHERE lower(name)=lower($1) AND enabled`, name).Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &p.Scopes, &p.Protocol, &p.SAMLSSOURL)
 	if err != nil {
 		return "", ErrNotFound
+	}
+	if p.Protocol == "saml" {
+		return s.samlStart(ctx, p, redirect)
 	}
 	doc, err := s.discover(ctx, p.Issuer)
 	if err != nil {
@@ -467,9 +499,16 @@ func (s *Service) SSOCallback(ctx context.Context, state, code string, ttl time.
 	}
 	sub, _ := claims["sub"].(string)
 	email, _ := claims["email"].(string)
-	email = strings.ToLower(strings.TrimSpace(email))
 	verified := claims["email_verified"] == true || claims["email_verified"] == "true"
 	name, _ := claims["name"].(string)
+	return s.ssoSignIn(ctx, res, p, jit, sub, email, name, verified, ttl, meta)
+}
+
+// ssoSignIn is what both protocols end with: the identity provider has vouched for a subject and an address; match the person to an
+// account (by the provider's subject, then by the address) or create one when the provider allows it, and start a session.
+func (s *Service) ssoSignIn(ctx context.Context, res SSOResult, p SSOProvider, jit bool, sub, email, name string, verified bool, ttl time.Duration, meta ClientMeta) (SSOResult, error) {
+	var err error
+	email = strings.ToLower(strings.TrimSpace(email))
 	if sub == "" || email == "" || !verified || !strings.Contains(email, "@") {
 		return res, ErrForbidden // an address the provider does not vouch for is not an identity
 	}

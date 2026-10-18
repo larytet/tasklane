@@ -76,6 +76,32 @@ func (s *Server) registerSSO(mux *http.ServeMux) {
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: res.Token, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
 		http.Redirect(w, r, res.Redirect, http.StatusFound) // a path on this server: the domain only stores addresses that start with one slash
 	})
+	// SAML 2.0: the metadata an identity provider's administrator needs, and the address the identity provider posts its signed response to
+	s.handle(mux, "GET /api/v1/auth/saml/{name}/metadata", func(w http.ResponseWriter, r *http.Request) {
+		doc, err := s.Svc.SAMLMetadata(r.Context(), r.PathValue("name"))
+		if err != nil {
+			s.fail(w, 404, "not_found", "no such SAML provider", nil)
+			return
+		}
+		w.Header().Set("Content-Type", "application/samlmetadata+xml")
+		w.Write([]byte(doc))
+	})
+	s.handle(mux, "POST /api/v1/auth/saml/acs", func(w http.ResponseWriter, r *http.Request) {
+		// a form posted by the person's browser from the identity provider: no session and no CSRF header can exist, and none is needed: the
+		// relay state names a request we made, is used once, and the response must answer that request
+		r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+		if err := r.ParseForm(); err != nil || r.PostForm.Get("SAMLResponse") == "" || r.PostForm.Get("RelayState") == "" {
+			http.Redirect(w, r, "/?sso=denied", http.StatusFound)
+			return
+		}
+		res, err := s.Svc.SAMLCallback(r.Context(), r.PostForm.Get("RelayState"), r.PostForm.Get("SAMLResponse"), s.SessionTTL, s.clientMeta(r))
+		if err != nil {
+			http.Redirect(w, r, "/?sso=denied", http.StatusFound)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: res.Token, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
+		http.Redirect(w, r, res.Redirect, http.StatusFound)
+	})
 	s.handle(mux, "GET /api/v1/admin/scim/tokens", adm(func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Svc.ListSCIMTokens(r.Context(), actorOf(r))
 		s.reply(w, v, err)

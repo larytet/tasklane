@@ -152,7 +152,7 @@ test('SEC-04: administrators set up single sign-on and SCIM tokens; the sign-in 
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
   await page.goto('/#/admin/identity');
-  await expect(page.getByRole('heading', { name: 'Single sign-on (OpenID Connect)' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Single sign-on (OpenID Connect and SAML)' })).toBeVisible();
   const name = 'idp' + uniq();
   await page.getByRole('button', { name: 'Add a provider' }).click();
   const dlg = page.getByRole('dialog');
