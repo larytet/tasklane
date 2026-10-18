@@ -320,6 +320,7 @@ func (s *Server) Handler() http.Handler {
 		s.handle(mux, m+" /mcp", s.MCP.Handler())
 	}
 	s.registerSearch(mux)
+	s.registerBoards(mux)
 	s.registerAttachments(mux)
 	s.registerExchange(mux)
 	if s.Extra != nil {

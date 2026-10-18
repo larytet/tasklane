@@ -172,6 +172,11 @@ design specification (tokens, typography, components, screens, backend and front
 - REST API (Jira-compatible subset under `/rest/api/3`) plus webhooks
 - Web UI: server-delivered SPA
 
+## Related projects
+
+- [Windshift](https://github.com/Windshiftapp/core) - an open source, self-hosted work management platform written in Go
+  (AGPL-3.0), covering boards, sprints, workflows, a customer portal, time tracking and test management.
+
 ## License
 
 Apache-2.0 (proposed, to be confirmed before the first public release; see SPEC section 17.9).

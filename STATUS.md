@@ -22,7 +22,7 @@ this file is updated, and the work is committed and pushed.
 | Milestone | Scope | State |
 |---|---|---|
 | M2.1 Work calendar | `internal/calendar`: IANA zone, any week start day, any working-day subset, per-day hours, holidays, ISO / first-day-of-year / no week numbering, sprint bounds in local time stored as UTC instants (23 and 25 hour days, skipped midnight), working days and hours between instants, days left, capacity per person calendar, name tokens | done |
-| M2.2 Boards and ranking | board entity, columns to statuses, WIP limits, lexorank per board, drag to transition | next |
+| M2.2 Boards and ranking | scrum and kanban boards, one column per status by default, add, rename, reorder and delete columns, WIP limits with breach state, board filter and quick filters as TQL inside the caller's permission scope, swimlanes (assignee, priority, epic, stories), subtask progress, rank per board (lexorank strings, rebalanced when long), drag = workflow transition + rank with the blocked-move explanation, human gates apply to agents, done cards age off after `done_days`, REST routes | done; no UI yet (M2.5), scrum boards show every issue until sprints exist (M2.3), no blocked indicator or epic colour, no board presence or realtime push |
 | M2.3 Sprints and backlog | states, start and complete, carry-over, scope changes, auto-sprints and rollover | open |
 | M2.4 Reports | burndown, burnup, velocity, sprint report, cumulative flow | open |
 | M2.5 Board and backlog UI | | open |
@@ -46,6 +46,7 @@ Open in M1c: MCP-04 (OAuth 2.1 and PKCE; bearer tokens only for now), MCP-12 (bu
 | 47 | M1c.1 | The licence scan flagged the stdio proxy's HTTP client | Allowed for that one file: it only calls the endpoint the operator names |
 | 48 | M1c.1 | `make e2e` failed with ECONNREFUSED: the Makefile exports the test database variable and the server's strict config check rejects unknown `TASKLANE_` variables | The e2e targets unset it; the strict check stays |
 | 49 | M2.1 | Go's `time.Date` returns an instant on the previous day when the zone skips local midnight (found with America/Sao_Paulo 2018-11-04), which would start a sprint a day early | A `midnight` helper steps forward to the first instant that is on the date; the test pins it |
+| 50 | M2.2 | Board rank strings sort differently under the database's locale collation than bytewise | The rank column and the ORDER BY use `COLLATE "C"`; tests include a randomized 3,000-insert order check |
 
 ## M1b milestones
 

@@ -153,3 +153,33 @@ func IsQueryError(err error) (*tql.Error, bool) {
 }
 
 var _ = pgx.ErrNoRows
+
+// Keys returns the keys of the issues a query matches inside the scope, up to limit (at most 5000): what a board's
+// filter and quick filters hand to the board view. The permission scope is added exactly as for Search.
+func (e *Postgres) Keys(ctx context.Context, sc Scope, src string, limit int) ([]string, error) {
+	q, err := tql.Parse(src)
+	if err != nil {
+		return nil, err
+	}
+	cq, err := compile(q, sc)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 5000 {
+		limit = 5000
+	}
+	rows, err := e.DB.Query(ctx, `SELECT i.key`+listFrom+` WHERE `+cq.where+fmt.Sprintf(` LIMIT %d`, limit), cq.args...)
+	if err != nil {
+		return nil, fmt.Errorf("search: %w", err)
+	}
+	defer rows.Close()
+	keys := []string{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}

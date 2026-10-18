@@ -72,6 +72,15 @@ func (f *fixture) issue() string {
 	return is.Key
 }
 
+func (f *fixture) board() string {
+	f.n++
+	b, err := f.e.Svc.CreateBoard(testutil.Ctx(), f.e.Admin, "ABC", fmt.Sprint("board ", f.n), "kanban")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return b.ID
+}
+
 func (f *fixture) attachment(key string) string {
 	a, err := f.e.Svc.AttachStream(testutil.Ctx(), f.e.Alice, key, "n.txt", "text/plain", strings.NewReader("hello matrix"))
 	if err != nil {
@@ -117,6 +126,21 @@ func rows() []row {
 		{"POST /api/v1/agents/kill", adminer, func(f *fixture) req { return J("POST", "/api/v1/agents/kill", map[string]any{"on": false}) }},
 		{"POST /api/v1/agents/{id}/pause", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
 			return J("POST", "/api/v1/agents/"+uuid0+"/pause", map[string]any{"paused": false})
+		}},
+		{"GET /api/v1/projects/{key}/boards", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/boards", nil) }},
+		{"POST /api/v1/projects/{key}/boards", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/projects/ABC/boards", map[string]any{"name": fmt.Sprint("b", f.n), "kind": "scrum"})
+		}},
+		{"GET /api/v1/boards/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.board(), nil) }},
+		{"PATCH /api/v1/boards/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PATCH", "/api/v1/boards/"+f.board(), map[string]any{"swimlane": "assignee"})
+		}},
+		{"PUT /api/v1/boards/{id}/columns", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/boards/"+f.board()+"/columns", map[string]any{"columns": []map[string]any{{"name": "All", "statuses": []string{"To Do", "In Progress", "Done"}}}})
+		}},
+		{"POST /api/v1/boards/{id}/move", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/boards/"+f.board()+"/move", map[string]any{"key": f.issue(), "column": "In Progress"})
 		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
