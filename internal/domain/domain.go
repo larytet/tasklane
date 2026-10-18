@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/larytet/tasklane/internal/egress"
 	"github.com/larytet/tasklane/internal/mail"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,11 @@ type Service struct {
 	WebAuthnRPID      string
 	WebAuthnOrigins   []string
 	WebAuthnRequireUV bool
+	// TrustedProxies are the networks whose X-Forwarded-For header is believed (see ClientIP); policyOnce and policies hold the cached
+	// security policies.
+	TrustedProxies []*net.IPNet
+	policyOnce     sync.Once
+	policies       *policyCache
 	// MailWorkers is how many messages are sent at the same time (default 8).
 	MailWorkers      int
 	lastMailBatch    atomic.Int64

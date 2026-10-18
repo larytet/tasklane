@@ -32,6 +32,8 @@
     let data = null; try { data = await r.json(); } catch (e) { /* empty body, 304 */ }
     if (r.status === 426 && data && data.code === 'client_too_old') showReload();
     else if (r.status === 503 && data && data.code === 'paused') showMaintenance();
+    else if (r.status === 403 && data && data.code === 'second_factor_required') showSecondFactorRequired();
+    else if (r.status === 403 && data && data.code === 'ip_not_allowed') banner('danger', 'This network is not allowed for your organization. Ask an administrator, or connect from an allowed network.');
     return { status: r.status, data, headers: r.headers };
   }
   function banner(kind, ...kids) {
@@ -50,6 +52,12 @@
       try { const r = await fetch('/api/v1/system/status', { credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane', 'X-Tasklane-Client': String(CLIENT_VERSION) } }); const d = r.ok ? await r.json() : null; over = !!d && (d.maintenance || []).length === 0; } catch (e) { /* the server may be restarting: keep waiting */ }
       if (over) { clearInterval(MAINT.timer); MAINT.on = false; banner(null); window.dispatchEvent(new Event('tl-resumed')); }
     }, 3000);
+  }
+  // the organization requires a second factor and this person has none: everything but the pages that set one up is refused, so
+  // take them there and say why
+  function showSecondFactorRequired() {
+    banner('warn', 'Your organization requires a second factor to sign in. Set up an authenticator app or a passkey to continue.');
+    if (location.hash !== '#/account') location.hash = '#/account';
   }
   function showReload() {
     banner('warn', 'A newer version of Tasklane is available. ', h('button', { class: 'btn', onclick: () => location.reload() }, 'Reload'), ' Your drafts are kept.');
@@ -952,7 +960,12 @@
   setInterval(bell, 30000);
   async function boot() {
     const r = await api('GET', '/api/v1/bootstrap');
-    if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect(); } else S.me = null;
+    if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect(); }
+    else if (r.status === 403 && r.data && r.data.code === 'second_factor_required') {
+      // signed in, but held to the pages that set a second factor up: who they are is all the page may load before that
+      const m = await api('GET', '/api/v1/me');
+      if (m.status === 200) { S.me = m.data; S.projects = []; S.users = []; } else S.me = null;
+    } else S.me = null;
     route();
   }
   // the agile views (agile.js) plug in here

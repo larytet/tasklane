@@ -262,6 +262,19 @@ func serve(ctx context.Context, cfg config.Config) {
 	nb := make([]byte, 4)
 	rand.Read(nb)
 	svc.WebAuthnRPID, svc.WebAuthnOrigins, svc.WebAuthnRequireUV = cfg.WebAuthnRPID, cfg.WebAuthnOrigins, cfg.WebAuthnRequireUV
+	for _, c := range cfg.TrustedProxies {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			svc.TrustedProxies = append(svc.TrustedProxies, n)
+		} else if ip := net.ParseIP(c); ip != nil {
+			bits := 32
+			if ip.To4() == nil {
+				bits = 128
+			}
+			svc.TrustedProxies = append(svc.TrustedProxies, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+		} else {
+			log.Fatalf("trusted_proxies: %q is not an address or a network", c)
+		}
+	}
 	svc.NodeID, svc.NodeVersion = fmt.Sprintf("%s-%d-%x", host, os.Getpid(), nb), releaseVersion()
 	if err := svc.CheckNodeAgainstGates(ctx, svc.NodeVersion); err != nil { // rolling back past an activated behaviour is refused
 		log.Fatalf("refusing to start: %v", err)

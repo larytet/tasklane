@@ -536,6 +536,10 @@ func rows() []row {
 		{"GET /api/v1/automation/rules/{id}/runs", projAdmin, func(f *fixture) req {
 			return J("GET", fmt.Sprintf("/api/v1/automation/rules/%d/runs", f.autoRule()), nil)
 		}},
+		{"GET /api/v1/admin/security-policy", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/security-policy", nil) }},
+		{"PUT /api/v1/admin/security-policy", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/admin/security-policy", map[string]any{"require_second_factor": false, "ip_allowlist": []string{}, "session_max_hours": 0})
+		}},
 		{"POST /api/v1/login/passkey", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
 			return J("POST", "/api/v1/login/passkey", map[string]any{"mfa_token": "nope", "id": "AA", "client_data_json": "AA", "authenticator_data": "AA", "signature": "AA"})
 		}},

@@ -123,6 +123,12 @@ func (s *Server) Handler() http.HandlerFunc {
 			tok = strings.TrimPrefix(h, "Bearer ")
 		}
 		actor, scopes, err := s.Svc.AuthenticateAgent(r.Context(), tok)
+		if err == nil { // the organization's allowed networks apply to agents too
+			if nerr := s.Svc.EnforceNetwork(r.Context(), actor, s.Svc.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))); nerr != nil {
+				http.Error(w, "this network is not allowed for this organization", http.StatusForbidden)
+				return
+			}
+		}
 		if err != nil {
 			base := strings.TrimRight(s.Svc.BaseURL, "/")
 			if base == "" {

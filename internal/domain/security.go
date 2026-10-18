@@ -95,12 +95,31 @@ func (s *Service) recordAttempt(ctx context.Context, email string, meta ClientMe
 }
 
 func (s *Service) newSession(ctx context.Context, userID string, ttl time.Duration, meta ClientMeta) (string, error) {
+	return s.newSessionVia(ctx, userID, ttl, meta, "password")
+}
+
+// newSessionVia starts a session. It is the one place every sign-in ends in, so the organization's policy is applied here too: a
+// network that is not allowed gets no session, and the session never outlives the organization's longest.
+func (s *Service) newSessionVia(ctx context.Context, userID string, ttl time.Duration, meta ClientMeta, via string) (string, error) {
+	var org string
+	var inst bool
+	if err := s.DB.QueryRow(ctx, `SELECT org_id::text,instance_admin FROM app_user WHERE id::text=$1`, userID).Scan(&org, &inst); err != nil {
+		return "", err
+	}
+	if s.ipDenied(ctx, org, meta.IP, inst) {
+		return "", ErrForbidden
+	}
+	if e, err := s.policyOf(ctx, org); err == nil && e.p.SessionMaxHours > 0 {
+		if max := time.Duration(e.p.SessionMaxHours) * time.Hour; ttl > max {
+			ttl = max
+		}
+	}
 	tok := newToken()
 	ua := meta.UserAgent
 	if len(ua) > 300 {
 		ua = ua[:300]
 	}
-	_, err := s.DB.Exec(ctx, `INSERT INTO session(token_hash,user_id,expires_at,user_agent,ip,last_seen_at) VALUES($1,$2,$3,$4,$5,$6)`, hashToken(tok), userID, s.Now().Add(ttl), ua, meta.IP, s.Now())
+	_, err := s.DB.Exec(ctx, `INSERT INTO session(token_hash,user_id,expires_at,user_agent,ip,last_seen_at,via) VALUES($1,$2,$3,$4,$5,$6,$7)`, hashToken(tok), userID, s.Now().Add(ttl), ua, meta.IP, s.Now(), via)
 	return tok, err
 }
 
@@ -121,6 +140,13 @@ func (s *Service) LoginWith(ctx context.Context, email, password string, ttl tim
 		return LoginResult{}, ErrForbidden
 	}
 	if bcrypt.CompareHashAndPassword([]byte(*hash), []byte(password)) != nil {
+		s.recordAttempt(ctx, email, meta, false)
+		return LoginResult{}, ErrForbidden
+	}
+	var org string
+	var inst bool
+	s.DB.QueryRow(ctx, `SELECT org_id::text,instance_admin FROM app_user WHERE id=$1`, u.ID).Scan(&org, &inst)
+	if s.ipDenied(ctx, org, meta.IP, inst) { // said exactly as a wrong password is: the answer does not reveal that the address was the reason
 		s.recordAttempt(ctx, email, meta, false)
 		return LoginResult{}, ErrForbidden
 	}
@@ -255,6 +281,7 @@ func (s *Service) EnableMFA(ctx context.Context, a Actor, code, currentToken str
 		}
 		return s.audit(ctx, tx, a, "security.mfa_enabled", a.ID, map[string]any{})
 	})
+	s.forgetFactor(a.ID)
 	return plain, err
 }
 
@@ -264,12 +291,14 @@ func (s *Service) DisableMFA(ctx context.Context, a Actor, password string) erro
 	if err := s.DB.QueryRow(ctx, `SELECT password_hash FROM app_user WHERE id=$1`, a.ID).Scan(&hash); err != nil || hash == nil || bcrypt.CompareHashAndPassword([]byte(*hash), []byte(password)) != nil {
 		return ErrForbidden
 	}
-	return s.tx(ctx, func(tx pgx.Tx) error {
+	err := s.tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM user_mfa WHERE user_id=$1`, a.ID); err != nil {
 			return err
 		}
 		return s.audit(ctx, tx, a, "security.mfa_disabled", a.ID, map[string]any{})
 	})
+	s.forgetFactor(a.ID)
+	return err
 }
 
 // ResetMFA lets an administrator switch a person's second factor off (a lost phone and no recovery codes) and ends their sessions.
@@ -277,7 +306,7 @@ func (s *Service) ResetMFA(ctx context.Context, a Actor, userID string) error {
 	if err := adminOnly(a); err != nil {
 		return err
 	}
-	return s.tx(ctx, func(tx pgx.Tx) error {
+	err := s.tx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `DELETE FROM user_mfa WHERE user_id::text=$1`, userID)
 		if err != nil {
 			return err
@@ -294,6 +323,8 @@ func (s *Service) ResetMFA(ctx context.Context, a Actor, userID string) error {
 		}
 		return s.audit(ctx, tx, a, "security.mfa_reset", userID, map[string]any{})
 	})
+	s.forgetFactor(userID)
+	return err
 }
 
 func (s *Service) MFAStatus(ctx context.Context, a Actor) (enabled bool, recoveryLeft int) {

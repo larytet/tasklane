@@ -94,6 +94,17 @@ func (s *Server) registerSecurity(mux *http.ServeMux) {
 			s.reply(w, ok, s.Svc.DisableMFA(r.Context(), actorOf(r), in.Password))
 		}
 	}))
+	s.handle(mux, "GET /api/v1/admin/security-policy", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.GetSecurityPolicy(r.Context(), actorOf(r), r.URL.Query().Get("org"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "PUT /api/v1/admin/security-policy", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.SecurityPolicy
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, ok, s.Svc.SetSecurityPolicy(r.Context(), actorOf(r), r.URL.Query().Get("org"), in, s.clientIP(r)))
+	}))
 	s.handle(mux, "GET /api/v1/me/passkeys", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		keys, err := s.Svc.ListPasskeys(r.Context(), actorOf(r))
 		s.reply(w, map[string]any{"available": s.Svc.WebAuthnAvailable(), "keys": keys}, err)

@@ -68,7 +68,7 @@ func (s *Server) registerSSO(mux *http.ServeMux) {
 			http.Redirect(w, r, "/?sso=denied", http.StatusFound)
 			return
 		}
-		res, err := s.Svc.SSOCallback(r.Context(), q.Get("state"), q.Get("code"), s.SessionTTL, clientMeta(r))
+		res, err := s.Svc.SSOCallback(r.Context(), q.Get("state"), q.Get("code"), s.SessionTTL, s.clientMeta(r))
 		if err != nil {
 			http.Redirect(w, r, "/?sso=denied", http.StatusFound) // the reason is not shown: it would help a guesser
 			return

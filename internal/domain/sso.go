@@ -520,6 +520,6 @@ func (s *Service) SSOCallback(ctx context.Context, state, code string, ttl time.
 	if err := s.DB.QueryRow(ctx, `SELECT id::text,email,name,kind,is_admin FROM app_user WHERE id::text=$1`, uid).Scan(&res.User.ID, &res.User.Email, &res.User.Name, &res.User.Kind, &res.User.Admin); err != nil {
 		return res, err
 	}
-	res.Token, err = s.newSession(ctx, uid, ttl, meta)
+	res.Token, err = s.newSessionVia(ctx, uid, ttl, meta, "sso")
 	return res, err
 }

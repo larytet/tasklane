@@ -15,6 +15,7 @@
       h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
       h('a', { href: '#/admin/email', class: 'tab', 'aria-current': active === 'email' ? 'page' : null }, 'Email'),
       h('a', { href: '#/admin/git', class: 'tab', 'aria-current': active === 'git' ? 'page' : null }, 'Git'),
+      h('a', { href: '#/admin/security', class: 'tab', 'aria-current': active === 'security' ? 'page' : null }, 'Security'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
   }
 
@@ -589,6 +590,34 @@
     await Promise.all([loadConns(), loadRepos(), loadVis(), loadIds(), loadRules(), refreshConnSel()]);
   }
 
+
+  // Security: the organization's policy (a second factor for everyone, the networks that may sign in, the longest session).
+  async function securityView() {
+    const app = document.getElementById('app'); clear(app);
+    const msg = h('div', { role: 'status', 'aria-live': 'polite' });
+    const req = h('input', { type: 'checkbox', id: 'req2fa' });
+    const nets = h('textarea', { 'aria-label': 'Allowed networks', rows: 4, placeholder: '203.0.113.0/24\n198.51.100.7', style: 'width:100%;max-width:420px' });
+    const hours = h('input', { type: 'number', min: 0, max: 8760, 'aria-label': 'Longest session in hours', style: 'width:100px' });
+    const count = h('span', { class: 'muted' });
+    const r = await api('GET', '/api/v1/admin/security-policy');
+    if (r.status === 200) {
+      req.checked = r.data.require_second_factor; nets.value = (r.data.ip_allowlist || []).join('\n'); hours.value = r.data.session_max_hours;
+      const n = r.data.people_without_second_factor; count.textContent = (n === 1 ? '1 active person has' : n + ' active people have') + ' no second factor yet. They would be held at the Account page until they add one.';
+    } else msg.textContent = errText(r);
+    app.append(topbar(), adminTabs('security'), h('div', { class: 'page' }, h('h2', {}, 'Security policy'),
+      h('p', { class: 'muted' }, 'Applies to your organization. It is enforced at sign-in and on every request, so a change reaches people who are already signed in.'),
+      h('h3', {}, 'Second factor'), h('label', { for: 'req2fa' }, req, ' Require a second factor (an authenticator app or a passkey)'), h('p', {}, count),
+      h('p', { class: 'muted' }, 'People without one can still sign in, but only reach the page where they set one up. Single sign-on sessions are not asked: your identity provider is the authority there. API tokens are not affected.'),
+      h('h3', {}, 'Allowed networks'), h('p', { class: 'muted' }, 'One address or network per line. Empty means anywhere. Sign-in and every request, including API tokens, must come from these. You cannot save a list that leaves out your own address.'), nets,
+      h('h3', {}, 'Longest session'), h('p', {}, hours, ' hours (0 means no limit beyond the server\u2019s)'),
+      h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: async () => {
+        const body = { require_second_factor: req.checked, ip_allowlist: nets.value.split(/[\n,]+/).map(x => x.trim()).filter(Boolean), session_max_hours: Number(hours.value) || 0 };
+        const x = await api('PUT', '/api/v1/admin/security-policy', body);
+        if (x.status === 200) { toast('Policy saved'); securityView(); } else msg.textContent = errText(x);
+      } }, 'Save policy')), msg));
+  }
+
+  A.EXT.routes.push({ re: /^#\/admin\/security\/?$/, run: () => securityView() });
   A.EXT.routes.push({ re: /^#\/admin\/git\/?$/, run: () => gitView() });
   A.EXT.routes.push({ re: /^#\/admin\/email\/?$/, run: () => emailView() });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/([0-9a-f-]{36})/, run: m => editorView(m[1]) });

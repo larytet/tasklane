@@ -157,6 +157,7 @@ func (s *Service) AddPasskey(ctx context.Context, a Actor, in PasskeyRegistratio
 		}
 		return s.audit(ctx, tx, a, "security.passkey_added", a.ID, map[string]any{"name": name})
 	})
+	s.forgetFactor(a.ID)
 	return p, err
 }
 
@@ -182,6 +183,7 @@ func (s *Service) RemovePasskey(ctx context.Context, a Actor, id int64, password
 	if err := s.checkOwnPassword(ctx, a.ID, password); err != nil {
 		return err
 	}
+	defer s.forgetFactor(a.ID)
 	return s.tx(ctx, func(tx pgx.Tx) error {
 		var name string
 		if err := tx.QueryRow(ctx, `DELETE FROM webauthn_credential WHERE id=$1 AND user_id::text=$2 RETURNING name`, id, a.ID).Scan(&name); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -202,7 +203,10 @@ func (s *Service) ClaimIssue(ctx context.Context, a Actor, key string, ttl time.
 		var ver int64
 		var raw []byte
 		if err := tx.QueryRow(ctx, `SELECT i.status_id,st.category,i.assignee_id,i.version,i.field_ver FROM issue i JOIN status st ON st.id=i.status_id WHERE i.id=$1 AND i.deleted_at IS NULL FOR UPDATE OF i`, is.ID).Scan(&statusID, &cat, &assignee, &ver, &raw); err != nil {
-			return ErrGone
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrGone // only a row that is not there means "deleted": a lock timeout or a dropped connection is an error to report as one
+			}
+			return err
 		}
 		if cat == "done" {
 			return invalid("the issue is already done; reopen it before claiming")

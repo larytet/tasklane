@@ -485,6 +485,16 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			s.fail(w, 403, "csrf", "missing X-Requested-With header", nil)
 			return
 		}
+		// the organization's security policy: which networks may be used, and whether a second factor is compulsory (the pages that
+		// set one up stay reachable)
+		switch perr := s.Svc.EnforcePolicy(r.Context(), a, s.clientIP(r), tok, viaCookie, secondFactorExempt(r.URL.Path)); {
+		case errors.Is(perr, domain.ErrIPNotAllowed):
+			s.fail(w, 403, "ip_not_allowed", perr.Error(), nil)
+			return
+		case errors.Is(perr, domain.ErrSecondFactorRequired):
+			s.fail(w, 403, "second_factor_required", perr.Error(), nil)
+			return
+		}
 		if h, ok := r.Context().Value(holderKey{}).(*actorHolder); ok {
 			h.a = a
 		}
@@ -492,9 +502,23 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func clientMeta(r *http.Request) domain.ClientMeta {
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return domain.ClientMeta{IP: ip, UserAgent: r.UserAgent()}
+// clientIP is where a request really came from: the peer, or the address a trusted proxy reports.
+func (s *Server) clientIP(r *http.Request) string {
+	return s.Svc.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+}
+
+func (s *Server) clientMeta(r *http.Request) domain.ClientMeta {
+	return domain.ClientMeta{IP: s.clientIP(r), UserAgent: r.UserAgent()}
+}
+
+// secondFactorExempt lists what a person who must set up a second factor may still reach: who they are, signing out, and the
+// pages that set a factor up.
+func secondFactorExempt(path string) bool {
+	switch path {
+	case "/api/v1/me", "/api/v1/logout", "/api/v1/system/status":
+		return true
+	}
+	return strings.HasPrefix(path, "/api/v1/me/2fa") || strings.HasPrefix(path, "/api/v1/me/passkeys")
 }
 
 func (s *Server) startSession(w http.ResponseWriter, tok string, u domain.User) {
@@ -522,7 +546,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &in) {
 		return
 	}
-	res, err := s.Svc.LoginWith(r.Context(), in.Email, in.Password, s.SessionTTL, clientMeta(r))
+	res, err := s.Svc.LoginWith(r.Context(), in.Email, in.Password, s.SessionTTL, s.clientMeta(r))
 	var mfa *domain.MFARequired
 	if errors.As(err, &mfa) {
 		out := map[string]any{"mfa_required": true, "mfa_token": mfa.Token, "totp": mfa.TOTP}
@@ -547,7 +571,7 @@ func (s *Server) loginMFA(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &in) {
 		return
 	}
-	res, err := s.Svc.LoginMFA(r.Context(), in.Token, in.Code, clientMeta(r))
+	res, err := s.Svc.LoginMFA(r.Context(), in.Token, in.Code, s.clientMeta(r))
 	if err != nil {
 		s.fail(w, 401, "bad_code", "that code is not right", nil)
 		return
@@ -560,7 +584,7 @@ func (s *Server) loginPasskey(w http.ResponseWriter, r *http.Request) {
 	if !s.decode(w, r, &in) {
 		return
 	}
-	res, err := s.Svc.LoginWebAuthn(r.Context(), in, clientMeta(r))
+	res, err := s.Svc.LoginWebAuthn(r.Context(), in, s.clientMeta(r))
 	if err != nil {
 		s.fail(w, 401, "bad_key", "that key could not sign you in", nil)
 		return
