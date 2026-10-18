@@ -236,7 +236,7 @@ func TestMCP01_ProtocolConformance(t *testing.T) {
 	if code, _, _ := ag.post(ag.token, map[string]any{"jsonrpc": "2.0", "id": 1, "method": "ping"}, map[string]string{"Origin": e.srv.URL}); code != 200 {
 		t.Fatalf("same origin: %d", code)
 	}
-	for method, want := range map[string]int{"GET": 405, "DELETE": 204} {
+	for method, want := range map[string]int{"GET": 400, "DELETE": 204} { // a GET is the event stream, which belongs to a session
 		req, _ := http.NewRequest(method, e.srv.URL+"/mcp", nil)
 		req.Header.Set("Authorization", "Bearer "+ag.token)
 		if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != want {

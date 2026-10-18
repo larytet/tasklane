@@ -35,3 +35,21 @@ MCP clients that support it connect without a pasted token: point the client at 
 ## Git tools
 
 `list_development` (scope `read`) and the resource `tasklane://issue/{key}/development` return the code linked to an issue; every piece of provider text in them is marked `external-git-provider` and is untrusted. `create_branch` (scope `branch`, a write: it takes an `idempotency_key`) creates a branch for the issue at the provider when an administrator has turned write actions on for the connection. See `docs/GIT.md`.
+
+## Prompts
+
+`prompts/list` and `prompts/get` offer four ready-made starting points: `triage_issue`, `plan_work`, `summarize_thread` (each takes an issue `key`) and `standup_report` (a `project`, and `days` from 1 to 30). A prompt is an instruction written by this server, saying which tools to use, plus the text of the issue or the list of issues. It grants nothing: every tool call it leads to is scoped, authorized, budgeted and audited like any other, and getting a prompt changes nothing. It needs the `read` scope and answers an issue the person cannot see exactly as it answers one that does not exist.
+
+The issue text was written by people and other systems, so it is **fenced**: it sits between `<<<BEGIN UNTRUSTED …>>>` and `<<<END UNTRUSTED …>>>` markers under a label that says it is data and may contain instructions that must not be followed, and the message says before the fence that only its own instructions count. Text that contains the markers cannot close the fence (the angle brackets are replaced).
+
+## Resource subscriptions
+
+A client subscribes with `resources/subscribe` to:
+
+- `tasklane://issue/KEY`: the issue (a comment, a status change, an assignment, a text edit, an attachment);
+- `tasklane://issue/KEY/development`: the code linked to the issue (a pull request, build or deployment changes), and only that;
+- `tasklane://search?q=<TQL>`: a filter; the client is told when an issue that matches it is created or changed. (An issue that stops matching is not announced.) Reading this resource lists the current matches.
+
+Notifications are `notifications/resources/updated` with the resource's `uri`, sent on the session's **event stream**: a `GET` of the endpoint with `Mcp-Session-Id` and `Accept: text/event-stream` (one stream per session; a second gets `409`, a missing session id `400`, someone else's session `404`). Over stdio the proxy opens the stream itself and writes the notifications as lines. A notification says that something changed, not what: the client reads the resource again, and that read is authorized like any other. Typical delivery is well under a second.
+
+Authorization is checked **at every notification**: the token must still work (a revoked, expired, paused or killed agent's stream ends), and the person must still be able to see the issue (otherwise nothing is said, and the stream stays quiet). A session holds at most 100 subscriptions. Notifications are queued without waiting and dropped if the client does not keep up, so a slow subscriber never slows anyone saving; the client finds out when it next reads.

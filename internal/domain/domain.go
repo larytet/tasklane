@@ -67,6 +67,8 @@ type Service struct {
 	// Clock is the machine's own clock (time.Now); Now corrects it by the measured offset from the database.
 	Clock       func() time.Time
 	clockOffset atomic.Int64
+	listenMu    sync.Mutex
+	listeners   []func(Event)
 	// BackupHook, when set, is called at points of a backup ("snapshot": the snapshot is fixed, nothing is copied yet); for tests.
 	BackupHook func(stage string)
 	// WebAuthnRPID and WebAuthnOrigins override the relying party that passkeys are bound to (default: the host of BaseURL);
@@ -206,6 +208,20 @@ func (s *Service) emit(e Event) {
 	if s.Publish != nil {
 		s.Publish(e)
 	}
+	s.listenMu.Lock()
+	ls := s.listeners
+	s.listenMu.Unlock()
+	for _, f := range ls {
+		f(e)
+	}
+}
+
+// OnEvent adds a listener that sees every committed change after the one realtime hook (Publish). Listeners must not block: they run
+// on the writer's goroutine, after its transaction has committed, and a slow one would slow every save.
+func (s *Service) OnEvent(f func(Event)) {
+	s.listenMu.Lock()
+	s.listeners = append(s.listeners, f)
+	s.listenMu.Unlock()
 }
 
 // CanRead reports whether the actor may read the issue; the realtime gateway authorizes channels with it.

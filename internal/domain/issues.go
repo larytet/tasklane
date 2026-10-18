@@ -220,7 +220,11 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 	if err != nil {
 		return Issue{}, err
 	}
-	return s.getIssue(ctx, key)
+	out, err := s.getIssue(ctx, key)
+	if err == nil { // a new issue is news to anyone watching a search that it matches
+		s.emit(Event{Type: "issue.created", Issue: key, Version: out.Version, Actor: a.Label, ActorID: a.ID})
+	}
+	return out, err
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
