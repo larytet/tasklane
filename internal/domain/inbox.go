@@ -17,7 +17,7 @@ type NotifyPrefs struct {
 	AutoWatch  bool     `json:"auto_watch"`  // hear about issues you reported, are assigned or commented on
 	Inbox      bool     `json:"inbox"`       // in-app notifications
 	Email      bool     `json:"email"`       // notification email (when the server sends any)
-	Muted      []string `json:"muted"`       // kinds you do not want: assigned, mention, comment, status, edit, created
+	Muted      []string `json:"muted"`       // kinds you do not want: assigned, mention, comment, status, edit, created, approval
 	QuietStart string   `json:"quiet_start"` // email waits until quiet hours end, such as 22:00 to 07:00
 	QuietEnd   string   `json:"quiet_end"`
 	Timezone   string   `json:"timezone"` // an IANA name; quiet hours use it (default UTC)
@@ -25,7 +25,7 @@ type NotifyPrefs struct {
 	EmailBouncing bool `json:"email_bouncing,omitempty"`
 }
 
-var notifyKinds = map[string]bool{"assigned": true, "mention": true, "comment": true, "status": true, "edit": true, "created": true}
+var notifyKinds = map[string]bool{"assigned": true, "mention": true, "comment": true, "status": true, "edit": true, "created": true, "approval": true}
 
 func defaultPrefs() NotifyPrefs {
 	return NotifyPrefs{AutoWatch: true, Inbox: true, Email: true, Muted: []string{}}
@@ -95,7 +95,7 @@ func (s *Service) MyNotifyPrefs(ctx context.Context, a Actor) NotifyPrefs {
 func (s *Service) SetNotifyPrefs(ctx context.Context, a Actor, p NotifyPrefs) (NotifyPrefs, error) {
 	for _, m := range p.Muted {
 		if !notifyKinds[m] {
-			return p, invalid("unknown notification kind %q (assigned, mention, comment, status, edit, created)", m)
+			return p, invalid("unknown notification kind %q (assigned, mention, comment, status, edit, created, approval)", m)
 		}
 	}
 	if (p.QuietStart != "") != (p.QuietEnd != "") {

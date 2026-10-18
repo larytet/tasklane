@@ -130,6 +130,7 @@
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/dashboards'; } }, 'Dashboards'),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/releases'; } }, 'Releases'),
+      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/approvals'; } }, 'Approvals'),
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
@@ -430,8 +431,51 @@
       root.append(customFieldsEl(is));
       root.append(attachmentsEl());
       root.append(developmentEl());
+      root.append(approvalsEl());
       root.append(threadEl());
       root.append(replyEl());
+    }
+
+    // ----- approvals: who was asked, what they said, and (for an approver) the buttons
+    function approvalsEl() {
+      const list = v.approvals || [];
+      const pending = list.some(a => a.status === 'pending');
+      const box = h('section', { class: 'card', 'aria-label': 'Approvals', style: 'padding:10px 12px;margin:12px 0' });
+      if (!list.length && !canEdit()) return h('span', { hidden: true });
+      box.append(h('h3', { style: 'margin:0 0 6px' }, 'Approvals'));
+      const word = { pending: 'Waiting', granted: 'Approved', rejected: 'Rejected', cancelled: 'Withdrawn' };
+      for (const ap of list) {
+        const rule = ap.rule === 'all' ? 'everyone must approve' : ap.rule === 'any' ? 'one approval is enough' : ap.needed + ' of ' + ap.approvers.length + ' must approve';
+        const row = h('div', { class: 'row', style: 'flex-direction:column;align-items:stretch;gap:4px' },
+          h('div', {}, h('strong', {}, word[ap.status] || ap.status), ' ', h('span', { class: 'muted' }, rule + (ap.requested_by ? ' · asked by ' + ap.requested_by.name : '') + (ap.deadline ? ' · due ' + new Date(ap.deadline).toLocaleString() : '')), ap.overdue ? h('span', { class: 'badge', style: 'margin-left:6px' }, 'Overdue') : null),
+          ap.comment ? h('div', { class: 'muted' }, ap.comment) : null,
+          h('ul', { style: 'margin:0;padding-left:18px' }, ap.approvers.map(p => h('li', {}, p.user.name + ' — ' + (p.decision === 'approve' ? 'approved' : p.decision === 'reject' ? 'rejected' : 'not decided yet') + (p.comment ? ': ' + p.comment : '')))));
+        if (ap.mine) {
+          const c = h('input', { type: 'text', 'aria-label': 'Comment on your decision', placeholder: 'Comment (optional)', style: 'min-width:220px' });
+          const act = d => async () => { const r = await api('POST', '/api/v1/approvals/' + ap.id + '/decision', { decision: d, comment: c.value }); if (r.status === 200) await reloadAll(); else toast((r.data && r.data.error) || 'Could not record the decision'); };
+          row.append(h('div', { class: 'chips' }, c, h('button', { class: 'btn primary', onclick: act('approve') }, 'Approve'), h('button', { class: 'btn', onclick: act('reject') }, 'Reject')));
+        }
+        if (ap.status === 'pending' && canEdit()) row.append(h('div', {}, h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/approvals/' + ap.id + '/cancel'); if (r.status === 200) await reloadAll(); else toast((r.data && r.data.error) || 'Could not withdraw it'); } }, 'Withdraw the request')));
+        box.append(row);
+      }
+      if (canEdit() && !pending) {
+        const who = h('input', { type: 'text', 'aria-label': 'Approvers', placeholder: 'ana@example.com, group:Release managers, reporter', style: 'min-width:300px' });
+        const rule = h('select', { 'aria-label': 'Approval rule' }, h('option', { value: 'all' }, 'Everyone'), h('option', { value: 'any' }, 'Any one'), h('option', { value: 'n' }, 'At least N'));
+        const n = h('input', { type: 'number', 'aria-label': 'How many must approve', min: 1, value: 2, style: 'width:70px', hidden: true });
+        rule.addEventListener('change', () => { n.hidden = rule.value !== 'n'; });
+        const due = h('input', { type: 'datetime-local', 'aria-label': 'Decision due' });
+        const note = h('input', { type: 'text', 'aria-label': 'Note to the approvers', placeholder: 'Note (optional)' });
+        box.append(h('div', { class: 'chips' }, who, rule, n, due, note, h('button', { class: 'btn', onclick: async () => {
+          const body = { users: [], groups: [], derived: [], rule: rule.value, n: Number(n.value), comment: note.value };
+          for (const t of who.value.split(',').map(x => x.trim()).filter(Boolean)) {
+            if (/^group:/i.test(t)) body.groups.push(t.slice(6).trim()); else if (/^(reporter|assignee)$/i.test(t)) body.derived.push(t.toLowerCase()); else body.users.push(t);
+          }
+          if (due.value) body.deadline = new Date(due.value).toISOString();
+          const r = await api('POST', '/api/v1/issues/' + key + '/approvals', body);
+          if (r.status === 201) await reloadAll(); else toast((r.data && r.data.error) || 'Could not ask for approval');
+        } }, 'Ask for approval')));
+      }
+      return box;
     }
 
     function noteFor(field, label) {

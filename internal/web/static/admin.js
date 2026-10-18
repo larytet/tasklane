@@ -327,7 +327,7 @@
     function rulesDialog(t, editing) {
       t.rules = t.rules || {};
       const mkTa = (k, label, hint) => { const ta = h('textarea', { 'aria-label': label, rows: 4, disabled: !editing, spellcheck: 'false', style: 'width:100%;font-family:monospace' }); ta.value = JSON.stringify(t.rules[k] || [], null, 1); return [h('label', {}, h('strong', {}, label), ' ', h('span', { class: 'muted' }, hint)), ta]; };
-      const c = mkTa('conditions', 'Conditions', 'role, assignee_only, reporter_only, assignee_or_reporter, field, subtasks_resolved'), v = mkTa('validators', 'Validators', 'field_required, regex, permission, previous_status'),
+      const c = mkTa('conditions', 'Conditions', 'role, assignee_only, reporter_only, assignee_or_reporter, field, subtasks_resolved, approval_granted'), v = mkTa('validators', 'Validators', 'field_required, regex, permission, previous_status'),
         p = mkTa('post_functions', 'Post-functions', 'set_field, assign, add_comment, webhook, create_subtask'), sc = mkTa('screen', 'Transition screen', 'field keys asked for first');
       const msg = h('div', { class: 'err', role: 'alert' });
       const close = modal(h('div', {}, h('h2', {}, 'Rules of ' + t.name), c, v, p, sc, msg, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, editing ? 'Cancel' : 'Close'),

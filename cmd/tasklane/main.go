@@ -261,6 +261,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	go svc.RunJiraWorkers(ctx, log.Printf)
 	go svc.RunWorkflowJobs(ctx, log.Printf)
 	go svc.RunNotifier(ctx, log.Printf)
+	go svc.RunApprovals(ctx, log.Printf)
 	go svc.RunWorkflowMigrations(ctx, log.Printf)
 	dom := "tasklane.local"
 	if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {

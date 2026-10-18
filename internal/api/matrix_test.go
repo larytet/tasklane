@@ -98,6 +98,19 @@ func (f *fixture) version() string {
 	return v.ID
 }
 
+// approval makes an open approval on a fresh issue that the matrix's member (and administrator) is the approver of.
+func (f *fixture) approval() string {
+	is, err := f.e.Svc.CreateIssue(testutil.Ctx(), f.e.Admin, domain.CreateIn{Project: "ABC", Type: "Task", Summary: "approval matrix"})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	ap, err := f.e.Svc.RequestApproval(testutil.Ctx(), f.e.Admin, is.Key, domain.ApprovalIn{Users: []string{f.e.Alice.ID, f.e.Admin.ID}, Rule: "any"})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return ap.ID
+}
+
 func (f *fixture) versionName() string {
 	f.n++
 	n := fmt.Sprint("n", f.n)
@@ -595,6 +608,18 @@ func rows() []row {
 		{"GET /api/v1/versions/{id}/notes", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/versions/"+f.version()+"/notes", nil) }},
 		{"PUT /api/v1/issues/{key}/versions", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
 			return J("PUT", "/api/v1/issues/"+f.issue()+"/versions", map[string]any{"fix": []string{f.versionName()}})
+		}},
+		{"GET /api/v1/issues/{key}/approvals", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/issues/"+f.issue()+"/approvals", nil) }},
+		{"POST /api/v1/issues/{key}/approvals", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(201), admin: codes(201)}, func(f *fixture) req {
+			is, _ := f.e.Svc.CreateIssue(testutil.Ctx(), f.e.Admin, domain.CreateIn{Project: "ABC", Type: "Task", Summary: "ask matrix"})
+			return J("POST", "/api/v1/issues/"+is.Key+"/approvals", map[string]any{"users": []string{f.e.Alice.ID}})
+		}},
+		{"GET /api/v1/approvals", authed, func(f *fixture) req { return J("GET", "/api/v1/approvals", nil) }},
+		{"POST /api/v1/approvals/{id}/decision", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/approvals/"+f.approval()+"/decision", map[string]any{"decision": "approve"})
+		}},
+		{"POST /api/v1/approvals/{id}/cancel", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/approvals/"+f.approval()+"/cancel", nil)
 		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {

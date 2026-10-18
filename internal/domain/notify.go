@@ -51,6 +51,8 @@ type notifyEvent struct {
 		Fields   []string `json:"fields"`
 		Field    string   `json:"field"`
 		TextSeq  int64    `json:"text_seq"`
+		Users    []string `json:"users"` // approval events: exactly who is told
+		Text     string   `json:"text"`
 	}
 }
 
@@ -100,7 +102,7 @@ type recipient struct{ id, name, email string }
 
 func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int, error) {
 	switch e.Type {
-	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved":
+	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved", "approval.requested", "approval.decided", "approval.reminder":
 	default:
 		return 0, nil
 	}
@@ -168,6 +170,19 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		for _, m := range s.mentions(ctx, tx, c) {
 			mentioned[m.id] = m
 		}
+	case "approval.requested", "approval.decided", "approval.reminder":
+		evName, baseKind = e.Type, "approval"
+		switch e.Type {
+		case "approval.requested":
+			what = e.Payload.Actor + " asked you to approve this issue"
+		case "approval.reminder":
+			what = "Your decision on this approval is due"
+		default:
+			what = e.Payload.Text
+		}
+		if e.Type != "approval.decided" {
+			body = e.Payload.Text
+		}
 	case "issue.text_saved":
 		evName, baseKind = "issue.text_saved", "edit"
 		kind, delay = "edit", s.editBatchWindow()
@@ -197,9 +212,13 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 	if err := tx.QueryRow(ctx, `SELECT mirror_of IS NOT NULL FROM project WHERE id=$1`, pid).Scan(&mirrored); err != nil {
 		return 0, err
 	}
-	classes := s.schemeClasses(ctx, tx, pid, evName)
-	if ids, err = s.audience(ctx, tx, id, reporter, assignee, classes, evName == "issue.created" || evName == "issue.assigned"); err != nil {
-		return 0, err
+	if baseKind == "approval" { // exactly the people the event names: approvers asked, the requester told, whatever the scheme says
+		ids = e.Payload.Users
+	} else {
+		classes := s.schemeClasses(ctx, tx, pid, evName)
+		if ids, err = s.audience(ctx, tx, id, reporter, assignee, classes, evName == "issue.created" || evName == "issue.assigned"); err != nil {
+			return 0, err
+		}
 	}
 	seen := map[string]bool{e.Payload.ActorID: true} // people are not notified of their own actions
 	n := 0

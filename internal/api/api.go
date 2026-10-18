@@ -402,6 +402,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerGroups(mux)
 	s.registerDashboards(mux)
 	s.registerVersions(mux)
+	s.registerApprovals(mux)
 	s.registerQuota(mux)
 	s.registerInboundMail(mux)
 	s.registerGitAuto(mux)

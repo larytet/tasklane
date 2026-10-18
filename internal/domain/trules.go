@@ -42,7 +42,7 @@ func (sp Spec) strs(k string) []string { return asStrings(sp[k]) }
 
 var roleRank = map[string]int{"": 0, "viewer": 1, "member": 2, "admin": 3}
 
-var condKinds = map[string]bool{"role": true, "assignee_only": true, "reporter_only": true, "assignee_or_reporter": true, "field": true, "subtasks_resolved": true}
+var condKinds = map[string]bool{"role": true, "assignee_only": true, "reporter_only": true, "assignee_or_reporter": true, "field": true, "subtasks_resolved": true, "approval_granted": true}
 var valKinds = map[string]bool{"field_required": true, "regex": true, "permission": true, "previous_status": true}
 var pfKinds = map[string]bool{"set_field": true, "assign": true, "add_comment": true, "webhook": true, "create_subtask": true}
 var asyncKinds = map[string]bool{"webhook": true, "create_subtask": true}
@@ -66,7 +66,7 @@ func (s *Service) ValidateRules(ctx context.Context, q querier, r TRules) error 
 	for _, c := range r.Conditions {
 		switch k := c.str("kind"); {
 		case !condKinds[k]:
-			return invalid("unknown condition %q (conditions: role, assignee_only, reporter_only, assignee_or_reporter, field, subtasks_resolved)", k)
+			return invalid("unknown condition %q (conditions: role, assignee_only, reporter_only, assignee_or_reporter, field, subtasks_resolved, approval_granted)", k)
 		case k == "role":
 			for _, x := range c.strs("roles") {
 				if roleRank[x] == 0 {
@@ -229,6 +229,10 @@ func (s *Service) checkConditions(ctx context.Context, q querier, specs []Spec, 
 			}
 			if !ruleHolds(Rule{WhenField: canonKey(c.str("field")), WhenOp: op, WhenValue: c["value"]}, t.Vals, "") {
 				return false, fmt.Sprintf("%s must be %s", c.str("field"), op)
+			}
+		case "approval_granted":
+			if !s.approvalGranted(ctx, q, t.ID) {
+				return false, "it needs a granted approval"
 			}
 		case "subtasks_resolved":
 			var open int
