@@ -152,3 +152,26 @@ func TestHTTP_SprintFlow(t *testing.T) {
 		t.Fatalf("%d", code)
 	}
 }
+
+// Reports honour the board filter, and a filter that does not parse is a 400 on reports as it is on the board.
+func TestHTTP_ReportsFollowTheBoardFilter(t *testing.T) {
+	e, alice, bob, _ := setup(t)
+	root := rootClient(t, e, alice)
+	_, b, _ := root.do("POST", "/api/v1/projects/ABC/boards", map[string]any{"name": "Flow", "kind": "kanban"})
+	id := b["id"].(string)
+	for _, path := range []string{"cumulative-flow", "control-chart", "created-vs-resolved", "workload", "time-in-status"} {
+		if code, _, _ := bob.do("GET", "/api/v1/boards/"+id+"/reports/"+path+"?days=7", nil); code != 200 {
+			t.Fatalf("%s: %d", path, code)
+		}
+	}
+	root.do("PATCH", "/api/v1/boards/"+id, map[string]any{"filter": "labels = ("})
+	for _, path := range []string{"cumulative-flow", "workload"} {
+		if code, out, _ := alice.do("GET", "/api/v1/boards/"+id+"/reports/"+path, nil); code != 400 || out["code"] != "tql_error" {
+			t.Fatalf("%s: %d %v", path, code, out)
+		}
+	}
+	// velocity needs a scrum board
+	if code, _, _ := alice.do("GET", "/api/v1/boards/"+id+"/reports/velocity", nil); code != 400 {
+		t.Fatalf("velocity on kanban: %d", code)
+	}
+}

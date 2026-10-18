@@ -174,9 +174,9 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 		}
 		key = pkey + "-" + itoa(n)
 		var id string
-		err := tx.QueryRow(ctx, `INSERT INTO issue(project_id,number,key,issue_type_id,status_id,priority,reporter_id,assignee_id,labels,parent_id,summary,rank)
-			VALUES($1,$2,$3,$4,(SELECT st.id FROM project p JOIN status st ON st.workflow_id=p.workflow_id WHERE p.id=$1 ORDER BY st.position LIMIT 1),$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-			pid, n, key, typeID, in.Priority, a.ID, assignee, labels, parentID, summary, rankFor(n)).Scan(&id)
+		err := tx.QueryRow(ctx, `INSERT INTO issue(project_id,number,key,issue_type_id,status_id,priority,reporter_id,assignee_id,labels,parent_id,summary,rank,created_at,updated_at)
+			VALUES($1,$2,$3,$4,(SELECT st.id FROM project p JOIN status st ON st.workflow_id=p.workflow_id WHERE p.id=$1 ORDER BY st.position LIMIT 1),$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING id`,
+			pid, n, key, typeID, in.Priority, a.ID, assignee, labels, parentID, summary, rankFor(n), s.Now()).Scan(&id)
 		if err != nil {
 			return err
 		}
@@ -546,9 +546,13 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 		fvj, _ := json.Marshal(fv)
 		resolved := "NULL"
 		if cat == "done" {
-			resolved = "now()"
+			resolved = "$5"
 		}
-		if _, err := tx.Exec(ctx, `UPDATE issue SET status_id=$2,version=$3,field_ver=$4,updated_at=now(),resolved_at=`+resolved+` WHERE id=$1`, is.ID, to, next, fvj); err != nil {
+		args := []any{is.ID, to, next, fvj}
+		if cat == "done" {
+			args = append(args, s.Now())
+		}
+		if _, err := tx.Exec(ctx, `UPDATE issue SET status_id=$2,version=$3,field_ver=$4,updated_at=now(),resolved_at=`+resolved+` WHERE id=$1`, args...); err != nil {
 			return err
 		}
 		s.hist(ctx, tx, is.ID, a, "status", &fromName, &toName)

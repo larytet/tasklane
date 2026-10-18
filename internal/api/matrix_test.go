@@ -197,6 +197,17 @@ func rows() []row {
 		{"PUT /api/v1/users/{id}/calendar", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
 			return J("PUT", "/api/v1/users/"+f.spare.ID+"/calendar", map[string]any{"calendar": nil})
 		}},
+		{"GET /api/v1/boards/{id}/reports/cumulative-flow", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.board()+"/reports/cumulative-flow", nil) }},
+		{"GET /api/v1/boards/{id}/reports/control-chart", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.board()+"/reports/control-chart", nil) }},
+		{"GET /api/v1/boards/{id}/reports/created-vs-resolved", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.board()+"/reports/created-vs-resolved", nil) }},
+		{"GET /api/v1/boards/{id}/reports/workload", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.board()+"/reports/workload", nil) }},
+		{"GET /api/v1/boards/{id}/reports/time-in-status", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.board()+"/reports/time-in-status", nil) }},
+		{"GET /api/v1/boards/{id}/reports/velocity", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.sprintBoard()+"/reports/velocity", nil) }},
+		{"GET /api/v1/boards/{id}/reports/epic/{key}", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			ep, _ := f.e.Svc.CreateIssue(testutil.Ctx(), f.e.Alice, domain.CreateIn{Project: "ABC", Type: "Epic", Summary: "e"})
+			return J("GET", "/api/v1/boards/"+f.board()+"/reports/epic/"+ep.Key, nil)
+		}},
+		{"GET /api/v1/sprints/{id}/report", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/sprints/"+f.activeSprint()+"/report", nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

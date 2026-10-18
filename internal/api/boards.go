@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/larytet/tasklane/internal/calendar"
@@ -31,33 +32,9 @@ func (s *Server) registerBoards(mux *http.ServeMux) {
 			s.reply(w, nil, err)
 			return
 		}
-		var restrict []string
-		clauses := []string{}
-		if b.Filter != "" {
-			clauses = append(clauses, "("+b.Filter+")")
-		}
-		for _, name := range strings.Split(r.URL.Query().Get("quick"), ",") {
-			for _, q := range b.QuickFilters {
-				if name != "" && strings.EqualFold(q.Name, strings.TrimSpace(name)) {
-					clauses = append(clauses, "("+q.Query+")")
-				}
-			}
-		}
-		if len(clauses) > 0 {
-			sc, err := s.scope(r)
-			if err != nil {
-				s.reply(w, nil, err)
-				return
-			}
-			restrict, err = s.Search.Keys(r.Context(), sc, "project = "+b.Project+" AND "+strings.Join(clauses, " AND "), 5000)
-			if err != nil {
-				if te, ok := search.IsQueryError(err); ok {
-					s.fail(w, 400, "tql_error", "the board filter does not parse: "+te.Msg, map[string]any{"pos": te.Pos})
-					return
-				}
-				s.reply(w, nil, err)
-				return
-			}
+		restrict, ok := s.boardRestrict(w, r, b, r.URL.Query().Get("quick"))
+		if !ok {
+			return
 		}
 		v, err := s.Svc.GetBoard(r.Context(), a, b.ID, restrict)
 		s.reply(w, v, err)
@@ -182,5 +159,87 @@ func (s *Server) registerSprints(mux *http.ServeMux) {
 			return
 		}
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.SetUserCalendar(r.Context(), actorOf(r), r.PathValue("id"), in.Calendar))
+	}))
+}
+
+// boardRestrict evaluates the board filter and the chosen quick filters (TQL, inside the caller's permission scope) and
+// returns the matching keys; nil means no restriction. On a bad filter it has already answered with 400.
+func (s *Server) boardRestrict(w http.ResponseWriter, r *http.Request, b domain.Board, quick string) ([]string, bool) {
+	clauses := []string{}
+	if b.Filter != "" {
+		clauses = append(clauses, "("+b.Filter+")")
+	}
+	for _, name := range strings.Split(quick, ",") {
+		for _, q := range b.QuickFilters {
+			if name != "" && strings.EqualFold(q.Name, strings.TrimSpace(name)) {
+				clauses = append(clauses, "("+q.Query+")")
+			}
+		}
+	}
+	if len(clauses) == 0 {
+		return nil, true
+	}
+	sc, err := s.scope(r)
+	if err != nil {
+		s.reply(w, nil, err)
+		return nil, false
+	}
+	keys, err := s.Search.Keys(r.Context(), sc, "project = "+b.Project+" AND "+strings.Join(clauses, " AND "), 5000)
+	if err != nil {
+		if te, ok := search.IsQueryError(err); ok {
+			s.fail(w, 400, "tql_error", "the board filter does not parse: "+te.Msg, map[string]any{"pos": te.Pos})
+			return nil, false
+		}
+		s.reply(w, nil, err)
+		return nil, false
+	}
+	return keys, true
+}
+
+func (s *Server) registerReports(mux *http.ServeMux) {
+	days := func(r *http.Request) int { n, _ := strconv.Atoi(r.URL.Query().Get("days")); return n }
+	flow := func(path string, run func(r *http.Request, a domain.Actor, id string, restrict []string) (any, error)) {
+		s.handle(mux, "GET /api/v1/boards/{id}/reports/"+path, s.auth(func(w http.ResponseWriter, r *http.Request) {
+			a := actorOf(r)
+			b, _, _, err := s.Svc.BoardAccess(r.Context(), a, r.PathValue("id"))
+			if err != nil {
+				s.reply(w, nil, err)
+				return
+			}
+			restrict, ok := s.boardRestrict(w, r, b, r.URL.Query().Get("quick"))
+			if !ok {
+				return
+			}
+			v, err := run(r, a, b.ID, restrict)
+			s.reply(w, v, err)
+		}))
+	}
+	flow("cumulative-flow", func(r *http.Request, a domain.Actor, id string, rs []string) (any, error) {
+		return s.Svc.CumulativeFlow(r.Context(), a, id, days(r), rs)
+	})
+	flow("control-chart", func(r *http.Request, a domain.Actor, id string, rs []string) (any, error) {
+		return s.Svc.ControlChart(r.Context(), a, id, days(r), rs)
+	})
+	flow("created-vs-resolved", func(r *http.Request, a domain.Actor, id string, rs []string) (any, error) {
+		return s.Svc.CreatedVsResolved(r.Context(), a, id, days(r), rs)
+	})
+	flow("workload", func(r *http.Request, a domain.Actor, id string, rs []string) (any, error) {
+		return s.Svc.WorkloadByAssignee(r.Context(), a, id, rs)
+	})
+	flow("time-in-status", func(r *http.Request, a domain.Actor, id string, rs []string) (any, error) {
+		return s.Svc.TimeInStatus(r.Context(), a, id, days(r), rs)
+	})
+	s.handle(mux, "GET /api/v1/boards/{id}/reports/velocity", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.URL.Query().Get("sprints"))
+		v, err := s.Svc.Velocity(r.Context(), actorOf(r), r.PathValue("id"), n)
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/boards/{id}/reports/epic/{key}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.EpicBurndown(r.Context(), actorOf(r), r.PathValue("id"), r.PathValue("key"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/sprints/{id}/report", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.SprintReport(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
 	}))
 }

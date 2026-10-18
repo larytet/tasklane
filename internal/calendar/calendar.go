@@ -95,6 +95,9 @@ func (c Calendar) midnight(y int, m time.Month, d int) time.Time {
 	return t
 }
 
+// LocationOrUTC is the calendar's zone (UTC when the name cannot be loaded).
+func (c Calendar) LocationOrUTC() *time.Location { return c.loc() }
+
 // StartOfDay is the first instant of the local day containing t.
 func (c Calendar) StartOfDay(t time.Time) time.Time {
 	y, m, d := t.In(c.loc()).Date()

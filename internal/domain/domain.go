@@ -89,8 +89,8 @@ func (s *Service) hist(ctx context.Context, tx pgx.Tx, issueID string, a Actor, 
 			return nil // an untracked field leaves no history record (text versions are kept: they are what a conflict and a restore need)
 		}
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO issue_history(issue_id,field,before,after,actor_id,actor_label) VALUES($1,$2,$3,$4,$5,$6)`,
-		issueID, field, before, after, nilIfEmpty(a.ID), a.Label)
+	_, err := tx.Exec(ctx, `INSERT INTO issue_history(issue_id,field,before,after,actor_id,actor_label,at) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+		issueID, field, before, after, nilIfEmpty(a.ID), a.Label, s.Now())
 	return err
 }
 
