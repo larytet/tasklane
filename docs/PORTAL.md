@@ -50,6 +50,18 @@ Their own requests, and for each: the summary, the description they wrote, the s
 
 A customer's comment goes into the issue's thread (labelled *customer*) and tells the people who watch the issue, like any comment.
 
+## Service level clocks
+
+A request type can carry a **policy**: a goal for the **first response** and one for the **resolution** (minutes), the **working calendar** the minutes count in (a work week preset, time zone, the time the day starts, hours per day, holidays; with none, every minute counts), and the **statuses that stop the clocks** (for example *Waiting for customer*). Each request raised through the type gets a clock per goal, started when it was made, **keeping the policy it started under** (changing a request type later does not move running clocks).
+
+- The **first response** is met by the first public reply from staff (an internal note, the customer's own comment and the hidden portal account do not count). Resolving the request also answers it.
+- The **resolution** is met when the request is resolved (a Done status). It stops while the request is in a stopping status and **while it sits resolved**, so a request reopened later is not charged for that time.
+- Working calendars count minutes inside the working window only: weekends, holidays and the hours outside the day count nothing. A day's window is its start plus its hours, so on a day the clocks change it is that many real hours after the start.
+
+A clock is **running**, **paused**, **met** or **breached**; one that was met after its goal shows as **met late**. The state is worked out from the facts (the status history, the first public reply, the resolution time), never from events seen, so it can always be recomputed and a missed event only delays a result. It is refreshed when the request is commented on or moves, when staff open it, and every minute for open clocks. When an open goal is missed the assignee (or, with none, the project's administrators) gets **one** notice (kind `sla`, mutable in the preferences).
+
+Staff see the clocks on the request's ticket; **customers never see them**. In search: `sla.state = breached`, `sla.firstResponse.state in (running, paused)`, `sla.resolution.state = met`.
+
 ## Not built yet
 
-Still to build: attachments on requests, queues, canned responses, SLA clocks, customer organizations that share requests, customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.
+Still to build: attachments on requests, queues, canned responses, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,  customer organizations that share requests, customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.

@@ -102,7 +102,7 @@ type recipient struct{ id, name, email string }
 
 func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int, error) {
 	switch e.Type {
-	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved", "approval.requested", "approval.decided", "approval.reminder", "customer.commented":
+	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved", "approval.requested", "approval.decided", "approval.reminder", "customer.commented", "sla.breached":
 	default:
 		return 0, nil
 	}
@@ -174,6 +174,9 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		evName, baseKind = "comment.added", "comment"
 		what = e.Payload.Actor + " commented"
 		body = e.Payload.Text
+	case "sla.breached":
+		evName, baseKind = e.Type, "sla"
+		what, body = e.Payload.Text, ""
 	case "approval.requested", "approval.decided", "approval.reminder":
 		evName, baseKind = e.Type, "approval"
 		switch e.Type {
@@ -216,7 +219,7 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 	if err := tx.QueryRow(ctx, `SELECT mirror_of IS NOT NULL FROM project WHERE id=$1`, pid).Scan(&mirrored); err != nil {
 		return 0, err
 	}
-	if baseKind == "approval" { // exactly the people the event names: approvers asked, the requester told, whatever the scheme says
+	if baseKind == "approval" || baseKind == "sla" { // exactly the people the event names: approvers asked, the requester told, whatever the scheme says
 		ids = e.Payload.Users
 	} else {
 		classes := s.schemeClasses(ctx, tx, pid, evName)

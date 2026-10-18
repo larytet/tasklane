@@ -265,6 +265,8 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 		return "", errAt(x.Pos, "operator %s cannot be used with labels", opName(x.Op))
 	case "fixversion", "affectedversion", "affectsversion":
 		return c.versionClause(x, isNeg)
+	case "sla.state", "sla.firstresponse.state", "sla.resolution.state":
+		return c.slaClause(x, isNeg)
 	case "inputrequested":
 		switch x.Op {
 		case "is":

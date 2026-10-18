@@ -25,7 +25,7 @@ type NotifyPrefs struct {
 	EmailBouncing bool `json:"email_bouncing,omitempty"`
 }
 
-var notifyKinds = map[string]bool{"assigned": true, "mention": true, "comment": true, "status": true, "edit": true, "created": true, "approval": true}
+var notifyKinds = map[string]bool{"assigned": true, "mention": true, "comment": true, "status": true, "edit": true, "created": true, "approval": true, "sla": true}
 
 func defaultPrefs() NotifyPrefs {
 	return NotifyPrefs{AutoWatch: true, Inbox: true, Email: true, Muted: []string{}}
@@ -95,7 +95,7 @@ func (s *Service) MyNotifyPrefs(ctx context.Context, a Actor) NotifyPrefs {
 func (s *Service) SetNotifyPrefs(ctx context.Context, a Actor, p NotifyPrefs) (NotifyPrefs, error) {
 	for _, m := range p.Muted {
 		if !notifyKinds[m] {
-			return p, invalid("unknown notification kind %q (assigned, mention, comment, status, edit, created, approval)", m)
+			return p, invalid("unknown notification kind %q (assigned, mention, comment, status, edit, created, approval, sla)", m)
 		}
 	}
 	if (p.QuietStart != "") != (p.QuietEnd != "") {

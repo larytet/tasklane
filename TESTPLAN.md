@@ -675,7 +675,7 @@ containers) nightly for the Helm chart.
 | PORT-05 | **M5.6: limits, honeypot, block and allow lists built; CAPTCHA and attachment rules open.** Abuse controls: email verification, rate limits, CAPTCHA, honeypot, block and allow lists, attachment rules | Spam and floods stopped; legitimate use unaffected |
 | PORT-06 | Promotion to staff; customer GDPR export and erase | History kept on promotion; export and erase complete |
 | PORT-07 | Notifications and email replies for customers | Customer-visible content only plus portal link; replies follow MAIL rules |
-| PORT-08 | **M5.7: request types and forms built (REQ01..03); SLA clocks open.** Request types, forms and SLA clocks (start, pause, resume, breach, calendar-aware) with the fake clock | Clocks correct across pauses, calendars and holidays |
+| PORT-08 | **M5.7, M5.8: request types and forms (REQ01..03) and SLA clocks (SLA01..04, the calendar tests in `internal/calendar`, e2e) built; reports and warnings open.** Request types, forms and SLA clocks (start, pause, resume, breach, calendar-aware) with the fake clock | Clocks correct across pauses, calendars and holidays |
 
 ### 5.17 Real Jira verification (occasional, before a major release)
 

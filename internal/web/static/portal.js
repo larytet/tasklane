@@ -17,12 +17,14 @@
     return el;
   }
   const clear = el => { while (el.firstChild) el.removeChild(el.firstChild); return el; };
+  // append that skips nothing-children: Element.append(null) would write the word "null"
+  const add = (el, ...kids) => { for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) el.append(k); return el; };
   const errText = r => (r.data && r.data.error) || 'Something went wrong';
 
   async function start() {
-    if (!key) { clear(root).append(h('h1', {}, 'Support portal'), h('p', {}, 'Open the address of the portal you were given.')); return; }
+    if (!key) { add(clear(root), h('h1', {}, 'Support portal'), h('p', {}, 'Open the address of the portal you were given.')); return; }
     const info = await api('GET', '/api/v1/portal/' + key);
-    if (info.status !== 200) { clear(root).append(h('h1', {}, 'Support portal'), h('p', {}, 'This portal does not exist or is not open.')); return; }
+    if (info.status !== 200) { add(clear(root), h('h1', {}, 'Support portal'), h('p', {}, 'This portal does not exist or is not open.')); return; }
     document.title = info.data.name + ' · Support';
     const token = new URLSearchParams(location.search).get('token');
     if (token) {
@@ -62,7 +64,7 @@
       h('label', { for: 'pe' }, 'Your email address'), email, trap, h('div', { class: 'chips' }, ask), codeRow,
       h('details', {}, h('summary', {}, 'I have a password'), h('label', { for: 'pp' }, 'Password'), pw, h('button', { class: 'btn', type: 'submit' }, 'Sign in with a password')),
       msg);
-    clear(root).append(h('h1', {}, info.name), info.welcome ? h('p', {}, info.welcome) : null, h('h2', {}, 'Sign in'), form, notices(info));
+    add(clear(root), h('h1', {}, info.name), info.welcome ? h('p', {}, info.welcome) : null, h('h2', {}, 'Sign in'), form, notices(info));
   }
 
   function notices(info) {
@@ -73,7 +75,7 @@
   function home(info, me) {
     const nav = (href, label, current) => h('a', { href, class: 'tab', 'aria-current': current ? 'page' : null }, label);
     function frame(current, ...body) {
-      clear(root).append(
+      add(clear(root), 
         h('h1', {}, info.name),
         h('p', {}, 'Signed in as ', h('strong', {}, me.email), '. ', h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/portal/logout'); location.hash = ''; location.reload(); } }, 'Sign out')),
         h('nav', { class: 'chips', 'aria-label': 'Portal' }, nav('#/', 'My requests', current === 'list'), nav('#/new', 'New request', current === 'new'), nav('#/me', 'My details', current === 'me')),
@@ -91,17 +93,17 @@
       const ul = h('ul', { class: 'list', 'aria-label': 'Your requests' });
       frame('list', h('h2', {}, 'My requests'), ul);
       const r = await api('GET', '/api/v1/portal/' + key + '/requests');
-      if (r.status !== 200) { ul.append(h('li', {}, errText(r))); return; }
-      if (!r.data.length) ul.append(h('li', { class: 'muted' }, 'You have no requests yet. ', h('a', { href: '#/new' }, 'Make one.')));
-      for (const q of r.data) ul.append(h('li', { class: 'row' }, h('a', { href: '#/r/' + q.key }, q.key + ' ' + q.summary), h('span', { class: 'muted' }, ' ' + q.status + (q.request_type ? ' · ' + q.request_type : '') + ' · ' + new Date(q.updated).toLocaleDateString())));
+      if (r.status !== 200) { add(ul, h('li', {}, errText(r))); return; }
+      if (!r.data.length) add(ul, h('li', { class: 'muted' }, 'You have no requests yet. ', h('a', { href: '#/new' }, 'Make one.')));
+      for (const q of r.data) add(ul, h('li', { class: 'row' }, h('a', { href: '#/r/' + q.key }, q.key + ' ' + q.summary), h('span', { class: 'muted' }, ' ' + q.status + (q.request_type ? ' · ' + q.request_type : '') + ' · ' + new Date(q.updated).toLocaleDateString())));
     }
 
     async function newRequest() {
       const box = h('div', {});
       frame('new', h('h2', {}, 'New request'), box);
       const r = await api('GET', '/api/v1/portal/' + key + '/request-types');
-      if (r.status !== 200) { box.append(h('p', { class: 'err' }, errText(r))); return; }
-      if (!r.data.length) { box.append(h('p', {}, 'There is nothing to choose from yet.')); return; }
+      if (r.status !== 200) { add(box, h('p', { class: 'err' }, errText(r))); return; }
+      if (!r.data.length) { add(box, h('p', {}, 'There is nothing to choose from yet.')); return; }
       const sel = h('select', { id: 'rt', 'aria-label': 'What do you need help with?' }, r.data.map(t => h('option', { value: t.id }, t.name)));
       const form = h('form', {});
       const msg = h('p', { role: 'alert', class: 'err' });
@@ -112,7 +114,7 @@
         const summary = h('input', { type: 'text', id: 'rs', maxlength: 255, required: true });
         const desc = h('textarea', { id: 'rd', rows: 6, maxlength: 20000 });
         const trap = h('input', { type: 'text', name: 'website', tabindex: '-1', autocomplete: 'off', 'aria-hidden': 'true', style: 'position:absolute;left:-9999px;width:1px;height:1px' });
-        form.append(t.description ? h('p', { class: 'muted' }, t.description) : null, t.help_text ? h('p', {}, t.help_text) : null,
+        add(form, t.description ? h('p', { class: 'muted' }, t.description) : null, t.help_text ? h('p', {}, t.help_text) : null,
           h('label', { for: 'rs' }, 'Summary'), summary, h('label', { for: 'rd' }, 'Details'), desc);
         for (const f of t.fields) {
           const id = 'f-' + f.key;
@@ -123,9 +125,9 @@
           else el = h('input', { type: f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : f.type === 'url' ? 'url' : 'text', id });
           if (f.required) el.setAttribute('required', '');
           inputs[f.key] = [el, f];
-          form.append(h('label', { for: id }, f.label + (f.required ? ' (required)' : '')), f.help ? h('div', { class: 'muted' }, f.help) : null, el);
+          add(form, h('label', { for: id }, f.label + (f.required ? ' (required)' : '')), f.help ? h('div', { class: 'muted' }, f.help) : null, el);
         }
-        form.append(trap, h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Send request')), msg);
+        add(form, trap, h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Send request')), msg);
         form.onsubmit = async e => {
           e.preventDefault(); msg.textContent = '';
           const fields = {};
@@ -136,7 +138,7 @@
         };
       }
       sel.addEventListener('change', draw);
-      box.append(h('label', { for: 'rt' }, 'What do you need help with?'), sel, form);
+      add(box, h('label', { for: 'rt' }, 'What do you need help with?'), sel, form);
       draw();
     }
 
@@ -144,12 +146,12 @@
       const body = h('div', {});
       frame('list', body);
       const r = await api('GET', '/api/v1/portal/' + key + '/requests/' + encodeURIComponent(k));
-      if (r.status !== 200) { body.append(h('p', {}, 'That request does not exist.'), h('a', { href: '#/' }, 'Back to my requests')); return; }
+      if (r.status !== 200) { add(body, h('p', {}, 'That request does not exist.'), h('a', { href: '#/' }, 'Back to my requests')); return; }
       const q = r.data;
       const thread = h('ul', { class: 'list', 'aria-label': 'Conversation' }, (q.comments || []).map(c => h('li', { class: 'row' }, h('strong', {}, c.author), h('span', { class: 'muted' }, ' ' + new Date(c.created).toLocaleString()), h('div', { style: 'white-space:pre-wrap' }, c.body))));
       const text = h('textarea', { id: 'cb', rows: 3, maxlength: 10000 });
       const msg = h('p', { role: 'alert', class: 'err' });
-      body.append(h('h2', {}, q.key + ' ' + q.summary), h('p', {}, h('strong', {}, q.status), q.request_type ? ' · ' + q.request_type : '', ' · opened ' + new Date(q.created).toLocaleDateString()),
+      add(body, h('h2', {}, q.key + ' ' + q.summary), h('p', {}, h('strong', {}, q.status), q.request_type ? ' · ' + q.request_type : '', ' · opened ' + new Date(q.created).toLocaleDateString()),
         q.description ? h('p', { style: 'white-space:pre-wrap' }, q.description) : null,
         q.fields && q.fields.length ? h('dl', {}, q.fields.map(f => [h('dt', {}, f.label), h('dd', {}, f.value)]).flat()) : null,
         h('h3', {}, 'Conversation'), (q.comments || []).length ? thread : h('p', { class: 'muted' }, 'No replies yet.'),

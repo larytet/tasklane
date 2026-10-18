@@ -37,6 +37,7 @@ type RequestType struct {
 	Fields      []RequestField `json:"fields"`
 	Visible     bool           `json:"visible"`
 	Position    int            `json:"position"`
+	SLA         SLAPolicy      `json:"sla"`
 }
 
 type RequestTypeIn struct {
@@ -47,16 +48,18 @@ type RequestTypeIn struct {
 	Fields      *[]RequestField `json:"fields"`
 	Visible     *bool           `json:"visible"`
 	Position    *int            `json:"position"`
+	SLA         *SLAPolicy      `json:"sla"`
 }
 
-const rtCols = `rt.id::text, p.key, rt.name, rt.description, rt.help_text, it.name, rt.fields, rt.visible, rt.position`
+const rtCols = `rt.id::text, p.key, rt.name, rt.description, rt.help_text, it.name, rt.fields, rt.visible, rt.position, rt.sla`
 
 func scanRT(row pgx.Row) (RequestType, error) {
 	var r RequestType
-	var raw []byte
-	if err := row.Scan(&r.ID, &r.Project, &r.Name, &r.Description, &r.Help, &r.IssueType, &raw, &r.Visible, &r.Position); err != nil {
+	var raw, sla []byte
+	if err := row.Scan(&r.ID, &r.Project, &r.Name, &r.Description, &r.Help, &r.IssueType, &raw, &r.Visible, &r.Position, &sla); err != nil {
 		return r, err
 	}
+	json.Unmarshal(sla, &r.SLA)
 	json.Unmarshal(raw, &r.Fields)
 	if r.Fields == nil {
 		r.Fields = []RequestField{}
@@ -200,14 +203,21 @@ func (s *Service) CreateRequestType(ctx context.Context, a Actor, projectKey str
 		return RequestType{}, invalid("the description is at most 1000 characters and the help at most 2000")
 	}
 	raw, _ := json.Marshal(append([]RequestField{}, fields...))
+	var policy SLAPolicy
+	if in.SLA != nil {
+		if policy, err = s.checkSLAPolicy(ctx, pid, *in.SLA); err != nil {
+			return RequestType{}, err
+		}
+	}
+	slaRaw, _ := json.Marshal(policy)
 	vis := in.Visible == nil || *in.Visible
 	pos := 0
 	if in.Position != nil {
 		pos = *in.Position
 	}
 	var id string
-	if err := s.DB.QueryRow(ctx, `INSERT INTO request_type(project_id,name,description,help_text,issue_type_id,fields,visible,position) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text`,
-		pid, strings.TrimSpace(*in.Name), str(in.Description), str(in.Help), typeID, raw, vis, pos).Scan(&id); err != nil {
+	if err := s.DB.QueryRow(ctx, `INSERT INTO request_type(project_id,name,description,help_text,issue_type_id,fields,visible,position,sla) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text`,
+		pid, strings.TrimSpace(*in.Name), str(in.Description), str(in.Help), typeID, raw, vis, pos, slaRaw).Scan(&id); err != nil {
 		return RequestType{}, rtError(err)
 	}
 	return s.requestTypeByID(ctx, id)
@@ -267,8 +277,14 @@ func (s *Service) UpdateRequestType(ctx context.Context, a Actor, id string, in 
 		return cur, err
 	}
 	raw, _ := json.Marshal(append([]RequestField{}, fields...))
-	if _, err := s.DB.Exec(ctx, `UPDATE request_type SET name=$2,description=$3,help_text=$4,issue_type_id=$5,fields=$6,visible=$7,position=$8 WHERE id::text=$1`,
-		id, cur.Name, cur.Description, cur.Help, typeID, raw, cur.Visible, cur.Position); err != nil {
+	if in.SLA != nil {
+		if cur.SLA, err = s.checkSLAPolicy(ctx, pid, *in.SLA); err != nil {
+			return cur, err
+		}
+	}
+	slaRaw, _ := json.Marshal(cur.SLA)
+	if _, err := s.DB.Exec(ctx, `UPDATE request_type SET name=$2,description=$3,help_text=$4,issue_type_id=$5,fields=$6,visible=$7,position=$8,sla=$9 WHERE id::text=$1`,
+		id, cur.Name, cur.Description, cur.Help, typeID, raw, cur.Visible, cur.Position, slaRaw); err != nil {
 		return cur, rtError(err)
 	}
 	return s.requestTypeByID(ctx, id)
@@ -444,6 +460,11 @@ func (s *Service) PortalCreateRequest(ctx context.Context, c Customer, projectKe
 		return PortalRequest{}, err
 	}
 	s.portalNote(ctx, "request", c.ID)
+	if !rt.SLA.empty() {
+		if err := s.startClocks(ctx, is.ID, rt.SLA, s.Now()); err != nil {
+			return PortalRequest{}, err
+		}
+	}
 	return s.PortalGetRequest(ctx, c, projectKey, is.Key)
 }
 

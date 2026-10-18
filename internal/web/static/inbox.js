@@ -5,7 +5,7 @@
   if (!A) return;
   const { h, clear, api, toast, topbar, modal, S } = A;
   const errText = r => (r.data && r.data.error) || 'Something went wrong';
-  const KINDS = [['assigned', 'Assigned to me'], ['mention', 'Mentions'], ['comment', 'Comments'], ['status', 'Status changes'], ['edit', 'Description edits'], ['created', 'Created for me'], ['approval', 'Approvals']];
+  const KINDS = [['assigned', 'Assigned to me'], ['mention', 'Mentions'], ['comment', 'Comments'], ['status', 'Status changes'], ['edit', 'Description edits'], ['created', 'Created for me'], ['approval', 'Approvals'], ['sla', 'Missed service level goals']];
 
   async function inboxView(state) {
     const app = clear(document.getElementById('app'));

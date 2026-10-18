@@ -426,6 +426,7 @@
           h('button', { class: 'btn', onclick: async () => { const r = await api('DELETE', '/api/v1/issues/' + key + '/archive'); if (r.status === 200) { toast('Restored from the archive.'); await reloadAll(); } else toast((r.data && r.data.error) || 'Could not restore'); } }, 'Unarchive')));
       }
       if (v.request) root.append(h('div', { class: 'banner info', role: 'status' }, 'Raised through the portal by ' + (v.request.customer || v.request.email) + ' (' + v.request.email + ')' + (v.request.request_type ? ' · ' + v.request.request_type : '') + '. A comment that is not internal is visible to the customer.'));
+      if (v.sla && v.sla.length) root.append(slaEl(v.sla));
       root.append(subjectEl(is));
       root.append(chipLine(is));
       root.append(descriptionEl(is));
@@ -435,6 +436,17 @@
       root.append(approvalsEl());
       root.append(threadEl());
       root.append(replyEl());
+    }
+
+    // ----- service level clocks of a request
+    function slaEl(clocks) {
+      const mins = n => { n = Math.abs(n); const d = Math.floor(n / 1440), hh = Math.floor((n % 1440) / 60), m = n % 60; return (d ? d + 'd ' : '') + (hh ? hh + 'h ' : '') + (m || (!d && !hh) ? m + 'm' : ''); };
+      const name = { first_response: 'First response', resolution: 'Resolution' };
+      return h('div', { class: 'chips', role: 'group', 'aria-label': 'Service level goals' }, clocks.map(c => {
+        const text = c.state === 'met' ? 'met' + (c.late ? ' late' : '') : c.state === 'paused' ? 'paused' : c.state === 'breached' ? 'missed' : mins(c.remaining_minutes) + ' left';
+        const bad = c.state === 'breached' || c.late;
+        return h('span', { class: 'badge', style: bad ? 'background:var(--danger,#c0392b);color:#fff' : '', title: 'Goal ' + mins(c.goal_minutes) + (c.due ? ', due ' + new Date(c.due).toLocaleString() : '') }, name[c.kind] + ': ' + text);
+      }));
     }
 
     // ----- approvals: who was asked, what they said, and (for an approver) the buttons

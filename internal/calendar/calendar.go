@@ -20,6 +20,7 @@ type Calendar struct {
 	DayHours    map[string]float64 `json:"day_hours,omitempty"` // optional per weekday ("Friday": 4)
 	Holidays    []string           `json:"holidays,omitempty"`  // local dates, YYYY-MM-DD
 	Numbering   string             `json:"week_numbering"`      // "iso", "first-day" or "none"
+	Start       string             `json:"start,omitempty"`     // local time the working day begins, "HH:MM" (default 09:00): service levels count minutes inside [start, start+hours)
 }
 
 // Preset returns a calendar for one of the common work weeks: mon-fri, sun-thu, mon-sat.
@@ -67,6 +68,20 @@ func (c Calendar) Validate() error {
 	for _, h := range c.Holidays {
 		if _, err := time.Parse("2006-01-02", h); err != nil {
 			return fmt.Errorf("holiday %q is not a date (YYYY-MM-DD)", h)
+		}
+	}
+	if c.Start != "" {
+		if _, err := time.Parse("15:04", c.Start); err != nil {
+			return fmt.Errorf("the start of the working day %q is not a time (HH:MM)", c.Start)
+		}
+		longest := c.Hours
+		for _, h := range c.DayHours {
+			if h > longest {
+				longest = h
+			}
+		}
+		if float64(c.startMinutes())+longest*60 > 24*60 {
+			return fmt.Errorf("a working day that starts at %s and lasts %.4g hours runs past midnight", c.Start, longest)
 		}
 	}
 	return nil

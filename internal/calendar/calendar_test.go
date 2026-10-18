@@ -216,3 +216,65 @@ func TestCORE13_HolidaysHoursAndCapacity(t *testing.T) {
 		t.Error("an unknown preset was accepted")
 	}
 }
+
+// PORT-08 (calendar-aware clocks): minutes are counted inside the working window only; weekends, holidays and daylight-saving changes.
+func TestSLA_WorkingMinutes(t *testing.T) {
+	c, err := Preset("mon-fri", "Europe/Prague")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Start = "09:00" // 09:00 to 17:00
+	loc := c.LocationOrUTC()
+	at := func(y int, m time.Month, d, h, mi int) time.Time { return time.Date(y, m, d, h, mi, 0, 0, loc) }
+	// Wednesday 2026-03-04: 10:00 to 12:30 is 150 minutes; outside the window counts nothing
+	if got := c.WorkingMinutesBetween(at(2026, 3, 4, 10, 0), at(2026, 3, 4, 12, 30)); got != 150 {
+		t.Fatalf("in a day: %v", got)
+	}
+	if got := c.WorkingMinutesBetween(at(2026, 3, 4, 6, 0), at(2026, 3, 4, 8, 59)); got != 0 {
+		t.Fatalf("before the day: %v", got)
+	}
+	// Friday 16:00 to Monday 10:00: 60 + 60
+	if got := c.WorkingMinutesBetween(at(2026, 3, 6, 16, 0), at(2026, 3, 9, 10, 0)); got != 120 {
+		t.Fatalf("over a weekend: %v", got)
+	}
+	// adding: 60 minutes from Friday 16:30 ends Monday 09:30; 8 hours from Monday 09:00 ends 17:00 the same day
+	if got := c.AddWorkingMinutes(at(2026, 3, 6, 16, 30), 60); !got.Equal(at(2026, 3, 9, 9, 30)) {
+		t.Fatalf("add over a weekend: %v", got)
+	}
+	if got := c.AddWorkingMinutes(at(2026, 3, 9, 9, 0), 480); !got.Equal(at(2026, 3, 9, 17, 0)) {
+		t.Fatalf("a whole day: %v", got)
+	}
+	if got := c.AddWorkingMinutes(at(2026, 3, 9, 3, 0), 30); !got.Equal(at(2026, 3, 9, 9, 30)) {
+		t.Fatalf("starting before the day: %v", got)
+	}
+	// a holiday has no working time
+	c.Holidays = []string{"2026-03-09"}
+	if got := c.AddWorkingMinutes(at(2026, 3, 6, 16, 30), 60); !got.Equal(at(2026, 3, 10, 9, 30)) {
+		t.Fatalf("over a holiday: %v", got)
+	}
+	if got := c.WorkingMinutesBetween(at(2026, 3, 9, 0, 0), at(2026, 3, 10, 0, 0)); got != 0 {
+		t.Fatalf("a holiday counts: %v", got)
+	}
+	// the clocks go forward on Sunday 2026-03-29: Monday's window is unaffected and the add works across it
+	c.Holidays = nil
+	if got := c.AddWorkingMinutes(at(2026, 3, 27, 16, 0), 120); !got.Equal(at(2026, 3, 30, 10, 0)) {
+		t.Fatalf("across the change: %v", got)
+	}
+	// a calendar that never works gives no answer
+	h := Calendar{TimeZone: "UTC", WorkingDays: []time.Weekday{time.Monday}, Hours: 8, Numbering: "none"}
+	for d := 0; d < 4000; d += 7 {
+		h.Holidays = append(h.Holidays, time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC).AddDate(0, 0, d).Format("2006-01-02"))
+	}
+	if got := h.AddWorkingMinutes(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 10); !got.IsZero() {
+		t.Fatalf("no working time: %v", got)
+	}
+	// a start that runs the day past midnight is refused
+	c.Start = "20:00"
+	if err := c.Validate(); err == nil {
+		t.Fatal("a window past midnight was accepted")
+	}
+	c.Start = "9am"
+	if err := c.Validate(); err == nil {
+		t.Fatal("a bad start was accepted")
+	}
+}

@@ -43,7 +43,7 @@
       if (!t.data.length) list.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No request types yet. Customers see nothing to choose from.')));
       for (const rt of t.data) {
         list.append(h('div', { class: 'row', role: 'listitem' },
-          h('span', { class: 'sum' }, h('strong', {}, rt.name), ' ', h('span', { class: 'muted' }, 'becomes ' + rt.issue_type + (rt.fields.length ? ' · asks for ' + rt.fields.map(f => f.label).join(', ') : '') + (rt.visible ? '' : ' · hidden'))),
+          h('span', { class: 'sum' }, h('strong', {}, rt.name), ' ', h('span', { class: 'muted' }, 'becomes ' + rt.issue_type + (rt.fields.length ? ' · asks for ' + rt.fields.map(f => f.label).join(', ') : '') + (rt.sla && (rt.sla.first_response_minutes || rt.sla.resolution_minutes) ? ' · goals: ' + [rt.sla.first_response_minutes ? 'reply in ' + rt.sla.first_response_minutes + ' min' : '', rt.sla.resolution_minutes ? 'resolve in ' + rt.sla.resolution_minutes + ' min' : ''].filter(Boolean).join(', ') + (rt.sla.calendar ? ' (working time, ' + rt.sla.calendar.time_zone + ')' : '') : '') + (rt.visible ? '' : ' · hidden'))),
           h('button', { class: 'btn ghost', 'aria-label': (rt.visible ? 'Hide ' : 'Show ') + rt.name, onclick: async () => { const x = await api('PUT', '/api/v1/request-types/' + rt.id, { visible: !rt.visible }); if (x.status === 200) loadTypes(); else toast(errText(x)); } }, rt.visible ? 'Hide' : 'Show'),
           h('button', { class: 'btn ghost', 'aria-label': 'Delete ' + rt.name, onclick: async () => { const x = await api('DELETE', '/api/v1/request-types/' + rt.id); if (x.status === 200) loadTypes(); else toast(errText(x)); } }, 'Delete')));
       }
@@ -53,11 +53,17 @@
     const desc = h('input', { type: 'text', 'aria-label': 'Description for customers', placeholder: 'Description (optional)', style: 'min-width:220px' });
     const help = h('input', { type: 'text', 'aria-label': 'Help text', placeholder: 'Help shown above the form (optional)', style: 'min-width:220px' });
     const fields = h('input', { type: 'text', 'aria-label': 'Fields the form asks for', placeholder: 'Custom field keys, e.g. customfield_10001, customfield_10002', style: 'min-width:300px' });
+    const fr = h('input', { type: 'number', min: 0, 'aria-label': 'First response goal in minutes', placeholder: 'First response (min)', style: 'width:150px' });
+    const rs = h('input', { type: 'number', min: 0, 'aria-label': 'Resolution goal in minutes', placeholder: 'Resolution (min)', style: 'width:150px' });
+    const tz = h('input', { type: 'text', 'aria-label': 'Working time zone', placeholder: 'Working hours time zone, e.g. Europe/Prague (empty: every minute counts)', style: 'min-width:260px' });
+    const st = h('input', { type: 'text', 'aria-label': 'Working day starts', placeholder: '09:00', style: 'width:90px' });
+    const ps = h('input', { type: 'text', 'aria-label': 'Statuses that stop the clock', placeholder: 'Statuses that stop the clock, comma separated', style: 'min-width:260px' });
     const err = h('div', { role: 'alert', class: 'err' });
-    body.append(h('div', { class: 'chips' }, name, type, desc, help, fields, h('button', { class: 'btn primary', onclick: async () => {
+    body.append(h('div', { class: 'chips' }, name, type, desc, help, fields), h('div', { class: 'chips' }, fr, rs, tz, st, ps, h('button', { class: 'btn primary', onclick: async () => {
       err.textContent = '';
-      const x = await api('POST', '/api/v1/projects/' + key + '/request-types', { name: name.value, issue_type: type.value, description: desc.value, help_text: help.value, fields: lines(fields.value).map(k => ({ key: k, required: false })) });
-      if (x.status === 201) { name.value = desc.value = help.value = fields.value = ''; loadTypes(); } else err.textContent = errText(x);
+      const x = await api('POST', '/api/v1/projects/' + key + '/request-types', { name: name.value, issue_type: type.value, description: desc.value, help_text: help.value, fields: lines(fields.value).map(k => ({ key: k, required: false })),
+        sla: { first_response_minutes: Number(fr.value) || 0, resolution_minutes: Number(rs.value) || 0, calendar: tz.value.trim() ? { time_zone: tz.value.trim(), start: st.value.trim() } : null, pause_statuses: lines(ps.value) } });
+      if (x.status === 201) { name.value = desc.value = help.value = fields.value = fr.value = rs.value = tz.value = st.value = ps.value = ''; loadTypes(); } else err.textContent = errText(x);
     } }, 'Add request type')), err);
     await loadTypes();
   }

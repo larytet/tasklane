@@ -70,6 +70,7 @@ type IssueView struct {
 	Versions    IssueVersions   `json:"versions"`
 	Approvals   []Approval      `json:"approvals"`
 	Request     *RequestInfo    `json:"request,omitempty"` // set when a customer raised this through the portal
+	SLA         []SLAClock      `json:"sla,omitempty"`     // its service level clocks, for staff
 }
 
 var priorities = map[string]bool{"lowest": true, "low": true, "medium": true, "high": true, "highest": true}
@@ -395,6 +396,8 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 	v.Input = s.inputRequest(ctx, is.ID)
 	v.Versions = s.issueVersions(ctx, is.ID)
 	v.Request = s.requestInfo(ctx, is.ID)
+	s.slaTouch(ctx, is.ID) // the clocks shown are current
+	v.SLA = s.issueClocks(ctx, is.ID)
 	if v.Approvals, err = s.IssueApprovals(ctx, a, key); err != nil {
 		return v, err
 	}
@@ -741,6 +744,7 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 		return is, err
 	}
 	s.touchLease(ctx, a, is.ID)
+	s.slaTouch(ctx, is.ID) // stopping, restarting and resolving move the clocks
 	out, gerr := s.getIssue(ctx, key)
 	if gerr == nil {
 		s.emit(Event{Type: "issue.transitioned", Issue: key, Fields: []string{"status"}, Version: out.Version, Actor: a.Label, ActorID: a.ID})

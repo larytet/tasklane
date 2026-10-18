@@ -124,6 +124,7 @@ test('REQ: a customer raises a request through a form, staff reply (and see who 
   await expect(page.getByRole('heading', { level: 2 })).toContainText(summary); // shown as text, tags and all
   const key = (await page.getByRole('heading', { level: 2 }).textContent()).split(' ')[0];
   await expect(page.getByText('The button does nothing.')).toBeVisible();
+  await expect(page.locator('#portal')).not.toContainText('null'); // an empty part of the page is nothing, not the word null
 
   // staff: the ticket says it came from the portal and who will read a reply
   const jana = await browser.newContext();
@@ -179,4 +180,59 @@ test('REQ: a customer raises a request through a form, staff reply (and see who 
   expect(r.status()).toBe(404);
   await op.goto(`/portal/${pk}#/r/${key}`);
   await expect(op.getByText('That request does not exist.')).toBeVisible();
+});
+
+test('PORT-08: a request carries service level clocks that staff see running, and a public reply meets the first response goal', async ({ browser }) => {
+  const adm = await browser.newContext();
+  adm.on('page', watch);
+  expect((await adm.request.post('/api/v1/login', { headers: H, data: { email: 'admin@example.com', password: 'adminpass1' } })).status()).toBe(200);
+  const pk = 'S' + uniq().toUpperCase();
+  expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Service' } })).status()).toBe(201);
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true } })).status()).toBe(200);
+  const rt = await adm.request.post(`/api/v1/projects/${pk}/request-types`, { headers: H, data: { name: 'Help', sla: { first_response_minutes: 60, resolution_minutes: 600, pause_statuses: ['In Progress'] } } });
+  expect(rt.status()).toBe(201);
+  // a policy the workflow cannot satisfy is refused with the reason
+  const bad = await adm.request.post(`/api/v1/projects/${pk}/request-types`, { headers: H, data: { name: 'Bad', sla: { first_response_minutes: 30, pause_statuses: ['Waiting for customer'] } } });
+  expect(bad.status()).toBe(400);
+  expect((await bad.json()).error).toContain('Waiting for customer');
+
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  const page = await ctx.newPage();
+  await page.goto('/portal/' + pk);
+  const addr = `sla.${uniq()}@customer.example`;
+  await page.getByLabel('Your email address').fill(addr);
+  await page.getByRole('button', { name: 'Email me a code' }).click();
+  const { code } = await sentTo(addr);
+  await page.getByLabel('The six digit code we sent you').fill(code);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+  await page.getByRole('link', { name: 'New request' }).click();
+  await page.getByLabel('Summary').fill('Nothing works');
+  await page.getByRole('button', { name: 'Send request' }).click();
+  await expect(page.getByRole('heading', { level: 2 })).toContainText('Nothing works');
+  const key = (await page.getByRole('heading', { level: 2 }).textContent()).split(' ')[0];
+  // the customer is not shown the clocks
+  await expect(page.getByText('First response')).toHaveCount(0);
+
+  const sp = await adm.newPage();
+  await sp.goto('/#/issue/' + key);
+  const clocks = sp.getByRole('group', { name: 'Service level goals' });
+  await expect(clocks).toContainText('First response:');
+  await expect(clocks).toContainText('left');
+  await expect(clocks).toContainText('Resolution:');
+  const axe = await new AxeBuilder({ page: sp }).analyze();
+  expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  // a note does not answer the customer; a public reply does
+  await sp.getByLabel('Reply', { exact: true }).fill('private note');
+  await sp.getByLabel('Internal').check();
+  await sp.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(sp.getByText('private note').first()).toBeVisible();
+  await expect(clocks).toContainText('First response: ');
+  await expect(clocks).not.toContainText('First response: met');
+  await sp.getByLabel('Reply', { exact: true }).fill('We are looking at it.');
+  await sp.getByLabel('Internal').uncheck();
+  await sp.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(sp.getByText('We are looking at it.').first()).toBeVisible();
+  await expect(clocks).toContainText('First response: met');
+  await expect(clocks).not.toContainText('First response: met late');
 });

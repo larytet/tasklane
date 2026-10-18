@@ -91,6 +91,9 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 		return outbox(ctx, tx, "issue:"+is.Key, "comment.added", map[string]any{"key": is.Key, "comment": c.ID, "actor": a.Label, "actor_id": a.ID})
 	})
 	s.touchLease(ctx, a, is.ID)
+	if err == nil {
+		s.slaTouch(ctx, is.ID) // a first public reply meets the first response goal
+	}
 	c.Author = User{ID: a.ID, Name: a.Label}
 	c.Body, c.Internal = body, internal
 	if err == nil {
