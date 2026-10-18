@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Custom fields (SPEC 8). A field has a type, optional validation, and one or more contexts; a context says for which
@@ -151,6 +152,16 @@ func (s *Service) CreateField(ctx context.Context, a Actor, in FieldIn) (FieldDe
 	if err := adminOnly(a); err != nil {
 		return FieldDef{}, err
 	}
+	return s.createField(ctx, s.DB, in)
+}
+
+// fieldDB is a pool or a transaction: the import creates fields inside its own transaction.
+type fieldDB interface {
+	querier
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func (s *Service) createField(ctx context.Context, q fieldDB, in FieldIn) (FieldDef, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len(in.Name) > 100 {
 		return FieldDef{}, invalid("a field needs a name of up to 100 characters")
@@ -170,7 +181,7 @@ func (s *Service) CreateField(ctx context.Context, a Actor, in FieldIn) (FieldDe
 		}
 	}
 	var n int
-	s.DB.QueryRow(ctx, `SELECT count(*) FROM custom_field WHERE trashed_at IS NULL`).Scan(&n)
+	q.QueryRow(ctx, `SELECT count(*) FROM custom_field WHERE trashed_at IS NULL`).Scan(&n)
 	if n >= maxFieldsPerInstance {
 		return FieldDef{}, invalid("this instance has the maximum of %d custom fields", maxFieldsPerInstance)
 	}
@@ -186,7 +197,7 @@ func (s *Service) CreateField(ctx context.Context, a Actor, in FieldIn) (FieldDe
 		}
 		return *p
 	}
-	row := s.DB.QueryRow(ctx, `INSERT INTO custom_field(name,description,help_text,type,unit,searchable,show_on_card,unique_values,min_value,max_value,regex,copy_on_clone,track_history,view_roles,edit_roles)
+	row := q.QueryRow(ctx, `INSERT INTO custom_field(name,description,help_text,type,unit,searchable,show_on_card,unique_values,min_value,max_value,regex,copy_on_clone,track_history,view_roles,edit_roles)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+fieldCols,
 		in.Name, str(in.Description), str(in.HelpText), in.Type, str(in.Unit), b(in.Searchable, true), b(in.ShowOnCard, false), b(in.Unique, false), in.Min, in.Max, str(in.Regex), b(in.CopyOnClone, false), b(in.TrackHistory, true),
 		orEmpty(in.ViewRoles), orEmpty(in.EditRoles))
@@ -365,8 +376,19 @@ func (s *Service) AddContext(ctx context.Context, a Actor, fieldID int64, in Con
 	if len(in.Options) > 0 && !isOptionType(f.Type) {
 		return FieldContext{}, invalid("only select, radio, multi select and checkbox fields have options")
 	}
-	out := FieldContext{FieldID: fieldID, Name: in.Name, Global: in.Global, Projects: []string{}, Types: []string{}, Required: in.Required}
+	var out FieldContext
 	err = s.tx(ctx, func(tx pgx.Tx) error {
+		var e error
+		out, e = s.addContext(ctx, tx, f, fieldID, in)
+		return e
+	})
+	return out, err
+}
+
+// addContext inserts a context inside a transaction the caller owns.
+func (s *Service) addContext(ctx context.Context, tx pgx.Tx, f FieldDef, fieldID int64, in ContextIn) (FieldContext, error) {
+	out := FieldContext{FieldID: fieldID, Name: in.Name, Global: in.Global, Projects: []string{}, Types: []string{}, Required: in.Required}
+	err := func() error {
 		var pos int
 		tx.QueryRow(ctx, `SELECT COALESCE(max(position)+1,0) FROM custom_field_context WHERE field_id=$1`, fieldID).Scan(&pos)
 		out.Position = pos
@@ -420,7 +442,7 @@ func (s *Service) AddContext(ctx context.Context, a Actor, fieldID int64, in Con
 			out.Default = v
 		}
 		return nil
-	})
+	}()
 	return out, err
 }
 

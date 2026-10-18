@@ -158,7 +158,7 @@ func jl[T any](files bundleFiles, name string, out *[]T) error {
 
 func readJSONBundle(files bundleFiles, d *BundleData) error {
 	for _, step := range []func() error{
-		func() error { return jl(files, "users.jsonl", &d.Users) }, func() error { return jl(files, "workflows.jsonl", &d.Workflows) },
+		func() error { return jl(files, "users.jsonl", &d.Users) }, func() error { return jl(files, "workflows.jsonl", &d.Workflows) }, func() error { return jl(files, "fields.jsonl", &d.Fields) },
 		func() error { return jl(files, "projects.jsonl", &d.Projects) }, func() error { return jl(files, "issues.jsonl", &d.Issues) },
 		func() error { return jl(files, "comments.jsonl", &d.Comments) }, func() error { return jl(files, "links.jsonl", &d.Links) },
 		func() error { return jl(files, "attachments.jsonl", &d.Attachments) }, func() error { return jl(files, "aliases.jsonl", &d.Aliases) },
@@ -270,7 +270,14 @@ func readCSVBundle(files bundleFiles, d *BundleData) error {
 		} else {
 			ft := strings.SplitN(get(r, 5), ">", 2)
 			if len(ft) == 2 {
-				w.Transitions = append(w.Transitions, BTransition{Name: get(r, 2), From: ft[0], To: ft[1]})
+				bt := BTransition{Name: get(r, 2), From: ft[0], To: ft[1], RequiresHuman: get(r, 6) == "true"}
+				if rj := get(r, 7); rj != "" {
+					var tr TRules
+					if json.Unmarshal([]byte(rj), &tr) == nil {
+						bt.Rules = &tr
+					}
+				}
+				w.Transitions = append(w.Transitions, bt)
 			}
 		}
 	}
@@ -317,7 +324,7 @@ func readCSVBundle(files bundleFiles, d *BundleData) error {
 		}
 		d.History = append(d.History, h)
 	}
-	return nil
+	return readFieldsCSV(files, d)
 }
 
 func splitNonEmpty(s, sep string) []string {
@@ -348,17 +355,18 @@ func (s *Service) Import(ctx context.Context, a Actor, r io.ReaderAt, size int64
 }
 
 type importCtx struct {
-	s       *Service
-	tx      pgx.Tx
-	a       Actor
-	o       ImportOpts
-	rep     *ImportReport
-	jobID   string
-	users   map[string]string // email -> id
-	issues  map[string]string // bundle key -> issue id
-	keys    map[string]string // bundle key -> key here
-	files   bundleFiles
-	created []string // project keys created, for rollback
+	s        *Service
+	tx       pgx.Tx
+	a        Actor
+	o        ImportOpts
+	rep      *ImportReport
+	jobID    string
+	users    map[string]string // email -> id
+	issues   map[string]string // bundle key -> issue id
+	keys     map[string]string // bundle key -> key here
+	files    bundleFiles
+	created  []string         // project keys created, for rollback
+	fieldIDs map[string]int64 // custom field name (lower case) -> id
 }
 
 func (c *importCtx) user(email string) *string {
@@ -410,7 +418,13 @@ func (s *Service) applyBundle(ctx context.Context, a Actor, d *BundleData, files
 	if len(rep.Errors) > 0 {
 		return rep, &ConflictError{"the import cannot run: " + strings.Join(rep.Errors, "; ")}
 	}
+	if err := c.customFields(ctx, d); err != nil {
+		return rep, err
+	}
 	if err := c.issuesStep(ctx, d); err != nil {
+		return rep, err
+	}
+	if err := c.customValues(ctx, d); err != nil {
 		return rep, err
 	}
 	if err := c.rest(ctx, d); err != nil {
@@ -479,7 +493,15 @@ func (c *importCtx) workflows(ctx context.Context, d *BundleData) error {
 				if t.From != "" {
 					from = ids[t.From]
 				}
-				if _, err := c.tx.Exec(ctx, `INSERT INTO transition(workflow_id,name,from_status,to_status) VALUES($1,$2,$3,$4)`, id, t.Name, from, ids[t.To]); err != nil {
+				rj := []byte("{}")
+				if t.Rules != nil {
+					if err := c.s.ValidateRules(ctx, c.tx, *t.Rules); err != nil {
+						c.rep.Gaps = append(c.rep.Gaps, fmt.Sprintf("workflow %q transition %q: its rules were left out (%v)", w.Name, t.Name, err))
+					} else {
+						rj, _ = json.Marshal(t.Rules)
+					}
+				}
+				if _, err := c.tx.Exec(ctx, `INSERT INTO transition(workflow_id,name,from_status,to_status,requires_human,rules) VALUES($1,$2,$3,$4,$5,$6)`, id, t.Name, from, ids[t.To], t.RequiresHuman, rj); err != nil {
 					return err
 				}
 			}

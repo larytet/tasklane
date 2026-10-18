@@ -113,6 +113,7 @@ func csvSafe(v string) string {
 type BundleData struct {
 	Users        []BUser
 	Workflows    []BWorkflow
+	Fields       []BField
 	Projects     []BProject
 	Issues       []BIssue
 	Comments     []BComment
@@ -215,17 +216,21 @@ func (s *Service) Export(ctx context.Context, a Actor, w io.Writer, o ExportOpts
 		if !wfSeen[p.wf] {
 			wfSeen[p.wf] = true
 			bw := BWorkflow{Name: wfName}
-			sr, _ := tx.Query(ctx, `SELECT name,category,position FROM status WHERE workflow_id=$1 ORDER BY position`, p.wf)
+			sr, _ := tx.Query(ctx, `SELECT name,category,position FROM status WHERE workflow_id=$1 AND NOT retired ORDER BY position`, p.wf)
 			for sr.Next() {
 				var st BStatus
 				sr.Scan(&st.Name, &st.Category, &st.Position)
 				bw.Statuses = append(bw.Statuses, st)
 			}
 			sr.Close()
-			tr, _ := tx.Query(ctx, `SELECT t.name,COALESCE(f.name,''),tt.name FROM transition t LEFT JOIN status f ON f.id=t.from_status JOIN status tt ON tt.id=t.to_status WHERE t.workflow_id=$1 ORDER BY t.name,tt.name`, p.wf)
+			tr, _ := tx.Query(ctx, `SELECT t.name,COALESCE(f.name,''),tt.name,t.requires_human,t.rules FROM transition t LEFT JOIN status f ON f.id=t.from_status JOIN status tt ON tt.id=t.to_status WHERE t.workflow_id=$1 AND NOT t.system ORDER BY t.name,tt.name`, p.wf)
 			for tr.Next() {
 				var t BTransition
-				tr.Scan(&t.Name, &t.From, &t.To)
+				var raw []byte
+				tr.Scan(&t.Name, &t.From, &t.To, &t.RequiresHuman, &raw)
+				if r := parseRules(raw); !r.empty() || len(r.Screen) > 0 {
+					t.Rules = &r
+				}
 				bw.Transitions = append(bw.Transitions, t)
 			}
 			tr.Close()
@@ -392,6 +397,13 @@ func (s *Service) Export(ctx context.Context, a Actor, w io.Writer, o ExportOpts
 			vr.Close()
 		}
 	}
+	roles := map[string]string{}
+	for _, p := range scoped {
+		roles[p.key] = p.role
+	}
+	if err := s.exportFields(ctx, tx, a, d, roles, "", user); err != nil {
+		return nil, err
+	}
 	var es []string
 	for e := range emails {
 		es = append(es, e)
@@ -419,6 +431,7 @@ func (s *Service) Export(ctx context.Context, a Actor, w io.Writer, o ExportOpts
 		}{
 			{"users.jsonl", len(d.Users), func(i int) any { return d.Users[i] }},
 			{"workflows.jsonl", len(d.Workflows), func(i int) any { return d.Workflows[i] }},
+			{"fields.jsonl", len(d.Fields), func(i int) any { return d.Fields[i] }},
 			{"projects.jsonl", len(d.Projects), func(i int) any { return d.Projects[i] }},
 			{"issues.jsonl", len(d.Issues), func(i int) any { return d.Issues[i] }},
 			{"comments.jsonl", len(d.Comments), func(i int) any { return d.Comments[i] }},
@@ -541,6 +554,9 @@ func writeCSVBundle(bw *bundleWriter, d *BundleData, o ExportOpts) error {
 	if err := bw.csvFile("attachments.csv", []string{"issue", "name", "mime", "sha256", "size", "uploader", "created", "path"}, rows); err != nil {
 		return err
 	}
+	if err := writeFieldsCSV(bw, d); err != nil {
+		return err
+	}
 	rows = nil
 	for _, u := range d.Users {
 		rows = append(rows, []string{u.Email, u.Name, u.Kind})
@@ -551,13 +567,18 @@ func writeCSVBundle(bw *bundleWriter, d *BundleData, o ExportOpts) error {
 	rows = nil
 	for _, w := range d.Workflows {
 		for _, st := range w.Statuses {
-			rows = append(rows, []string{w.Name, "status", st.Name, st.Category, fmt.Sprint(st.Position), ""})
+			rows = append(rows, []string{w.Name, "status", st.Name, st.Category, fmt.Sprint(st.Position), "", "", ""})
 		}
 		for _, t := range w.Transitions {
-			rows = append(rows, []string{w.Name, "transition", t.Name, "", "", t.From + ">" + t.To})
+			rj := ""
+			if t.Rules != nil {
+				b, _ := json.Marshal(t.Rules)
+				rj = string(b)
+			}
+			rows = append(rows, []string{w.Name, "transition", t.Name, "", "", t.From + ">" + t.To, fmt.Sprint(t.RequiresHuman), rj})
 		}
 	}
-	if err := bw.csvFile("workflows.csv", []string{"workflow", "kind", "name", "category", "position", "from>to"}, rows); err != nil {
+	if err := bw.csvFile("workflows.csv", []string{"workflow", "kind", "name", "category", "position", "from>to", "requires_human", "rules"}, rows); err != nil {
 		return err
 	}
 	rows = nil

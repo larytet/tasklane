@@ -47,9 +47,11 @@ type BStatus struct {
 }
 
 type BTransition struct {
-	Name string `json:"name"`
-	From string `json:"from"` // empty: from any status
-	To   string `json:"to"`
+	Name          string  `json:"name"`
+	From          string  `json:"from"` // empty: from any status
+	To            string  `json:"to"`
+	RequiresHuman bool    `json:"requires_human,omitempty"`
+	Rules         *TRules `json:"rules,omitempty"` // conditions, validators, post-functions and the transition screen
 }
 
 type BWorkflow struct {
@@ -93,6 +95,8 @@ type BIssue struct {
 	PurgeAfter  *time.Time `json:"purge_after"`
 	Version     int64      `json:"version"`
 	Estimate    *float64   `json:"estimate,omitempty"`
+	// Custom holds custom field values by field name
+	Custom map[string]any `json:"custom,omitempty"`
 }
 
 type BComment struct {
