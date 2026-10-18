@@ -33,6 +33,52 @@
         const x = await api('PUT', '/api/v1/projects/' + key + '/portal', { enabled: enabled.checked, welcome: welcome.value, privacy_notice: privacy.value, consent_text: consent.value, allow: lines(allow.value), block: lines(block.value) });
         msg.className = x.status === 200 ? 'muted' : 'err'; msg.textContent = x.status === 200 ? 'Saved.' : errText(x);
       } }, 'Save settings')));
+    // customers as data subjects: find, export, erase, promote (administrators of the organization)
+    const cq = h('input', { type: 'search', 'aria-label': 'Find a customer', placeholder: 'Find a customer by address or name' });
+    const clist = h('div', { class: 'list', role: 'list', 'aria-label': 'Customers' });
+    const cmsg = h('div', { role: 'status' });
+    async function findCustomers() {
+      clear(clist);
+      const x = await api('GET', '/api/v1/admin/customers?limit=20&q=' + encodeURIComponent(cq.value));
+      if (x.status !== 200) { clist.append(h('div', { class: 'row', role: 'listitem' }, x.status === 403 ? 'Only administrators of the organization manage customers.' : errText(x))); return; }
+      if (!x.data.length) clist.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No customers found.')));
+      for (const c of x.data) {
+        const gone = !!c.erased;
+        clist.append(h('div', { class: 'row', role: 'listitem' },
+          h('span', { class: 'sum' }, h('strong', {}, c.email), ' ', h('span', { class: 'muted' }, [c.name, c.company, c.verified ? '' : 'never signed in', c.blocked && !gone ? 'blocked' : '', gone ? 'erased' : '', c.promoted_to ? 'staff' : ''].filter(Boolean).join(' · '))),
+          h('button', { class: 'btn ghost', disabled: gone, 'aria-label': 'Export data of ' + c.email, onclick: async () => {
+            const r = await fetch('/api/v1/admin/customers/' + c.id + '/personal-data', { credentials: 'same-origin' });
+            if (!r.ok) { cmsg.className = 'err'; cmsg.textContent = 'Could not export.'; return; }
+            const url = URL.createObjectURL(await r.blob()); const a = h('a', { href: url, download: 'customer-data.json' }); document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+          } }, 'Export'),
+          h('button', { class: 'btn ghost', disabled: gone || !!c.promoted_to, 'aria-label': 'Promote ' + c.email + ' to staff', onclick: () => promote(c) }, 'Make staff'),
+          h('button', { class: 'btn ghost', disabled: gone, 'aria-label': 'Erase ' + c.email, onclick: () => erase(c) }, 'Erase')));
+      }
+    }
+    function erase(c) {
+      const content = h('input', { type: 'checkbox', id: 'ec-del' });
+      let close;
+      close = modal(h('div', {}, h('h2', {}, 'Erase ' + c.email), h('p', {}, 'Removes the person from the portal, their sign-ins and mail. Their requests stay as work records without their name or address. Requests under legal hold stop the erase.'),
+        h('label', { for: 'ec-del' }, content, ' Also delete what they wrote'),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
+          const x = await api('POST', '/api/v1/admin/customers/' + c.id + '/erase', { delete_content: content.checked, scrub_mentions: true });
+          close(); if (x.status === 200) { cmsg.className = 'muted'; cmsg.textContent = 'Erased.'; findCustomers(); } else { cmsg.className = 'err'; cmsg.textContent = errText(x); }
+        } }, 'Erase'))));
+    }
+    function promote(c) {
+      const name = h('input', { type: 'text', id: 'pm-n', value: c.name || '' }), pw = h('input', { type: 'password', id: 'pm-p', autocomplete: 'new-password' });
+      const err = h('div', { role: 'alert', class: 'err' });
+      let close;
+      close = modal(h('div', {}, h('h2', {}, 'Make ' + c.email + ' a member of staff'), h('p', {}, 'Creates a staff account with this address. Their requests and comments stay as they are, and they can still use the portal.'),
+        h('label', { for: 'pm-n' }, 'Name'), name, h('label', { for: 'pm-p' }, 'Initial password'), pw, err,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
+          const x = await api('POST', '/api/v1/admin/customers/' + c.id + '/promote', { name: name.value, password: pw.value });
+          if (x.status === 201) { close(); cmsg.className = 'muted'; cmsg.textContent = 'Staff account made.'; findCustomers(); } else err.textContent = errText(x);
+        } }, 'Make staff'))));
+    }
+    cq.addEventListener('input', () => { clearTimeout(cq._t); cq._t = setTimeout(findCustomers, 300); });
+    body.append(h('h3', { style: 'margin-top:16px' }, 'Customers'), cq, clist, cmsg);
+    findCustomers();
     // customer organizations: the companies whose people can share requests
     const orgs = h('div', { class: 'list', role: 'list', 'aria-label': 'Customer organizations' });
     const oname = h('input', { type: 'text', 'aria-label': 'Customer organization name', placeholder: 'Acme Ltd', maxlength: 100 });

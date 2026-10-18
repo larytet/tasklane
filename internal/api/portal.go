@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/larytet/tasklane/internal/domain"
 )
@@ -272,6 +273,51 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 		if s.decode(w, r, &in) {
 			v, err := s.Svc.SetCustomerOrgMembers(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("id"), in.Add, in.Remove)
 			s.reply(w, v, err)
+		}
+	}))
+	// customers as data subjects: their own export and erase
+	s.handle(mux, "GET /api/v1/portal/me/export", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.CustomerExportSelf(r.Context(), customerOf(r))
+		w.Header().Set("Content-Disposition", `attachment; filename="my-data.json"`)
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/portal/me/erase", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Confirm       string `json:"confirm"`
+			DeleteContent bool   `json:"delete_content"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		res, err := s.Svc.CustomerEraseSelf(r.Context(), customerOf(r), in.Confirm, domain.EraseOpts{DeleteContent: in.DeleteContent, ScrubMentions: true})
+		if err == nil {
+			http.SetCookie(w, &http.Cookie{Name: portalCookie, Value: "", Path: "/", MaxAge: -1})
+		}
+		s.reply(w, res, err)
+	}))
+	// administrators: find, export, erase and promote customers
+	s.handle(mux, "GET /api/v1/admin/customers", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		v, err := s.Svc.ListCustomers(r.Context(), actorOf(r), r.URL.Query().Get("q"), n)
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/admin/customers/{id}/personal-data", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ExportCustomerData(r.Context(), actorOf(r), r.PathValue("id"))
+		w.Header().Set("Content-Disposition", `attachment; filename="customer-data.json"`)
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/admin/customers/{id}/erase", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.EraseOpts
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.EraseCustomer(r.Context(), actorOf(r), r.PathValue("id"), in)
+			s.reply(w, v, err)
+		}
+	}))
+	s.handle(mux, "POST /api/v1/admin/customers/{id}/promote", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.PromoteIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.PromoteCustomer(r.Context(), actorOf(r), r.PathValue("id"), in)
+			s.replyStatus(w, 201, v, err)
 		}
 	}))
 }

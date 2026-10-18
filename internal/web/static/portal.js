@@ -192,7 +192,28 @@
         h('details', {}, h('summary', {}, me.has_password ? 'Change or remove my password' : 'Set a password'),
           h('label', { for: 'pnp' }, 'New password (leave empty to remove it)'), pass,
           h('button', { class: 'btn', type: 'button', onclick: async () => { const r = await api('PUT', '/api/v1/portal/password', { password: pass.value }); msg.className = r.status === 200 ? 'muted' : 'err'; msg.textContent = r.status === 200 ? 'Password saved.' : errText(r); } }, 'Save password')),
+        h('h2', {}, 'Your data'),
+        h('p', {}, h('button', { class: 'btn', type: 'button', id: 'dl', onclick: async () => {
+          const r = await fetch('/api/v1/portal/me/export', { credentials: 'same-origin' });
+          if (!r.ok) { msg.className = 'err'; msg.textContent = 'Could not prepare your data.'; return; }
+          const url = URL.createObjectURL(await r.blob());
+          const a = h('a', { href: url, download: 'my-data.json' }); document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        } }, 'Download my data')),
+        eraseBox(me, msg),
         msg);
+    }
+    // erasing: the person types their address, and may also have what they wrote deleted
+    function eraseBox(me, msg) {
+      const confirm = h('input', { type: 'email', id: 'ec', autocomplete: 'off' });
+      const content = h('input', { type: 'checkbox', id: 'ed' });
+      return h('details', {}, h('summary', {}, 'Delete my data'),
+        h('p', {}, 'This removes you from our records: your details, sign-ins and the emails we hold. Your requests stay with us as our work records, without your name or address.'),
+        h('label', { for: 'ed' }, content, ' Also delete what I wrote (my comments, and the summary and details of my requests)'),
+        h('label', { for: 'ec' }, 'Type your email address to confirm'), confirm,
+        h('button', { class: 'btn', type: 'button', id: 'erase', onclick: async () => {
+          const r = await api('POST', '/api/v1/portal/me/erase', { confirm: confirm.value, delete_content: content.checked });
+          if (r.status === 200) { location.hash = ''; location.reload(); } else { msg.className = 'err'; msg.textContent = errText(r); }
+        } }, 'Delete my data'));
     }
     window.addEventListener('hashchange', route);
     route();

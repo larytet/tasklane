@@ -153,6 +153,16 @@ func (f *fixture) customerOrg() string {
 	return o.ID
 }
 
+func (f *fixture) customer() string {
+	f.n++
+	var id string
+	err := f.e.Store.Pool.QueryRow(testutil.Ctx(), `INSERT INTO customer(email,verified_at) VALUES($1,now()) RETURNING id::text`, fmt.Sprint("matrix", f.n, "@customer.example")).Scan(&id)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
 func (f *fixture) versionName() string {
 	f.n++
 	n := fmt.Sprint("n", f.n)
@@ -741,6 +751,18 @@ func rows() []row {
 		}},
 		{"PUT /api/v1/projects/{key}/portal/customer-orgs/{id}/members", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
 			return J("PUT", "/api/v1/projects/ABC/portal/customer-orgs/"+f.customerOrg()+"/members", map[string]any{"add": []string{"member@company.example"}})
+		}},
+		{"GET /api/v1/portal/me/export", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/portal/me/export", nil) }},
+		{"POST /api/v1/portal/me/erase", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("POST", "/api/v1/portal/me/erase", map[string]any{"confirm": "x"}) }},
+		{"GET /api/v1/admin/customers", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/customers", nil) }},
+		{"GET /api/v1/admin/customers/{id}/personal-data", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("GET", "/api/v1/admin/customers/"+f.customer()+"/personal-data", nil)
+		}},
+		{"POST /api/v1/admin/customers/{id}/erase", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/admin/customers/"+f.customer()+"/erase", map[string]any{})
+		}},
+		{"POST /api/v1/admin/customers/{id}/promote", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/admin/customers/"+f.customer()+"/promote", map[string]any{"password": "a long enough one"})
 		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {

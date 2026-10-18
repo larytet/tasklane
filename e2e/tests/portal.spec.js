@@ -369,3 +369,78 @@ test('PORT-07: the customer is emailed about their request with a portal link, a
   await sp.reload();
   await expect(sp.getByText('Here is the photo link.')).toBeVisible();
 });
+
+test('PORT-06: a customer downloads their data and erases themselves; an administrator exports, promotes and erases customers', async ({ browser }) => {
+  const adm = await browser.newContext();
+  adm.on('page', watch);
+  expect((await adm.request.post('/api/v1/login', { headers: H, data: { email: 'admin@example.com', password: 'adminpass1' } })).status()).toBe(200);
+  const pk = 'D' + uniq().toUpperCase();
+  expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Data' } })).status()).toBe(201);
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true } })).status()).toBe(200);
+  expect((await adm.request.post(`/api/v1/projects/${pk}/request-types`, { headers: H, data: { name: 'Question' } })).status()).toBe(201);
+
+  async function signIn(addr) {
+    const ctx = await browser.newContext();
+    ctx.on('page', watch);
+    const page = await ctx.newPage();
+    await page.goto('/portal/' + pk);
+    await page.getByLabel('Your email address').fill(addr);
+    await page.getByRole('button', { name: 'Email me a code' }).click();
+    const { code } = await sentTo(addr);
+    await page.getByLabel('The six digit code we sent you').fill(code);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+    await expect(page.getByText('Signed in as')).toContainText(addr);
+    return { ctx, page };
+  }
+  const gone = `gone.${uniq()}@customer.example`, keep = `keep.${uniq()}@customer.example`;
+  const g = await signIn(gone);
+  await g.page.getByRole('link', { name: 'New request' }).click();
+  await g.page.getByLabel('Summary').fill('Please forget me ' + uniq());
+  await g.page.getByRole('button', { name: 'Send request' }).click();
+  await expect(g.page.getByRole('heading', { level: 2 })).toContainText('Please forget me');
+  const key = (await g.page.getByRole('heading', { level: 2 }).textContent()).split(' ')[0];
+  const k = await signIn(keep);
+
+  // the customer downloads their data
+  await g.page.getByRole('link', { name: 'My details' }).click();
+  const [download] = await Promise.all([g.page.waitForEvent('download'), g.page.getByRole('button', { name: 'Download my data' }).click()]);
+  const data = JSON.parse(readFileSync(await download.path(), 'utf8'));
+  expect(data.profile.email).toBe(gone);
+  expect(data.requests.length).toBe(1);
+  expect(JSON.stringify(data)).not.toContain(keep);
+  const axeD = await new AxeBuilder({ page: g.page }).analyze();
+  expect(axeD.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+
+  // an administrator finds a customer, exports their data and makes them staff
+  const sp = await adm.newPage();
+  await sp.goto('/#/portal-admin/' + pk);
+  await sp.getByLabel('Find a customer').fill(keep);
+  await expect(sp.getByRole('list', { name: 'Customers' })).toContainText(keep);
+  const axeA = await new AxeBuilder({ page: sp }).analyze();
+  expect(axeA.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  const [dl2] = await Promise.all([sp.waitForEvent('download'), sp.getByRole('button', { name: 'Export data of ' + keep }).click()]);
+  expect(JSON.parse(readFileSync(await dl2.path(), 'utf8')).profile.email).toBe(keep);
+  await sp.getByRole('button', { name: 'Promote ' + keep + ' to staff' }).click();
+  await sp.getByLabel('Initial password').fill('a long enough one');
+  await sp.getByRole('button', { name: 'Make staff', exact: true }).click();
+  await expect(sp.getByText('Staff account made.')).toBeVisible();
+  await expect(sp.getByRole('list', { name: 'Customers' })).toContainText('staff');
+
+  // the customer erases themselves: they must type their address, and are signed out
+  await g.page.getByText('Delete my data', { exact: true }).first().click();
+  await g.page.getByRole('button', { name: 'Delete my data' }).click();
+  await expect(g.page.getByRole('alert').or(g.page.getByRole('status')).filter({ hasText: 'type your email' })).toBeVisible();
+  await g.page.getByLabel('Type your email address to confirm').fill(gone);
+  await g.page.getByRole('button', { name: 'Delete my data' }).click();
+  await expect(g.page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  expect((await g.ctx.request.get('/api/v1/portal/me')).status()).toBe(401);
+  // staff: the request stays, with no trace of the customer
+  const view = await adm.request.get(`/api/v1/issues/${key}/view`);
+  expect(view.status()).toBe(200);
+  const body = await view.text();
+  expect(body).not.toContain(gone);
+  expect(body).toContain('Deleted customer');
+  await sp.getByLabel('Find a customer').fill('erased');
+  await expect(sp.getByRole('list', { name: 'Customers' })).toContainText('erased');
+  void k;
+});
