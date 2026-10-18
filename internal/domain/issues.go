@@ -86,6 +86,11 @@ func normLabels(in []string) ([]string, error) {
 const maxSummary = 255
 
 func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue, error) {
+	endWrite, perr := s.admit(ctx, in.Project)
+	if perr != nil {
+		return Issue{}, perr
+	}
+	defer endWrite()
 	pid, err := s.projectID(ctx, in.Project)
 	if err != nil {
 		return Issue{}, err
@@ -333,6 +338,11 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	if !canWrite(role) {
 		return is, ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return is, perr
+	}
+	defer endWrite()
 	pid, err := s.projectID(ctx, is.Project)
 	if err != nil {
 		return is, err
@@ -457,6 +467,11 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 	if !canWrite(role) {
 		return is, ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return is, perr
+	}
+	defer endWrite()
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		var cur int64
 		var raw []byte

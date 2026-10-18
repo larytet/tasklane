@@ -12,7 +12,7 @@ this file is updated, and the work is committed and pushed.
 | Phase | State | Notes |
 |---|---|---|
 | M1a Tracker | **built, exit gate not passed** | milestones M1a.1 to M1a.9 below; see the exit gate audit for what is still open |
-| M1b Lifecycle and exchange | in progress | milestones M1b.1 to M1b.3 below |
+| M1b Lifecycle and exchange | built, gate to be audited | milestones M1b.1 to M1b.3 below |
 | M1c Agents | not started | |
 | M2 to M5 | not started | |
 
@@ -21,8 +21,8 @@ this file is updated, and the work is committed and pushed.
 | Milestone | Scope | State |
 |---|---|---|
 | M1b.1 Lifecycle operations | plan-then-execute convert, move (key aliases that resolve forever in REST, TQL and the browser), clone (option matrix, blobs shared by reference), delete to trash, restore, purge (retention job, legal hold, never for agents), removed-values records, issue links, hierarchy rules, `410` for trashed issues, UI dialogs and trash page | done |
-| M1b.2 Pause state | `running`, `draining`, `paused` scopes for imports and restores, deadline and abort, `503` with `Retry-After` for API writers | next |
-| M1b.3 Exchange | JSON and CSV bundle export, import into an empty instance, generic CSV import with column mapping, dry run, idempotency | planned |
+| M1b.2 Pause state | pause leases (instance or project scope) with drain, marker (outbox and log position), deadline abort, lease expiry, overlapping scopes refused, admission on every write path with `503` and `Retry-After`, snapshot and none modes, audit | done |
+| M1b.3 Exchange | JSON and CSV bundles (zip, manifest with per-file SHA-256, one consistent snapshot), import with checksum verification, dry run, idempotent re-import, key renames with aliases, rollback by import id, generic CSV import with mapping, per-row error report and saved templates | done; the Admin import and export screen is not built |
 
 ## M1a milestones
 
@@ -172,3 +172,25 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | LIFE-13 | done | double move (one winner), move versus transition, delete versus edit, repeated under the race detector |
 | LIFE-14 | partial | every operation audited and emitted in order, dry runs leave no trace; webhooks and automation triggers do not exist yet; MCP has no delete or purge tool because there is no MCP server yet |
 | LIFE-16, LIFE-17 | open | bulk operations as resumable jobs, import and export of aliases and removed values |
+| 42 | M1b.3 | Removed-values records pointed at issue ids, which differ between instances, so "convert back" restored nothing after an import | The bundle carries keys and import translates them to the new ids |
+| 43 | M1b.3 | The export swallowed an error: a second query ran on the snapshot transaction while the removed-values cursor was open (the same pgx rule as issue 38), so the keys were silently empty | Rows are read fully before any further query; the round-trip test asserts the restored child, which is how it was found |
+| 44 | M1b.3 | CSV bundles lost sub-second precision on timestamps | RFC 3339 with nanoseconds on write and read |
+| 45 | M1b.3 | A new project's counter starts at 1 while numbers preserved from a bundle already occupy it, so an allocation could collide | Allocation first raises the counter above the highest number in use |
+
+**Frontend framework.** SPEC §23 and DESIGN §13.1 now recommend Svelte 5 with TypeScript, to be confirmed by the prototype gate (200 KB initial, 60 KB per route). The current dependency-free JavaScript frontend (about 800 lines, about 20 KB gzipped, covered by the Playwright suite) is treated as a throwaway: the browser tests are written against roles and labels, not markup, so they can be pointed at a replacement.
+
+## M1b audit against the plan
+
+| Ids | State | Notes |
+|---|---|---|
+| EXP-01 | done | JSON and CSV round trip into an empty instance: fields, hierarchy, comments (with visibility), links, attachments (bytes checked), aliases, removed values, history and text versions, numbering continues |
+| EXP-02 | partial | attachment files stream with constant memory and the archive is written as it is produced; entity lists are held in memory per export, and a resumable download is not built |
+| EXP-03 | done | viewers get no internal comments, outsiders get 404, the full export is administrator only and audited, no credentials in any bundle |
+| EXP-05 | open | golden bundles from released versions (no release yet); the manifest carries a format version and a newer version is refused |
+| IMP-05, 06, 07 | done | dry run equals the real run and commits nothing; re-import updates in place and creates nothing; rollback by import id removes only what the run created |
+| IMP-09 | partial | generic CSV with mapping, saved templates, multi-line cells, BOM, repeated comment columns, row errors as CSV. GitHub, Trello, Linear and Asana presets, and a JSON mapping, are not built |
+| PAUSE-01, 02, 03 | partial | PAUSE-01 exact boundary under 50 writers is proved. PAUSE-02 (backup and restore with active users) needs the restore tooling; PAUSE-03 derived-data bounds are measured for search only |
+| PAUSE-04, 06, 07, 08, 10, 12 | done | writers held then refused with 503 and `Retry-After`, drain deadline aborts and audits, lease expiry, overlapping scopes (one grant under concurrent requests), snapshot and none modes, marker in the manifest |
+| PAUSE-05 | partial | import into existing issues holds a project pause (tested through the import) and editors' saves conflict normally afterwards; the editor notice is not built |
+| PAUSE-09, 11 | open | blob-store backup ordering, mirror mode |
+| LIFE-16, 17 | LIFE-17 done, LIFE-16 open | bulk operations as resumable jobs are not built |

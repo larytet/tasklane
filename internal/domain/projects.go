@@ -89,6 +89,11 @@ func (s *Service) CreateProject(ctx context.Context, a Actor, key, name string) 
 }
 
 func (s *Service) AddMember(ctx context.Context, a Actor, projectKey, userID, role string) error {
+	endWrite, perr := s.admit(ctx, projectKey)
+	if perr != nil {
+		return perr
+	}
+	defer endWrite()
 	if role != "viewer" && role != "member" && role != "admin" {
 		return invalid("role must be viewer, member or admin")
 	}

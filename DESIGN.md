@@ -1077,9 +1077,28 @@ counted and sampled for review (E4). The test campaign (TESTPLAN 5.1) uses the r
 
 ### 13.1 Stack
 
-TypeScript SPA, built once and embedded in the Go binary. Framework choice is open (section 17); the constraint is a
-small runtime with fine-grained reactivity (Solid, Preact with signals, or Svelte) over a heavy virtual-DOM
-framework, because the list and board re-render constantly from events. Editor: **ProseMirror** (via a
+TypeScript SPA, built once and embedded in the Go binary. The constraint is a small runtime with fine-grained
+reactivity over a heavy virtual-DOM framework, because the list and board re-render constantly from events.
+
+**Recommendation: Svelte 5 (runes) with TypeScript.** Still open until the section 17 prototype confirms it.
+
+- **Language: TypeScript, not plain JavaScript.** The API, the WebSocket event protocol and the shared ProseMirror
+  schema are typed contracts; types catch drift between client and server at build time. The current M1a frontend is
+  plain JS (about 800 lines in `internal/web/static`) and is a throwaway that this replaces.
+- **Why Svelte.** It compiles components to small plain JS, so there is no virtual-DOM runtime to ship and the initial
+  JS budget (13.2) is easy to meet. Runes (`$state`, `$derived`) give fine-grained updates, which matches the event-driven
+  list and board. Output is static files that `go:embed` serves from the single binary. The workflow designer has a
+  ready library in SvelteFlow. Windshift, a comparable Go and Jira-like project, uses it for its whole UI.
+- **React is the main alternative, and the safe one.** Largest hiring pool and library ecosystem, including mature
+  drag-and-drop, table and editor wrappers, and ProseMirror bindings. Costs: a virtual-DOM runtime (React plus ReactDOM
+  is roughly 40 KB gzipped before any app code), and more care (memoization, selectors or signals) to keep large lists and
+  boards from re-rendering. Choose it if hiring or the library ecosystem outweighs bundle size and re-render cost. Preact
+  with signals is the lighter middle option and keeps the React ecosystem through compat.
+- **Solid** is the other fine-grained option (React-like syntax, signals); smaller ecosystem than either.
+- **Decision rule.** Build the same list + ticket editor in the shortlisted frameworks; the winner meets the CI budgets in
+  13.2 on the reference phone with the least code. Ties go to the team's familiarity.
+
+Editor: **ProseMirror** (via a
 thin wrapper) as a single-user editor; the ProseMirror schema, defined once as data and shared with the server validator (12.6),
 is the canonical rich-text model, with converters to Markdown and ADF (this resolves the "rich text format" open question in SPEC section 23 in favor of
 ProseMirror JSON plus an ADF converter).
@@ -1223,7 +1242,7 @@ automated checks (axe in CI) plus manual screen-reader passes for the editor, bo
 | 1 | Collaborative editing model | **Decided:** real-time co-editing (CRDT with a doc-engine sidecar) dropped; advisory presence, private autosaved drafts, compare-and-set saves on `text_seq`, client-side three-way merge dialog (section 12). Revisit only if conflicts prove painful. | Done |
 | 2 | One WebSocket per tab with channels | Adopted: carries presence and field-change events only, no text sync | Done |
 | 3 | Rich text model | ProseMirror JSON canonical, Markdown and ADF converters | M1 |
-| 4 | Frontend framework | Fine-grained reactive, small runtime; choose by prototype of list + editor within the JS budget | M1 |
+| 4 | Frontend framework | **Recommended: Svelte 5 + TypeScript** (React or Preact with signals as the alternatives, section 13.1); confirm by prototype of list + editor within the JS budget | M1 |
 | 5 | Pub/sub transport | **Decided:** Redis, required for 2+ nodes (presence, events, cache invalidation), none on a single node; no `LISTEN/NOTIFY` fallback. Events are best effort; clients refetch on a `version` gap or on focus, and caches have TTLs as a backstop. | Done |
 | 6 | Server-side time budget | 50 ms p95 for reads; tighten SPEC section 21 accordingly | Now |
 | 7 | Presence heartbeat and limits | 10 s heartbeat, 30 s expiry, state changes only; validated by the load test | M1 |

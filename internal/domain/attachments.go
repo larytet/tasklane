@@ -278,6 +278,11 @@ func (s *Service) CommitUpload(ctx context.Context, a Actor, id string) (Attachm
 	if !canWrite(role) {
 		return Attachment{}, ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return Attachment{}, perr
+	}
+	defer endWrite()
 	path, err := s.Blobs.Store.StagingPath(sessionStagingID(id))
 	if err != nil {
 		return Attachment{}, err
@@ -302,6 +307,11 @@ func (s *Service) AttachStream(ctx context.Context, a Actor, key, name, declared
 	if !canWrite(role) {
 		return Attachment{}, ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return Attachment{}, perr
+	}
+	defer endWrite()
 	release, err := s.acquire()
 	if err != nil {
 		return Attachment{}, err
@@ -431,6 +441,11 @@ func (s *Service) DeleteAttachment(ctx context.Context, a Actor, key, attID stri
 	if !canWrite(role) {
 		return ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return perr
+	}
+	defer endWrite()
 	defer func() { s.emit(Event{Type: "attachment.changed", Issue: is.Key, Actor: a.Label, ActorID: a.ID}) }()
 	return s.tx(ctx, func(tx pgx.Tx) error {
 		var blobID, name string

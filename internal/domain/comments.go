@@ -40,6 +40,11 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 	if !canWrite(role) {
 		return Comment{}, ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return Comment{}, perr
+	}
+	defer endWrite()
 	body, _ = Sanitize(body)
 	if strings.TrimSpace(body) == "" {
 		return Comment{}, invalid("comment is empty")
@@ -72,6 +77,11 @@ func (s *Service) EditComment(ctx context.Context, a Actor, key, commentID, body
 	if !canWrite(role) {
 		return ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return perr
+	}
+	defer endWrite()
 	body, _ = Sanitize(body)
 	if strings.TrimSpace(body) == "" {
 		return invalid("comment is empty")

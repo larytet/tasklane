@@ -135,6 +135,11 @@ func (s *Service) mutateText(ctx context.Context, a Actor, key, field, mode, sav
 	if !canWrite(role) {
 		return TextResult{}, ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return TextResult{}, perr
+	}
+	defer endWrite()
 	var res TextResult
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		// lock the text row; the lock is what makes compare-and-set atomic

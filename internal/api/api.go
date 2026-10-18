@@ -250,6 +250,21 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.SetFieldTracking(r.Context(), actorOf(r), r.PathValue("field"), in.Track))
 	}))
+	s.handle(mux, "GET /api/v1/admin/pause", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		l, err := s.Svc.PauseStatus(r.Context(), actorOf(r))
+		s.reply(w, l, err)
+	}))
+	s.handle(mux, "POST /api/v1/admin/pause", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.PauseIn
+		if !s.decode(w, r, &in) {
+			return
+		}
+		l, err := s.Svc.RequestPause(r.Context(), actorOf(r), in)
+		s.reply(w, l, err)
+	}))
+	s.handle(mux, "DELETE /api/v1/admin/pause/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.ReleasePause(r.Context(), actorOf(r), r.PathValue("id")))
+	}))
 	s.handle(mux, "POST /api/v1/issues/{key}/lifecycle", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in domain.LifecycleIn
 		if !s.decode(w, r, &in) {
@@ -283,6 +298,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	s.registerSearch(mux)
 	s.registerAttachments(mux)
+	s.registerExchange(mux)
 	if s.Extra != nil {
 		s.Extra(mux, s)
 	}
@@ -515,6 +531,7 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		pm  *domain.PatchMismatch
 		om  *domain.OffsetMismatch
 		be  *domain.BlockedError
+		ep  *domain.ErrPaused
 		ce  *domain.ConflictError
 		nd  *domain.NotDownloadable
 	)
@@ -535,6 +552,11 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.fail(w, 409, "version_conflict", err.Error(), vc)
 	case errors.As(err, &tp):
 		s.fail(w, 412, "precondition_failed", err.Error(), tp)
+	case errors.As(err, &ep):
+		w.Header().Set("Retry-After", strconv.Itoa(int(ep.RetryAfter.Seconds())+1))
+		s.fail(w, 503, "paused", ep.Error(), map[string]any{"scope": ep.Scope, "retry_after": int(ep.RetryAfter.Seconds()) + 1})
+	case errors.Is(err, domain.ErrDrainTimeout):
+		s.fail(w, 409, "drain_timeout", err.Error(), nil)
 	case errors.As(err, &be):
 		s.fail(w, 409, "blocked", be.Error(), be.Plan)
 	case errors.As(err, &ce):

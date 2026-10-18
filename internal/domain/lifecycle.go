@@ -144,6 +144,26 @@ func (s *Service) Lifecycle(ctx context.Context, a Actor, key string, in Lifecyc
 		return nil, invalid("unknown operation %q (delete, restore, purge, clone, move or convert)", in.Op)
 	}
 	plan := newPlan(op, strings.ToUpper(key))
+	var srcProject string
+	s.DB.QueryRow(ctx, `SELECT p.key FROM issue i JOIN project p ON p.id=i.project_id WHERE i.key=$1 OR i.id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1) LIMIT 1`, plan.Key).Scan(&srcProject)
+	if srcProject != "" && !in.DryRun { // a dry run only reads; a real operation counts as a write in every project it touches
+		endWrite, perr := s.admit(ctx, srcProject)
+		if perr != nil {
+			return nil, perr
+		}
+		defer endWrite()
+		tgt := in.Project
+		if op == "clone" {
+			tgt = in.Clone.Project
+		}
+		if tgt != "" && !strings.EqualFold(tgt, srcProject) && (op == "move" || op == "clone") {
+			endWrite2, perr := s.admit(ctx, tgt)
+			if perr != nil {
+				return nil, perr
+			}
+			defer endWrite2()
+		}
+	}
 	var events []Event
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {

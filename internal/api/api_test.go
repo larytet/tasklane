@@ -9,8 +9,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/larytet/tasklane/internal/api"
+	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/testutil"
 )
 
@@ -277,5 +279,46 @@ func TestHTTP_MailLogIsAdminOnly(t *testing.T) {
 				t.Fatalf("%d", c)
 			}
 		}
+	}
+}
+
+// PAUSE-04 over HTTP: writers get 503 with Retry-After, reads keep working, and the retry after release applies once.
+func TestHTTP_PAUSE04_WritersGet503WithRetryAfter(t *testing.T) {
+	domain.PauseAdmitWait = 100 * time.Millisecond
+	defer func() { domain.PauseAdmitWait = 2 * time.Second }()
+	e, alice, _, key := setup(t)
+	us, _ := e.Svc.ListUsers(testutil.Ctx())
+	var admin *client
+	for _, u := range us {
+		if u.Email == "admin@example.com" {
+			tok, _ := e.Svc.CreateAPIToken(testutil.Ctx(), u.ID, "adm")
+			admin = &client{t: t, base: alice.base, token: tok}
+		}
+	}
+	code, out, _ := admin.do("POST", "/api/v1/admin/pause", map[string]any{"scope": "project:ABC", "owner": "import"})
+	if code != 200 || out["state"] != "paused" {
+		t.Fatalf("%d %v", code, out)
+	}
+	id := out["id"].(string)
+	code, out, hdr := alice.do("PUT", "/api/v1/issues/"+key+"/text/description", map[string]any{"body": "x", "base_seq": 1, "save_id": "p-1"})
+	if code != 503 || out["code"] != "paused" || hdr.Get("Retry-After") == "" {
+		t.Fatalf("%d %v retry-after %q", code, out, hdr.Get("Retry-After"))
+	}
+	if code, _, _ := alice.do("GET", "/api/v1/issues/"+key+"/view", nil); code != 200 {
+		t.Fatalf("a read was refused: %d", code)
+	}
+	if c, _, _ := admin.do("GET", "/api/v1/admin/pause", nil); c != 200 {
+		t.Fatal(c)
+	}
+	if c, _, _ := admin.do("DELETE", "/api/v1/admin/pause/"+id, nil); c != 200 {
+		t.Fatal(c)
+	}
+	for i := 0; i < 2; i++ { // the retry after release, and a duplicate retry, apply once
+		if c, _, _ := alice.do("PUT", "/api/v1/issues/"+key+"/text/description", map[string]any{"body": "x", "base_seq": 1, "save_id": "p-1"}); c != 200 {
+			t.Fatalf("retry %d: %d", i, c)
+		}
+	}
+	if _, v, _ := alice.do("GET", "/api/v1/issues/"+key+"/view", nil); v["issue"].(map[string]any)["description_seq"].(float64) != 2 {
+		t.Fatalf("%v", v["issue"])
 	}
 }

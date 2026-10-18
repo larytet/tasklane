@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,6 +20,8 @@ type Service struct {
 	Presence *Presence
 	Blobs    *Blobs
 	Mail     *MailConfig
+	gateOnce sync.Once
+	gate     *gate
 	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
 	TrashRetention time.Duration
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:

@@ -602,6 +602,11 @@ func (s *Service) AddLink(ctx context.Context, a Actor, key, typ, target string)
 	if !canWrite(role) {
 		return ErrForbidden
 	}
+	endWrite, perr := s.admit(ctx, is.Project)
+	if perr != nil {
+		return perr
+	}
+	defer endWrite()
 	to, _, err := s.access(ctx, a, target)
 	if err != nil {
 		return invalid("the linked issue %s was not found", target)

@@ -1485,7 +1485,8 @@ per-user locale and timezone, date and number formats.
   converters.
 - Real-time collaborative editing: dropped in favor of advisory presence and optimistic save (section 4.5). Revisit only if the
   conflict dialog proves painful in practice.
-- Frontend framework: a small fine-grained reactive runtime; chosen by prototype within the JS budget.
+- Frontend framework: **recommendation: Svelte 5 with TypeScript**, confirmed by a prototype of list + editor within the JS
+  budget (rationale and alternatives, including React, in DESIGN.md section 13.1). Not yet decided.
 - Search engine: resolved in section 10.1. PostgreSQL by default, OpenSearch (an extra service and a second, lagging copy)
   for large instances; the PostgreSQL limit is set at 100,000 issues per instance and verified by PERF-16.
 - Jira write-back (the outbound half of the mirror): when to build it and the conflict and echo policy; design notes are in

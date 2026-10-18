@@ -208,6 +208,31 @@ func rows() []row {
 		{"PUT /api/v1/issues/{key}/legal-hold", adminer, func(f *fixture) req {
 			return J("PUT", "/api/v1/issues/"+f.issue()+"/legal-hold", map[string]any{"hold": false})
 		}},
+		{"GET /api/v1/admin/pause", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/pause", nil) }},
+		{"POST /api/v1/admin/pause", adminer, func(f *fixture) req {
+			return J("POST", "/api/v1/admin/pause", map[string]any{"scope": "instance", "mode": "none"}) // none holds nothing, so the matrix itself is not paused
+		}},
+		{"DELETE /api/v1/admin/pause/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/admin/pause/00000000-0000-4000-8000-000000000000", nil)
+		}},
+		{"POST /api/v1/export", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/export", map[string]any{"attachments": false})
+		}},
+		{"POST /api/v1/import", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req {
+			return req{method: "POST", path: "/api/v1/import?dry_run=1", raw: []byte("not a bundle")} // an administrator is let in and told the upload is not a bundle
+		}},
+		{"POST /api/v1/import/{id}/rollback", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/import/00000000-0000-4000-8000-000000000000/rollback", nil)
+		}},
+		{"POST /api/v1/import/csv", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/import/csv", map[string]any{"project": "ABC", "csv": "title\nfrom csv", "mapping": map[string]any{"columns": map[string]string{"title": "summary"}}})
+		}},
+		{"PUT /api/v1/import/csv/templates/{name}", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/import/csv/templates/t", map[string]any{"columns": map[string]string{"title": "summary"}})
+		}},
+		{"GET /api/v1/import/csv/templates/{name}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("GET", "/api/v1/import/csv/templates/does-not-exist", nil)
+		}},
 		{"GET /files/{id}", exp{anon: codes(403), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req { return J("GET", "/files/"+f.attachment(f.issue()), nil) }},
 	}
 }
