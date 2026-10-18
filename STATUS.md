@@ -14,7 +14,21 @@ this file is updated, and the work is committed and pushed.
 | M1a Tracker | **built, exit gate not passed** | milestones M1a.1 to M1a.9 below; see the exit gate audit for what is still open |
 | M1b Lifecycle and exchange | built, gate to be audited | milestones M1b.1 to M1b.3 below |
 | M1c Agents | **MCP server, gates, kill switch built** | milestones M1c.1 and M1c.2 below; OAuth, subscriptions and bulk tools are open |
-| M2 to M5 | not started | |
+| M2 Agile | **in progress** | M2.1 work calendar done; boards, sprints, reports, S3, Git, OpenSearch, Jira mirror open |
+| M3 to M5 | not started | |
+
+## M2 milestones
+
+| Milestone | Scope | State |
+|---|---|---|
+| M2.1 Work calendar | `internal/calendar`: IANA zone, any week start day, any working-day subset, per-day hours, holidays, ISO / first-day-of-year / no week numbering, sprint bounds in local time stored as UTC instants (23 and 25 hour days, skipped midnight), working days and hours between instants, days left, capacity per person calendar, name tokens | done |
+| M2.2 Boards and ranking | board entity, columns to statuses, WIP limits, lexorank per board, drag to transition | next |
+| M2.3 Sprints and backlog | states, start and complete, carry-over, scope changes, auto-sprints and rollover | open |
+| M2.4 Reports | burndown, burnup, velocity, sprint report, cumulative flow | open |
+| M2.5 Board and backlog UI | | open |
+| M2.6 to M2.9 | S3 backend and direct upload, read-only Git integration, OpenSearch backend, Jira mirror | open |
+
+Note: SPEC places OAuth, budgets, kill switch and human gates in M4; they were built early in M1c.2, so M4 has less MCP work. Regional holiday lists by country are not built (holidays are manual or imported dates); the calendar is a value type, org/project/board/team/user inheritance arrives with the board.
 
 ## M1c milestones
 
@@ -31,6 +45,7 @@ Open in M1c: MCP-04 (OAuth 2.1 and PKCE; bearer tokens only for now), MCP-12 (bu
 | 46 | M1c.1 | Found before the MCP work: `View` returned internal comments to viewers | Comments are filtered by role; `TestSEC03_InternalCommentsHiddenFromViewers` |
 | 47 | M1c.1 | The licence scan flagged the stdio proxy's HTTP client | Allowed for that one file: it only calls the endpoint the operator names |
 | 48 | M1c.1 | `make e2e` failed with ECONNREFUSED: the Makefile exports the test database variable and the server's strict config check rejects unknown `TASKLANE_` variables | The e2e targets unset it; the strict check stays |
+| 49 | M2.1 | Go's `time.Date` returns an instant on the previous day when the zone skips local midnight (found with America/Sao_Paulo 2018-11-04), which would start a sprint a day early | A `midnight` helper steps forward to the first instant that is on the date; the test pins it |
 
 ## M1b milestones
 
