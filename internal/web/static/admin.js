@@ -10,7 +10,8 @@
 
   function adminTabs(active) {
     return h('nav', { class: 'tabs', 'aria-label': 'Administration' }, h('span', { class: 'tabs-title' }, 'Administration'),
-      h('a', { href: '#/admin/workflows', class: 'tab', 'aria-current': active === 'workflows' ? 'page' : null }, 'Workflows'));
+      h('a', { href: '#/admin/workflows', class: 'tab', 'aria-current': active === 'workflows' ? 'page' : null }, 'Workflows'),
+      h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
   }
 
   // ---------- list ----------
@@ -34,6 +35,42 @@
         h('span', { class: 'sum' }, w.name), h('span', { class: 'muted' }, 'v' + w.version + (w.projects.length ? ' · ' + w.projects.join(', ') : ' · not used')),
         w.has_draft ? h('span', { class: 'loz in_progress' }, 'Draft') : null, w.migrating ? h('span', { class: 'loz in_progress' }, 'Migrating') : null));
     }
+  }
+
+
+  // ---------- audit log ----------
+  async function auditView() {
+    const app = clear(document.getElementById('app'));
+    if (!S.me.admin) { app.append(topbar(), h('div', { class: 'page' }, h('p', {}, 'Only administrators can read the audit log.'))); return; }
+    const actor = h('input', { type: 'text', 'aria-label': 'Filter by person', placeholder: 'Person' }), action = h('input', { type: 'text', 'aria-label': 'Filter by action', placeholder: 'Action, such as workflow.' });
+    const list = h('div', { class: 'card', role: 'list' }), state = h('div', { role: 'status', 'aria-live': 'polite', class: 'muted' }), more = h('button', { class: 'btn', hidden: true }, 'Load more');
+    let before = 0;
+    const qs = () => 'actor=' + encodeURIComponent(actor.value) + '&action=' + encodeURIComponent(action.value);
+    async function load(reset) {
+      if (reset) { clear(list); before = 0; }
+      const r = await api('GET', '/api/v1/admin/audit?limit=50&' + qs() + (before ? '&before=' + before : ''));
+      if (r.status !== 200) { state.textContent = errText(r); return; }
+      for (const e of r.data) {
+        list.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted', style: 'min-width:150px' }, new Date(e.at).toLocaleString()), h('strong', { style: 'min-width:120px' }, e.actor || '—'),
+          h('span', { class: 'sum' }, e.action + (e.target ? '  ' + e.target : '')), h('span', { class: 'muted' }, e.detail && e.detail.status ? String(e.detail.status) : '')));
+        before = e.id;
+      }
+      more.hidden = r.data.length < 50;
+      if (reset && !r.data.length) list.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No entries match.')));
+    }
+    more.addEventListener('click', () => load(false));
+    const verify = h('button', { class: 'btn', onclick: async () => {
+      state.textContent = 'Checking the chain…';
+      const r = await api('GET', '/api/v1/admin/audit/verify');
+      if (r.status !== 200) { state.textContent = errText(r); return; }
+      const c = r.data;
+      state.textContent = c.ok ? 'The chain is intact: ' + c.entries + ' entries' + (c.unchained ? ' (' + c.unchained + ' older entries predate it)' : '') + '.' : 'The chain is broken at entry ' + c.broken_at + ': ' + c.problem + '.';
+    } }, 'Verify the chain');
+    for (const i of [actor, action]) i.addEventListener('change', () => load(true));
+    app.append(topbar(), adminTabs('audit'), h('div', { class: 'page' }, h('div', { class: 'chips' }, h('h2', { style: 'margin:0' }, 'Audit log'), h('span', { class: 'grow' }), verify,
+      h('a', { class: 'btn', href: '/api/v1/admin/audit/export?' + qs(), download: 'audit.csv', onclick: e => { e.currentTarget.href = '/api/v1/admin/audit/export?' + qs(); } }, 'Export CSV')),
+      h('div', { class: 'chips', style: 'margin:8px 0' }, actor, action), state, list, h('div', { style: 'margin-top:8px' }, more)));
+    await load(true);
   }
 
   // ---------- the diagram ----------
@@ -210,4 +247,5 @@
 
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/([0-9a-f-]{36})/, run: m => editorView(m[1]) });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/?$/, run: () => listView() });
+  A.EXT.routes.push({ re: /^#\/admin\/audit\/?$/, run: () => auditView() });
 })();

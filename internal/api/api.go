@@ -23,6 +23,7 @@ import (
 
 type Server struct {
 	Svc         *domain.Service
+	Logf        func(string, ...any) // where server-side problems are reported (default: the standard logger)
 	SessionTTL  time.Duration
 	Secure      bool // set the Secure flag on the session cookie
 	Extra       func(mux *http.ServeMux, s *Server)
@@ -38,13 +39,17 @@ type Server struct {
 // handle registers a route and records its pattern, so a test can prove that every route is covered by the authorization matrix.
 func (s *Server) handle(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
 	s.routes = append(s.routes, pattern)
-	mux.HandleFunc(pattern, h)
+	mux.HandleFunc(pattern, s.audited(pattern, h))
 }
 
 // Routes lists the registered patterns (method and path), for the authorization matrix test.
 func (s *Server) Routes() []string { s.Handler(); return append([]string(nil), s.routes...) }
 
 type ctxKey struct{}
+type holderKey struct{}
+
+// actorHolder lets the audit wrapper, which sits outside authentication, learn who the request turned out to be.
+type actorHolder struct{ a domain.Actor }
 
 func actorOf(r *http.Request) domain.Actor {
 	a, _ := r.Context().Value(ctxKey{}).(domain.Actor)
@@ -329,6 +334,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerScreens(mux)
 	s.registerWorkflows(mux)
 	s.registerArchive(mux)
+	s.registerAudit(mux)
 	s.registerJira(mux)
 	s.registerSearchAdmin(mux)
 	s.registerAttachments(mux)
@@ -416,6 +422,9 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		if viaCookie && r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("X-Requested-With") != "tasklane" {
 			s.fail(w, 403, "csrf", "missing X-Requested-With header", nil)
 			return
+		}
+		if h, ok := r.Context().Value(holderKey{}).(*actorHolder); ok {
+			h.a = a
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, a)))
 	}

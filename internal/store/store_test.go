@@ -112,12 +112,13 @@ func TestUPG01_LintRejectsDangerousExpandMigrations(t *testing.T) {
 		}
 	}
 	ok := map[string]string{
-		"add nullable column":        "-- phase: expand\nALTER TABLE issue ADD COLUMN x int;",
-		"add column with default":    "-- phase: expand\nALTER TABLE issue ADD COLUMN y text NOT NULL DEFAULT '';",
-		"new table and its index":    "-- phase: expand\nCREATE TABLE t (a int);\nCREATE INDEX t_a ON t (a);",
-		"concurrent index, no-tx":    "-- phase: expand\n-- no-transaction\nCREATE INDEX CONCURRENTLY i_x ON issue (priority);",
-		"contract may drop":          "-- phase: contract\nALTER TABLE issue DROP COLUMN old;",
-		"commented-out drop ignored": "-- phase: expand\n-- DROP TABLE comment;\nALTER TABLE issue ADD COLUMN z int;",
+		"add nullable column":             "-- phase: expand\nALTER TABLE issue ADD COLUMN x int;",
+		"add column with default":         "-- phase: expand\nALTER TABLE issue ADD COLUMN y text NOT NULL DEFAULT '';",
+		"new table and its index":         "-- phase: expand\nCREATE TABLE t (a int);\nCREATE INDEX t_a ON t (a);",
+		"concurrent index, no-tx":         "-- phase: expand\n-- no-transaction\nCREATE INDEX CONCURRENTLY i_x ON issue (priority);",
+		"a trigger that refuses truncate": "-- phase: expand\nCREATE TRIGGER t BEFORE TRUNCATE ON issue FOR EACH STATEMENT EXECUTE FUNCTION f();\nCREATE TRIGGER u BEFORE UPDATE OR DELETE OR TRUNCATE ON issue FOR EACH STATEMENT EXECUTE FUNCTION f();",
+		"contract may drop":               "-- phase: contract\nALTER TABLE issue DROP COLUMN old;",
+		"commented-out drop ignored":      "-- phase: expand\n-- DROP TABLE comment;\nALTER TABLE issue ADD COLUMN z int;",
 	}
 	for name, sql := range ok {
 		if p := store.Lint("m", sql, earlier); len(p) > 0 {

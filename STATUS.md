@@ -16,7 +16,16 @@ this file is updated, and the work is committed and pushed.
 | M1c Agents | **MCP server, gates, kill switch built** | milestones M1c.1 and M1c.2 below; OAuth, subscriptions and bulk tools are open |
 | M2 Agile | **built, exit gate not passed** | M2.1 to M2.9 below; the audit at the end of the M2 section lists what only a real service or a scale run can prove |
 | M3 Fields and workflow | **built, exit gate not passed** | M3.1 to M3.4 below; the exit gate's golden bundles from released versions (EXP-05) and the gaps listed per milestone are open |
-| M4 to M5 | not started | |
+| M4 Enterprise | **in progress** | M4.1 audit log built; SSO and SCIM, permission schemes, notifications, automation, retention and the rest are open |
+| M5 | not started | |
+
+## M4 milestones
+
+| Milestone | Scope | State |
+|---|---|---|
+| M4.1 | Audit log (SEC-07): append-only (the database refuses update, delete and truncate), hash-chained in commit order with a verifier that names the first altered or missing entry, every successful administrative change recorded by a wrapper around the routes (new routes are audited unless declared ordinary work), a test over the authorization matrix, viewer API with filters and paging, CSV export that is itself recorded, Admin Audit log tab, `docs/AUDIT.md` | **built** |
+
+M4.1 gaps: the API-level record is written right after the action, not in its transaction (a failed audit write is logged, not retried); a project lead who is not an instance administrator is recorded only where the domain already audits; erasing personal data from audit rows (GDPR) will need a deliberate pseudonymization path through the append-only rule (M4 retention work); the matrix test only checks routes where the fixture's administrator gets a 2xx.
 
 ## M3 milestones
 

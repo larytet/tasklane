@@ -56,6 +56,8 @@ func Lint(name, sql string, earlier map[string]bool) []string {
 		return problems
 	}
 	body := strings.ToUpper(stripComments(sql))
+	// a trigger that refuses TRUNCATE protects data; only a statement that runs it destroys any
+	body = regexp.MustCompile(`\bBEFORE\s+(?:[A-Z]+\s+OR\s+)*TRUNCATE\b`).ReplaceAllString(body, "BEFORE")
 	if ph == Expand {
 		for _, bad := range []struct{ re, why string }{
 			{`\bDROP\s+TABLE\b`, "DROP TABLE removes data the previous release may still read"},

@@ -76,3 +76,24 @@ test('LIFE-03: edit a workflow in the editor, publish, and remove a status that 
   expect(live.live.statuses.map(s => s.name)).not.toContain('In Review');
   expect(live.version).toBe(2);
 });
+
+test('SEC-07: the audit log shows administrative changes, filters, verifies and exports', async ({ browser }) => {
+  const { page, call } = await adminPage(browser);
+  const name = 'Audited flow ' + uniq();
+  expect((await call('POST', '/api/v1/workflows', { name, template: 'simple' })).status).toBe(201);
+  await page.goto('/#/admin/audit');
+  await expect(page.getByRole('heading', { name: 'Audit log' })).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'POST /api/v1/workflows' }).first()).toBeVisible();
+  await page.getByLabel('Filter by action').fill('workflow.create');
+  await page.getByLabel('Filter by action').press('Tab');
+  await expect(page.getByRole('listitem').filter({ hasText: 'workflow.create' }).first()).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'POST /api/v1/workflows' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Verify the chain' }).click();
+  await expect(page.getByText(/The chain is intact/)).toBeVisible();
+  const a11y = await new AxeBuilder({ page }).analyze();
+  expect(a11y.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  const res = await page.request.get('/api/v1/admin/audit/export?action=workflow.');
+  expect(res.status()).toBe(200);
+  expect(res.headers()['content-type']).toContain('text/csv');
+  expect(await res.text()).toContain('workflow.create');
+});

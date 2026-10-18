@@ -466,6 +466,9 @@ func rows() []row {
 		{"PUT /api/v1/projects/{key}/archive-policy", adminer, func(f *fixture) req {
 			return J("PUT", "/api/v1/projects/ABC/archive-policy", map[string]any{"days": nil})
 		}},
+		{"GET /api/v1/admin/audit", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/audit", nil) }},
+		{"GET /api/v1/admin/audit/verify", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/audit/verify", nil) }},
+		{"GET /api/v1/admin/audit/export", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/audit/export", nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++
