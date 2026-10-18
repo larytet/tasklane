@@ -25,6 +25,7 @@ type fx struct {
 
 func newFx(t *testing.T) *fx {
 	e := testutil.New(t)
+	e.Clock.T = time.Now() // these golden queries mix the service clock with database-side timestamps: keep them on one clock
 	e.Project()
 	f := &fx{Env: e, ix: &search.Indexer{DB: e.Store.Pool}, eng: &search.Postgres{DB: e.Store.Pool}}
 	mk := func(email, name string) domain.Actor {
