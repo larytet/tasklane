@@ -19,10 +19,35 @@
     return e;
   }
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+  // The page says which client it is (X-Tasklane-Client); a server that no longer serves it answers 426 and the page asks for a reload.
+  // A 503 "paused" means maintenance is under way: a banner says so, reads continue, and saves keep their drafts and retry when it ends.
+  const CLIENT_VERSION = 1;
   async function api(method, path, body, headers) {
-    const r = await fetch(path, { method, credentials: 'same-origin', headers: Object.assign({ 'X-Requested-With': 'tasklane', 'Content-Type': 'application/json' }, headers || {}), body: body === undefined ? undefined : JSON.stringify(body) });
+    const r = await fetch(path, { method, credentials: 'same-origin', headers: Object.assign({ 'X-Requested-With': 'tasklane', 'Content-Type': 'application/json', 'X-Tasklane-Client': String(CLIENT_VERSION) }, headers || {}), body: body === undefined ? undefined : JSON.stringify(body) });
     let data = null; try { data = await r.json(); } catch (e) { /* empty body, 304 */ }
+    if (r.status === 426 && data && data.code === 'client_too_old') showReload();
+    else if (r.status === 503 && data && data.code === 'paused') showMaintenance();
     return { status: r.status, data, headers: r.headers };
+  }
+  function banner(kind, ...kids) {
+    const b = document.getElementById('banner');
+    if (!b) return;
+    clear(b);
+    if (kind) b.append(h('div', { class: 'banner ' + kind, role: 'status' }, ...kids));
+  }
+  const MAINT = { on: false, timer: 0 };
+  function showMaintenance() {
+    if (MAINT.on) return;
+    MAINT.on = true;
+    banner('warn', 'Maintenance in progress. You can keep reading; changes you make are kept as drafts and saved when it ends.');
+    MAINT.timer = setInterval(async () => {
+      let over = false;
+      try { const r = await fetch('/api/v1/system/status', { credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane', 'X-Tasklane-Client': String(CLIENT_VERSION) } }); const d = r.ok ? await r.json() : null; over = !!d && (d.maintenance || []).length === 0; } catch (e) { /* the server may be restarting: keep waiting */ }
+      if (over) { clearInterval(MAINT.timer); MAINT.on = false; banner(null); window.dispatchEvent(new Event('tl-resumed')); }
+    }, 3000);
+  }
+  function showReload() {
+    banner('warn', 'A newer version of Tasklane is available. ', h('button', { class: 'btn', onclick: () => location.reload() }, 'Reload'), ' Your drafts are kept.');
   }
   function toast(msg, action) {
     const t = h('div', { class: 'toast' }, h('span', {}, msg));
@@ -65,7 +90,7 @@
     ws.onclose = () => { RT.up = false; RT.ws = null; rtRetry(); };
     ws.onerror = () => { try { ws.close(); } catch (e) { /* already closed */ } };
   }
-  function rtRetry() { if (!S.me) return; RT.timer = setTimeout(rtConnect, RT.backoff); RT.backoff = Math.min(RT.backoff * 2, 30000); }
+  function rtRetry() { if (!S.me) return; RT.timer = setTimeout(rtConnect, RT.backoff * (0.5 + Math.random())); RT.backoff = Math.min(RT.backoff * 2, 30000); } // jittered, so a restart does not bring every tab back in the same second
   function rtSub(key, handler) { RT.subs.set(key, handler); if (RT.up) RT.ws.send(JSON.stringify({ op: 'sub', channel: 'issue:' + key })); else rtConnect(); }
   function rtUnsub(key) { RT.subs.delete(key); if (RT.up) RT.ws.send(JSON.stringify({ op: 'unsub', channel: 'issue:' + key })); }
   function rtSend(m) { if (RT.up) { RT.ws.send(JSON.stringify(m)); return true; } return false; }
@@ -583,7 +608,10 @@
         const r = await saveText('description', ed.body, ed.baseSeq, 'save', st.saveId);
         if (r.ok) { stopEditing(true); await reloadAll(); }
         else if (r.conflict) { st.saveId = null; await conflictDialog('description', r.conflict, ed.body, async () => { stopEditing(true); await reloadAll(); }); }
-        else { state.textContent = r.msg || 'Offline, draft kept'; } // same save id on retry: a replay can never apply twice
+        else {
+          state.textContent = r.msg || 'Offline, draft kept'; // same save id on retry: a replay can never apply twice
+          if (r.paused) window.addEventListener('tl-resumed', () => { if (st.editing && st.dirty) save(); }, { once: true });
+        }
       };
       box.append(h('div', { class: 'chips' }, state, h('span', { class: 'grow' }),
         h('button', { class: 'btn', onclick: () => { if (!st.dirty || confirm('Discard unsaved changes? Your draft is kept.')) stopEditing(false); render(); } }, 'Cancel'),
@@ -617,6 +645,8 @@
         render();
         return { msg: 'This issue was deleted; your text is kept in your draft' };
       }
+      if (r.status === 503 && r.data && r.data.code === 'paused') return { msg: 'Paused for maintenance, draft kept', paused: true };
+      if (r.status === 426) return { msg: 'Reload to continue, draft kept' };
       return { msg: (r.data && r.data.error) || 'Could not save' };
     }
 

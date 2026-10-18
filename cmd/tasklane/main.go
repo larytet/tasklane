@@ -333,7 +333,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	go sprintJobs(ctx, svc)
 	hub := rt.New(svc)
 	go hub.SweepLoop(ctx)
-	srv := &api.Server{Hub: hub, Svc: svc, Search: searcher, SearchAdmin: searchAdmin, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
+	srv := &api.Server{Version: svc.NodeVersion, MinClient: cfg.MinClient, Hub: hub, Svc: svc, Search: searcher, SearchAdmin: searchAdmin, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
 		Ready: func(ctx context.Context) error {
 			if err := st.Pool.Ping(ctx); err != nil {
 				return err

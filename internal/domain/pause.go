@@ -308,3 +308,20 @@ func (s *Service) PauseStatus(ctx context.Context, a Actor) ([]PauseLease, error
 	}
 	return l, nil
 }
+
+// Maintenance is what any signed-in person may know about a pause: that one is under way, for which scope and until when.
+type Maintenance struct {
+	Scope string    `json:"scope"`
+	Until time.Time `json:"until"`
+}
+
+// ActiveMaintenance lists the pauses that hold writes (a snapshot-mode job holds none and is not shown).
+func (s *Service) ActiveMaintenance(ctx context.Context) []Maintenance {
+	out := []Maintenance{}
+	for _, l := range s.leases(ctx, true) {
+		if l.Mode == "pause" {
+			out = append(out, Maintenance{Scope: l.Scope, Until: l.Deadline})
+		}
+	}
+	return out
+}

@@ -33,7 +33,22 @@ type Server struct {
 	BlobOrigin  string // optional separate origin for signed file links
 	Hub         *rt.Hub
 	MCP         *mcp.Server
-	routes      []string
+	// Version is what this server runs. ClientVersion is the newest browser client it knows; MinClient is the oldest it still
+	// serves (default: the previous one, so a tab left open across an upgrade keeps working). A client older than that is told to
+	// reload with 426. Requests that do not say (API tokens, MCP, scripts) are not clients in this sense and are never refused.
+	Version   string
+	MinClient int
+	routes    []string
+}
+
+// ClientVersion is the newest browser client this server speaks to (sent by the page in X-Tasklane-Client).
+const ClientVersion = 1
+
+func (s *Server) minClient() int {
+	if s.MinClient > 0 {
+		return s.MinClient
+	}
+	return ClientVersion - 1
 }
 
 // handle registers a route and records its pattern, so a test can prove that every route is covered by the authorization matrix.
@@ -71,6 +86,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.Write([]byte("ready"))
 	})
+	s.handle(mux, "GET /api/v1/system/status", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.json(w, 200, map[string]any{"server_version": s.Version, "client_version": ClientVersion, "min_client": s.minClient(), "maintenance": s.Svc.ActiveMaintenance(r.Context())})
+	}))
 	s.handle(mux, "POST /api/v1/login", s.login)
 	s.handle(mux, "POST /api/v1/login/mfa", s.loginMFA)
 	s.handle(mux, "POST /api/v1/logout", s.auth(s.logout))
@@ -395,6 +413,16 @@ func (s *Server) secure(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			h.Set("X-Tasklane-Server", s.Version)
+			h.Set("X-Tasklane-Client-Min", strconv.Itoa(s.minClient()))
+			if cv := r.Header.Get("X-Tasklane-Client"); cv != "" {
+				if n, err := strconv.Atoi(cv); err == nil && n < s.minClient() {
+					s.fail(w, 426, "client_too_old", "this page is out of date: reload it to continue (your drafts are kept)", map[string]any{"client": n, "min": s.minClient(), "reload": true})
+					return
+				}
+			}
+		}
 		start := time.Now()
 		next.ServeHTTP(&timingWriter{ResponseWriter: w, start: start}, r)
 	})
