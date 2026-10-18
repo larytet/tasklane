@@ -400,6 +400,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerOAuth(mux)
 	s.registerPrivacy(mux)
 	s.registerGroups(mux)
+	s.registerDashboards(mux)
 	s.registerQuota(mux)
 	s.registerInboundMail(mux)
 	s.registerGitAuto(mux)
@@ -424,7 +425,15 @@ func (s *Server) secure(next http.Handler) http.Handler {
 			connect += " " + o.Origin()
 		}
 	}
-	csp := "default-src 'self'; connect-src " + connect + "; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+	frames := "'none'"
+	if s.Svc != nil && len(s.Svc.DashboardIframeHosts) > 0 {
+		frames = ""
+		for _, h := range s.Svc.DashboardIframeHosts {
+			frames += " https://" + h
+		}
+		frames = strings.TrimSpace(frames)
+	}
+	csp := "default-src 'self'; frame-src " + frames + "; connect-src " + connect + "; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", csp)

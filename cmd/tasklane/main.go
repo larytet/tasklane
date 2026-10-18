@@ -288,6 +288,7 @@ func serve(ctx context.Context, cfg config.Config) {
 			log.Fatalf("trusted_proxies: %q is not an address or a network", c)
 		}
 	}
+	svc.DashboardIframeHosts = cfg.DashboardIframeHosts
 	svc.NodeID, svc.NodeVersion = fmt.Sprintf("%s-%d-%x", host, os.Getpid(), nb), releaseVersion()
 	if err := svc.CheckNodeAgainstGates(ctx, svc.NodeVersion); err != nil { // rolling back past an activated behaviour is refused
 		log.Fatalf("refusing to start: %v", err)

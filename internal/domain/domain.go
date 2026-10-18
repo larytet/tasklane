@@ -69,6 +69,8 @@ type Service struct {
 	clockOffset atomic.Int64
 	listenMu    sync.Mutex
 	listeners   []func(Event)
+	// DashboardIframeHosts are the hosts an iframe gadget may embed (empty: none).
+	DashboardIframeHosts []string
 	// BackupHook, when set, is called at points of a backup ("snapshot": the snapshot is fixed, nothing is copied yet); for tests.
 	BackupHook func(stage string)
 	// WebAuthnRPID and WebAuthnOrigins override the relying party that passkeys are bound to (default: the host of BaseURL);

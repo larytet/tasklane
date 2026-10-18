@@ -548,6 +548,48 @@ func rows() []row {
 			return J("PUT", "/api/v1/roles/00000000-0000-0000-0000-000000000001", map[string]any{"name": "x", "base": "viewer"})
 		}},
 		{"DELETE /api/v1/roles/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/roles/00000000-0000-0000-0000-000000000001", nil) }},
+		{"GET /api/v1/filters", authed, func(f *fixture) req { return J("GET", "/api/v1/filters", nil) }},
+		{"POST /api/v1/filters", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/filters", map[string]any{"name": "Matrix filter", "tql": "project = ABC"})
+		}},
+		{"PUT /api/v1/filters/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/filters/00000000-0000-0000-0000-000000000009", map[string]any{"name": "x", "tql": "project = ABC"})
+		}},
+		{"DELETE /api/v1/filters/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/filters/00000000-0000-0000-0000-000000000009", nil) }},
+		{"GET /api/v1/dashboard-kinds", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboard-kinds", nil) }},
+		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
+		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/dashboards", map[string]any{"name": "Matrix dashboard"})
+		}},
+		{"GET /api/v1/dashboards/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009", nil) }},
+		{"PUT /api/v1/dashboards/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009", map[string]any{"name": "x"})
+		}},
+		{"DELETE /api/v1/dashboards/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009", nil)
+		}},
+		{"POST /api/v1/dashboards/{id}/clone", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009/clone", nil)
+		}},
+		{"PUT /api/v1/dashboards/{id}/favourite", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009/favourite", nil)
+		}},
+		{"DELETE /api/v1/dashboards/{id}/favourite", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009/favourite", nil)
+		}},
+		{"PUT /api/v1/me/default-dashboard", authed, func(f *fixture) req { return J("PUT", "/api/v1/me/default-dashboard", map[string]any{"id": ""}) }},
+		{"POST /api/v1/dashboards/{id}/gadgets", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009/gadgets", map[string]any{"kind": "text", "config": map[string]any{"markdown": "x"}})
+		}},
+		{"PUT /api/v1/dashboards/{id}/gadgets/{gid}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009/gadgets/00000000-0000-0000-0000-000000000009", map[string]any{"config": map[string]any{"markdown": "x"}})
+		}},
+		{"DELETE /api/v1/dashboards/{id}/gadgets/{gid}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009/gadgets/00000000-0000-0000-0000-000000000009", nil)
+		}},
+		{"GET /api/v1/dashboards/{id}/gadgets/{gid}/data", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("GET", "/api/v1/dashboards/00000000-0000-0000-0000-000000000009/gadgets/00000000-0000-0000-0000-000000000009/data", nil)
+		}},
 		{"POST /api/v1/login/passkey", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
 			return J("POST", "/api/v1/login/passkey", map[string]any{"mfa_token": "nope", "id": "AA", "client_data_json": "AA", "authenticator_data": "AA", "signature": "AA"})
 		}},
