@@ -226,6 +226,19 @@ func (s *Server) Handler() http.Handler {
 		}))
 		mux.HandleFunc("GET /api/v1/ws", s.Hub.Handler())
 	}
+	mux.HandleFunc("GET /api/v1/admin/fields", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		t, err := s.Svc.FieldTracking(r.Context(), actorOf(r))
+		s.reply(w, t, err)
+	}))
+	mux.HandleFunc("PUT /api/v1/admin/fields/{field}/history", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Track bool `json:"track"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.SetFieldTracking(r.Context(), actorOf(r), r.PathValue("field"), in.Track))
+	}))
 	s.registerSearch(mux)
 	s.registerAttachments(mux)
 	if s.Extra != nil {

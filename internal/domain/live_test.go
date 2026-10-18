@@ -394,3 +394,65 @@ func TestComments(t *testing.T) { // CORE-07
 		t.Fatal(err)
 	}
 }
+
+func TestHIST05_TrackedFieldSetting(t *testing.T) {
+	e := testutil.New(t)
+	e.Project()
+	is := e.Issue("s", "orig")
+	count := func(field string) int {
+		h, _ := e.Svc.History(ctx, e.Alice, is.Key)
+		n := 0
+		for _, x := range h {
+			if x.Field == field {
+				n++
+			}
+		}
+		return n
+	}
+	pri := func(p string) { e.Svc.UpdateFields(ctx, e.Alice, is.Key, nil, false, domain.Changes{Priority: &p}) }
+	pri("high")
+	if count("priority") != 1 {
+		t.Fatal("tracked change not recorded")
+	}
+	// only administrators decide, and only for known fields
+	if err := e.Svc.SetFieldTracking(ctx, e.Alice, "priority", false); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("%v", err)
+	}
+	if err := e.Svc.SetFieldTracking(ctx, e.Admin, "nonsense", false); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+	if err := e.Svc.SetFieldTracking(ctx, e.Admin, "priority", false); err != nil {
+		t.Fatal(err)
+	}
+	pri("low")
+	pri("medium")
+	if count("priority") != 1 { // untracked: nothing new, and the earlier record is not removed
+		t.Fatalf("untracked field left %d records", count("priority"))
+	}
+	// the flag changes going forward only
+	e.Svc.SetFieldTracking(ctx, e.Admin, "priority", true)
+	pri("highest")
+	if count("priority") != 2 {
+		t.Fatalf("after re-enabling: %d", count("priority"))
+	}
+	// an untracked text field leaves no history record, but its versions are kept so conflicts and restore still work
+	e.Svc.SetFieldTracking(ctx, e.Admin, "description", false)
+	e.Svc.SaveText(ctx, e.Alice, is.Key, domain.SaveIn{Field: "description", Body: "changed", BaseSeq: 1})
+	if count("description") != 0 {
+		t.Fatal("untracked text change recorded in history")
+	}
+	vs, _ := e.Svc.TextVersions(ctx, e.Alice, is.Key, "description")
+	if len(vs) != 2 || vs[0].Body != "changed" {
+		t.Fatalf("%+v", vs)
+	}
+	if _, err := e.Svc.RestoreText(ctx, e.Alice, is.Key, "description", 1); err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := e.Svc.FieldTracking(ctx, e.Admin)
+	if tr["description"] || !tr["priority"] || !tr["status"] {
+		t.Fatalf("%v", tr)
+	}
+	if _, err := e.Svc.FieldTracking(ctx, e.Alice); err == nil {
+		t.Fatal("non-admin read the settings")
+	}
+}

@@ -203,7 +203,7 @@ func (s *Service) mutateText(ctx context.Context, a Actor, key, field, mode, sav
 			is.ID, field, next, clean, nilIfEmpty(a.ID), a.Label, mode); err != nil {
 			return err
 		}
-		if err := history(ctx, tx, is.ID, a, field, &cur, &clean); err != nil {
+		if err := s.hist(ctx, tx, is.ID, a, field, &cur, &clean); err != nil {
 			return err
 		}
 		if saveID != "" {
@@ -215,7 +215,7 @@ func (s *Service) mutateText(ctx context.Context, a Actor, key, field, mode, sav
 			tx.Exec(ctx, `DELETE FROM draft WHERE user_id=$1 AND issue_id=$2 AND field=$3`, a.ID, is.ID, field)
 		}
 		res.Seq = next
-		return outbox(ctx, tx, "issue:"+is.Key, "issue.text_saved", map[string]any{"key": is.Key, "field": field, "text_seq": next, "version": is.Version, "actor": a.Label, "mode": mode})
+		return outbox(ctx, tx, "issue:"+is.Key, "issue.text_saved", map[string]any{"key": is.Key, "field": field, "text_seq": next, "version": is.Version, "actor": a.Label, "actor_id": a.ID, "mode": mode})
 	})
 	if err == nil && !res.Unchanged && !res.Retried {
 		s.emit(Event{Type: "issue.text_saved", Issue: is.Key, Field: field, TextSeq: res.Seq, Version: is.Version, Actor: a.Label, ActorID: a.ID})

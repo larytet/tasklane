@@ -157,7 +157,7 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 				return err
 			}
 		}
-		if err := history(ctx, tx, id, a, "created", nil, sp(key)); err != nil {
+		if err := s.hist(ctx, tx, id, a, "created", nil, sp(key)); err != nil {
 			return err
 		}
 		return outbox(ctx, tx, "issue:"+key, "issue.created", map[string]any{"key": key, "actor": a.Label, "actor_id": a.ID})
@@ -341,7 +341,7 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 		if p, ok := changed["priority"]; ok {
 			if p != is.Priority {
 				add("priority", p)
-				history(ctx, tx, is.ID, a, "priority", &is.Priority, &p)
+				s.hist(ctx, tx, is.ID, a, "priority", &is.Priority, &p)
 				fv["priority"] = next
 			}
 		}
@@ -349,7 +349,7 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 			old, nw := strings.Join(is.Labels, ","), strings.Join(labels, ",")
 			if old != nw {
 				add("labels", labels)
-				history(ctx, tx, is.ID, a, "labels", &old, &nw)
+				s.hist(ctx, tx, is.ID, a, "labels", &old, &nw)
 				fv["labels"] = next
 			}
 		}
@@ -370,7 +370,7 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 					val = as
 				}
 				add("assignee_id", val)
-				history(ctx, tx, is.ID, a, "assignee", &oldName, &newName)
+				s.hist(ctx, tx, is.ID, a, "assignee", &oldName, &newName)
 				fv["assignee"] = next
 			}
 		}
@@ -444,7 +444,7 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 		if _, err := tx.Exec(ctx, `UPDATE issue SET status_id=$2,version=$3,field_ver=$4,updated_at=now(),resolved_at=`+resolved+` WHERE id=$1`, is.ID, to, next, fvj); err != nil {
 			return err
 		}
-		history(ctx, tx, is.ID, a, "status", &fromName, &toName)
+		s.hist(ctx, tx, is.ID, a, "status", &fromName, &toName)
 		return outbox(ctx, tx, "issue:"+is.Key, "issue.transitioned", map[string]any{"key": is.Key, "from": fromName, "to": toName, "version": next, "actor": a.Label, "actor_id": a.ID})
 	})
 	if err != nil {

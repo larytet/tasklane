@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -379,5 +380,123 @@ func TestMAIL_NoMailerMeansNoMail(t *testing.T) {
 	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM mail_message`).Scan(&n)
 	if n != 0 {
 		t.Fatal("mail queued without a mailer")
+	}
+}
+
+func mailsWith(e *mailEnv, to, needle string) int {
+	n := 0
+	for _, m := range e.msgTo(to) {
+		if strings.Contains(string(m.Raw), needle) || func() bool {
+			_, t, h := readMsg(e.T, m.Raw)
+			return strings.Contains(t, needle) || strings.Contains(h, needle)
+		}() {
+			n++
+		}
+	}
+	return n
+}
+
+func TestHIST03_MentionsNotifyOnce(t *testing.T) {
+	e := newMailEnv(t)
+	is, _ := e.Svc.CreateIssue(ctx, e.Alice, domain.CreateIn{Project: "ABC", Summary: "s"})
+	e.flush()
+	// a comment mentioning Bob: one specific mail, not also the generic "commented" one
+	if _, err := e.Svc.AddComment(ctx, e.Alice, is.Key, "@bob can you check this? write to bob@example.com or ask @nobody", false); err != nil {
+		t.Fatal(err)
+	}
+	e.flush()
+	got := e.msgTo("bob@example.com")
+	if len(got) != 1 {
+		t.Fatalf("%d mails to Bob\n%s", len(got), e.smtp.Transcript())
+	}
+	_, text, html := readMsg(t, got[0].Raw)
+	if !strings.Contains(text, "Alice K. mentioned you in a comment") || !strings.Contains(text, "can you check this?") || !strings.Contains(html, "mentioned you") {
+		t.Fatalf("%q", text)
+	}
+	// an email address is not a mention: nobody besides Bob was addressed
+	if len(e.msgTo("alice@example.com")) != 0 {
+		t.Fatal("the author was notified of their own comment")
+	}
+	// a description save that introduces a mention notifies once; saving again with the mention still there is quiet
+	v, _ := e.Svc.View(ctx, e.Alice, is.Key)
+	e.Svc.SaveText(ctx, e.Alice, is.Key, domain.SaveIn{Field: "description", Body: "please look, @bob", BaseSeq: v.Issue.DescSeq})
+	e.flush()
+	if n := mailsWith(e, "bob@example.com", "mentioned you in the description"); n != 1 {
+		t.Fatalf("description mention mails: %d", n)
+	}
+	e.Svc.SaveText(ctx, e.Alice, is.Key, domain.SaveIn{Field: "description", Body: "please look, @bob, urgent", BaseSeq: v.Issue.DescSeq + 1})
+	e.Clock.Advance(5 * time.Minute)
+	e.flush()
+	if n := mailsWith(e, "bob@example.com", "mentioned you in the description"); n != 1 {
+		t.Fatalf("the same mention notified again: %d", n)
+	}
+	// a person without access is never mailed, and an internal comment mentioning a viewer is not either
+	vu, _ := e.Svc.CreateUser(ctx, "vera@example.com", "Vera V.", "password123", false)
+	e.Svc.AddMember(ctx, e.Admin, "ABC", vu.ID, "viewer")
+	ou, _ := e.Svc.CreateUser(ctx, "outsider@example.com", "Olga O.", "password123", false)
+	_ = ou
+	e.flush() // their welcome emails go out now, so that only the mentions are measured below
+	before := len(e.smtp.Messages())
+	e.Svc.AddComment(ctx, e.Alice, is.Key, "@outsider look at this", false)
+	e.Svc.AddComment(ctx, e.Alice, is.Key, "internal only: @vera should not see this", true)
+	e.flush()
+	for _, m := range e.smtp.Messages()[before:] {
+		if m.Rcpts[0] == "outsider@example.com" || m.Rcpts[0] == "vera@example.com" {
+			t.Fatalf("mail to %s who must not receive it", m.Rcpts[0])
+		}
+	}
+	// a public mention of a viewer does reach the viewer
+	e.Svc.AddComment(ctx, e.Alice, is.Key, "@vera this one is public", false)
+	e.flush()
+	if n := mailsWith(e, "vera@example.com", "public"); n != 1 {
+		t.Fatalf("viewer mention mails: %d", n)
+	}
+}
+
+func TestHIST04_EditNoticesAreBatchedPerPerson(t *testing.T) {
+	e := newMailEnv(t)
+	is, _ := e.Svc.CreateIssue(ctx, e.Alice, domain.CreateIn{Project: "ABC", Summary: "s", Assignee: e.Bob.ID})
+	e.flush()
+	base := len(e.msgTo("bob@example.com")) // the assignment mail
+	seq := int64(1)
+	save := func(a domain.Actor, body string) {
+		r, err := e.Svc.SaveText(ctx, a, is.Key, domain.SaveIn{Field: "description", Body: body, BaseSeq: seq})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seq = r.Seq
+	}
+	for i := 0; i < 6; i++ { // a burst of saves by Alice
+		save(e.Alice, fmt.Sprint("draft ", i))
+		e.flush()
+	}
+	if len(e.msgTo("bob@example.com")) != base {
+		t.Fatal("an edit notice was sent before the batch window elapsed")
+	}
+	e.Clock.Advance(4 * time.Minute)
+	e.flush()
+	if n := mailsWith(e, "bob@example.com", "edited the description"); n != 1 {
+		t.Fatalf("%d edit notices for six saves", n)
+	}
+	// a later save starts a new window
+	save(e.Alice, "later change")
+	e.flush()
+	e.Clock.Advance(4 * time.Minute)
+	e.flush()
+	if n := mailsWith(e, "bob@example.com", "edited the description"); n != 2 {
+		t.Fatalf("%d notices after a second burst", n)
+	}
+	// two people editing in the same window are two notices, one per person
+	save(e.Admin, "admin change")
+	save(e.Alice, "alice again")
+	e.flush()
+	e.Clock.Advance(4 * time.Minute)
+	e.flush()
+	if n := mailsWith(e, "bob@example.com", "edited the description"); n != 4 {
+		t.Fatalf("%d notices, want one per person per window", n)
+	}
+	// the editor is never told about their own edit
+	if n := mailsWith(e, "alice@example.com", "Alice K. edited"); n != 0 {
+		t.Fatalf("Alice was told of her own edits %d times", n)
 	}
 }

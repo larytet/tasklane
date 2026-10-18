@@ -7,6 +7,7 @@ import (
 	"html"
 	"math"
 	netmail "net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,6 +22,8 @@ type MailConfig struct {
 	From    string // "Tasklane <tasklane@example.com>"
 	Domain  string // message-id domain
 	BaseURL string
+	// EditBatch is how long a description-edit notice waits to absorb further saves by the same person (default 3 minutes).
+	EditBatch time.Duration
 }
 
 const (
@@ -40,6 +43,8 @@ type notifyEvent struct {
 		From    string   `json:"from"`
 		To      string   `json:"to"`
 		Fields  []string `json:"fields"`
+		Field   string   `json:"field"`
+		TextSeq int64    `json:"text_seq"`
 	}
 }
 
@@ -92,9 +97,12 @@ type recipient struct{ id, name, email string }
 
 func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int, error) {
 	switch e.Type {
-	case "issue.created", "issue.transitioned", "comment.added", "issue.updated":
+	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved":
 	default:
 		return 0, nil
+	}
+	if e.Type == "issue.text_saved" && e.Payload.Field != "description" {
+		return 0, nil // summary renames are visible in the thread; only description edits are announced
 	}
 	if e.Payload.Key == "" {
 		return 0, nil
@@ -111,6 +119,10 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 	var ids []string
 	var what, body string
 	internal := false
+	kind := "event"
+	var delay time.Duration
+	mentioned := map[string]recipient{} // people mentioned for the first time by this event
+	var mentionWhat string
 	switch e.Type {
 	case "issue.created":
 		if assignee == nil {
@@ -157,9 +169,83 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		rows.Close()
 		what = e.Payload.Actor + " commented"
 		body = c
+		mentionWhat = e.Payload.Actor + " mentioned you in a comment"
+		for _, m := range s.mentions(ctx, tx, c) {
+			mentioned[m.id] = m
+		}
+	case "issue.text_saved":
+		ids = []string{reporter}
+		if assignee != nil {
+			ids = append(ids, *assignee)
+		}
+		kind, delay = "edit", s.editBatchWindow()
+		what = e.Payload.Actor + " edited the description"
+		// only mentions that this save introduced notify anyone: saving again with the same mention stays quiet
+		var cur, prev string
+		tx.QueryRow(ctx, `SELECT body FROM text_version WHERE issue_id=$1 AND field='description' AND seq=$2`, id, e.Payload.TextSeq).Scan(&cur)
+		tx.QueryRow(ctx, `SELECT body FROM text_version WHERE issue_id=$1 AND field='description' AND seq=$2`, id, e.Payload.TextSeq-1).Scan(&prev)
+		old := map[string]bool{}
+		for _, m := range s.mentions(ctx, tx, prev) {
+			old[m.id] = true
+		}
+		for _, m := range s.mentions(ctx, tx, cur) {
+			if !old[m.id] {
+				mentioned[m.id] = m
+			}
+		}
+		mentionWhat = e.Payload.Actor + " mentioned you in the description"
+		body = ""
+		if len(mentioned) > 0 {
+			body = cur
+		}
 	}
 	seen := map[string]bool{e.Payload.ActorID: true} // people are not notified of their own actions
 	n := 0
+	queue := func(r recipient, k, w, text string, due time.Duration, keySuffix string) error {
+		if !s.mayReceive(ctx, tx, r.id, pid, internal) { // visibility is decided now and again at send time
+			return nil
+		}
+		if k == "edit" { // one "edited by" notice per person and issue while the previous one is still waiting
+			var pending bool
+			var who any
+			if e.Payload.ActorID != "" {
+				who = e.Payload.ActorID
+			}
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM mail_message WHERE kind='edit' AND issue_id=$1 AND recipient_id=$2 AND actor_id IS NOT DISTINCT FROM $3::uuid AND status='pending')`, id, r.id, who).Scan(&pending); err != nil {
+				return err
+			}
+			if pending {
+				return nil
+			}
+		}
+		msg := s.compose(ctx, tx, id, e, e.Payload.Key, summary, w, text, r)
+		next := s.Now()
+		if due > 0 {
+			next = next.Add(due)
+		}
+		var actor any
+		if e.Payload.ActorID != "" {
+			actor = e.Payload.ActorID
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,issue_id,recipient_id,recipient,internal,subject,message_id,in_reply_to,refs,body_text,body_html,kind,actor_id,next_attempt_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (idempotency_key) DO NOTHING`,
+			fmt.Sprintf("%s:%d:%s%s", k, e.ID, r.id, keySuffix), id, r.id, (&netmail.Address{Name: r.name, Address: r.email}).String(), internal, msg.Subject, msg.MessageID, msg.InReplyTo, msg.Refs, msg.Text, msg.HTML, k, actor, next)
+		if err != nil {
+			return err
+		}
+		n += int(tag.RowsAffected())
+		return nil
+	}
+	// a mentioned person gets the specific mail, once, instead of the generic one
+	for _, m := range mentioned {
+		if seen[m.id] {
+			continue
+		}
+		seen[m.id] = true
+		if err := queue(m, "mention", mentionWhat, body, 0, ""); err != nil {
+			return n, err
+		}
+	}
 	for _, uid := range ids {
 		if seen[uid] {
 			continue
@@ -170,19 +256,43 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		if err := tx.QueryRow(ctx, `SELECT id,name,email,active FROM app_user WHERE id=$1`, uid).Scan(&r.id, &r.name, &r.email, &active); err != nil || !active {
 			continue
 		}
-		if !s.mayReceive(ctx, tx, r.id, pid, internal) { // visibility is decided now and again at send time
-			continue
+		text := body
+		if kind == "edit" {
+			text = ""
 		}
-		msg := s.compose(ctx, tx, id, e, e.Payload.Key, summary, what, body, r)
-		tag, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,issue_id,recipient_id,recipient,internal,subject,message_id,in_reply_to,refs,body_text,body_html)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (idempotency_key) DO NOTHING`,
-			fmt.Sprintf("ev:%d:%s", e.ID, r.id), id, r.id, (&netmail.Address{Name: r.name, Address: r.email}).String(), internal, msg.Subject, msg.MessageID, msg.InReplyTo, msg.Refs, msg.Text, msg.HTML)
-		if err != nil {
+		if err := queue(r, kind, what, text, delay, ""); err != nil {
 			return n, err
 		}
-		n += int(tag.RowsAffected())
 	}
 	return n, nil
+}
+
+var mentionRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9_.@])@([A-Za-z0-9][A-Za-z0-9._-]{0,63})`)
+
+// mentions resolves @name tokens (the part of an email address before the @) to active users.
+func (s *Service) mentions(ctx context.Context, tx pgx.Tx, text string) []recipient {
+	seen := map[string]bool{}
+	var out []recipient
+	for _, m := range mentionRe.FindAllStringSubmatch(text, -1) {
+		tok := strings.ToLower(strings.TrimRight(m[1], ".-_"))
+		if tok == "" || seen[tok] {
+			continue
+		}
+		seen[tok] = true
+		var r recipient
+		if err := tx.QueryRow(ctx, `SELECT id,name,email FROM app_user WHERE active AND lower(split_part(email,'@',1))=$1`, tok).Scan(&r.id, &r.name, &r.email); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// editBatchWindow is how long an "edited by" notice waits so that a burst of saves becomes one message.
+func (s *Service) editBatchWindow() time.Duration {
+	if s.Mail != nil && s.Mail.EditBatch > 0 {
+		return s.Mail.EditBatch
+	}
+	return 3 * time.Minute
 }
 
 // mayReceive: the recipient must have read access to the project, and internal comments need write access.

@@ -75,7 +75,13 @@ func outbox(ctx context.Context, tx pgx.Tx, aggregate, typ string, payload any) 
 	return err
 }
 
-func history(ctx context.Context, tx pgx.Tx, issueID string, a Actor, field string, before, after *string) error {
+func (s *Service) hist(ctx context.Context, tx pgx.Tx, issueID string, a Actor, field string, before, after *string) error {
+	if field != "created" {
+		var track bool
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT track_history FROM field_setting WHERE field=$1), true)`, field).Scan(&track); err == nil && !track {
+			return nil // an untracked field leaves no history record (text versions are kept: they are what a conflict and a restore need)
+		}
+	}
 	_, err := tx.Exec(ctx, `INSERT INTO issue_history(issue_id,field,before,after,actor_id,actor_label) VALUES($1,$2,$3,$4,$5,$6)`,
 		issueID, field, before, after, nilIfEmpty(a.ID), a.Label)
 	return err
@@ -112,4 +118,41 @@ func (s *Service) emit(e Event) {
 func (s *Service) CanRead(ctx context.Context, a Actor, key string) bool {
 	_, _, err := s.access(ctx, a, key)
 	return err == nil
+}
+
+// trackable lists the fields whose history can be switched off.
+var trackable = map[string]bool{"summary": true, "description": true, "priority": true, "assignee": true, "labels": true, "status": true, "attachment": true}
+
+// SetFieldTracking turns history on or off for a field going forward; records already written stay.
+func (s *Service) SetFieldTracking(ctx context.Context, a Actor, field string, track bool) error {
+	if !a.Admin {
+		return ErrForbidden
+	}
+	if !trackable[field] {
+		return invalid("unknown field %q", field)
+	}
+	_, err := s.DB.Exec(ctx, `INSERT INTO field_setting(field,track_history) VALUES($1,$2) ON CONFLICT (field) DO UPDATE SET track_history=$2`, field, track)
+	return err
+}
+
+func (s *Service) FieldTracking(ctx context.Context, a Actor) (map[string]bool, error) {
+	if !a.Admin {
+		return nil, ErrForbidden
+	}
+	out := map[string]bool{}
+	for f := range trackable {
+		out[f] = true
+	}
+	rows, err := s.DB.Query(ctx, `SELECT field, track_history FROM field_setting`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var f string
+		var t bool
+		rows.Scan(&f, &t)
+		out[f] = t
+	}
+	return out, rows.Err()
 }
