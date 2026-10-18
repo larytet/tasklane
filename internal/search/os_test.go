@@ -130,6 +130,18 @@ func TestTQL08_Routing(t *testing.T) {
 	if res := r.via(r.router, r.Alice, `inputrequested is EMPTY`); searches() != before || res.Engine == "opensearch" { // a field the index does not carry
 		t.Fatal("a query the index cannot answer was sent to it")
 	}
+	f, err := r.Svc.CreateField(ctx, r.Admin, domain.FieldIn{Name: "Severity", Type: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Svc.AddContext(ctx, r.Admin, f.ID, domain.ContextIn{Global: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{fmt.Sprintf(`cf[%d] = x`, f.ID), `"Severity" = x`} { // custom fields are answered by PostgreSQL
+		if res := r.via(r.router, r.Alice, q); searches() != before || res.Engine == "opensearch" {
+			t.Fatalf("custom field query %q was sent to the index", q)
+		}
+	}
 	if _, err := r.router.Search(ctx, r.scope(r.Alice), `project = (`, search.Page{}); err == nil {
 		t.Fatal("a bad query did not fail")
 	} else if _, ok := search.IsQueryError(err); !ok {

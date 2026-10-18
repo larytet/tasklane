@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,7 +66,7 @@ func (e *Postgres) Search(ctx context.Context, sc Scope, src string, pg Page) (*
 	if err != nil {
 		return nil, err
 	}
-	cq, err := compile(q, sc)
+	cq, err := compile(q, e.withFields(ctx, sc))
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +178,7 @@ func (e *Postgres) Keys(ctx context.Context, sc Scope, src string, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	cq, err := compile(q, sc)
+	cq, err := compile(q, e.withFields(ctx, sc))
 	if err != nil {
 		return nil, err
 	}
@@ -235,4 +236,24 @@ func (e *Postgres) Hydrate(ctx context.Context, sc Scope, ids []string) ([]Row, 
 		}
 	}
 	return out, rows.Err()
+}
+
+// withFields adds what the compiler needs to understand custom field clauses: the field definitions and a user lookup.
+func (e *Postgres) withFields(ctx context.Context, sc Scope) Scope {
+	sc.Fields = e.fieldMap(ctx)
+	sc.UserLookup = func(name string) []string {
+		rows, err := e.DB.Query(ctx, `SELECT id::text FROM app_user WHERE lower(email)=$1 OR lower(name)=$1`, name)
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			rows.Scan(&id)
+			ids = append(ids, strings.ToLower(id))
+		}
+		return ids
+	}
+	return sc
 }

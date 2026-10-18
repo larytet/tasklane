@@ -170,6 +170,18 @@ func (f *fixture) mirrored() string {
 	return key
 }
 
+func (f *fixture) field() int64 {
+	f.n++
+	fd, err := f.e.Svc.CreateField(testutil.Ctx(), f.e.Admin, domain.FieldIn{Name: fmt.Sprint("Field ", f.n), Type: "select"})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.e.Svc.AddContext(testutil.Ctx(), f.e.Admin, fd.ID, domain.ContextIn{Global: true, Options: []string{"A", "B"}}); err != nil {
+		f.t.Fatal(err)
+	}
+	return fd.ID
+}
+
 func (f *fixture) attachment(key string) string {
 	a, err := f.e.Svc.AttachStream(testutil.Ctx(), f.e.Alice, key, "n.txt", "text/plain", strings.NewReader("hello matrix"))
 	if err != nil {
@@ -327,6 +339,37 @@ func rows() []row {
 		{"POST /api/v1/jira/projects/{key}/reconcile", adminer, func(f *fixture) req { return J("POST", "/api/v1/jira/projects/"+f.mirrored()+"/reconcile", nil) }},
 		{"POST /api/v1/jira/projects/{key}/cutover", adminer, func(f *fixture) req { return J("POST", "/api/v1/jira/projects/"+f.mirrored()+"/cutover", nil) }},
 		{"GET /api/v1/jira/status", adminer, func(f *fixture) req { return J("GET", "/api/v1/jira/status", nil) }},
+		{"GET /api/v1/fields", authed, func(f *fixture) req { return J("GET", "/api/v1/fields", nil) }},
+		{"POST /api/v1/fields", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/fields", map[string]any{"name": fmt.Sprint("New ", f.n), "type": "text"})
+		}},
+		{"PATCH /api/v1/fields/{id}", adminer, func(f *fixture) req {
+			return J("PATCH", fmt.Sprintf("/api/v1/fields/%d", f.field()), map[string]any{"help_text": "h"})
+		}},
+		{"DELETE /api/v1/fields/{id}", adminer, func(f *fixture) req { return J("DELETE", fmt.Sprintf("/api/v1/fields/%d", f.field()), nil) }},
+		{"POST /api/v1/fields/{id}/restore", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("POST", fmt.Sprintf("/api/v1/fields/%d/restore", f.field()), nil) }},
+		{"GET /api/v1/fields/{id}/contexts", adminer, func(f *fixture) req { return J("GET", fmt.Sprintf("/api/v1/fields/%d/contexts", f.field()), nil) }},
+		{"POST /api/v1/fields/{id}/contexts", adminer, func(f *fixture) req {
+			return J("POST", fmt.Sprintf("/api/v1/fields/%d/contexts", f.field()), map[string]any{"global": true, "options": []string{"X"}})
+		}},
+		{"DELETE /api/v1/fields/{id}/contexts/{ctx}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", fmt.Sprintf("/api/v1/fields/%d/contexts/999999", f.field()), nil)
+		}},
+		{"POST /api/v1/fields/{id}/contexts/{ctx}/options", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req {
+			return J("POST", fmt.Sprintf("/api/v1/fields/%d/contexts/999999/options", f.field()), map[string]any{"value": "Z"})
+		}},
+		{"PATCH /api/v1/fields/options/{option}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("PATCH", "/api/v1/fields/options/999999", map[string]any{"archived": true})
+		}},
+		{"POST /api/v1/fields/{id}/merge-options", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", fmt.Sprintf("/api/v1/fields/%d/merge-options", f.field()), map[string]any{"from": "A", "into": "B"})
+		}},
+		{"POST /api/v1/fields/{id}/replace", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", fmt.Sprintf("/api/v1/fields/%d/replace", f.field()), map[string]any{"with": f.field()})
+		}},
+		{"GET /api/v1/fields/warnings", adminer, func(f *fixture) req { return J("GET", "/api/v1/fields/warnings", nil) }},
+		{"GET /api/v1/projects/{key}/fields", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/fields?type=Task", nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

@@ -130,3 +130,8 @@ table.data{border-collapse:collapse;margin:8px 0}table.data th,table.data td{bor
 @media (max-width:640px){.col{flex-basis:85vw}}
 
 .dev{margin:12px 0;border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;background:var(--surface)}.dev summary{cursor:pointer;font-weight:600}.dev-list{margin:4px 0 8px;padding-left:20px}.loz.blocked{background:var(--danger-bg);color:var(--danger)}
+
+.cf-box{margin:8px 0;display:grid;gap:6px}
+.cf-row{display:grid;grid-template-columns:140px 1fr;gap:8px;align-items:start}
+.cf-name{color:var(--subtle);padding-top:4px}
+.cf-card[hidden]{display:none}

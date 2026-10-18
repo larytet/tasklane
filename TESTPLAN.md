@@ -811,7 +811,8 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | TQL-01 | done | `TestTQL01_GoldenQueries`: about 60 queries over a fixed dataset (fields, operators, `currentUser()`, dates and functions, `ORDER BY`, text, `WAS`, `CHANGED`); `internal/search/tql` grammar tests |
 | TQL-02 | done | `TestFuzzRandomInput` (2 s of random and mutated input, hang detection per input), `FuzzParse` (native fuzzer), `TestLimits` (nesting, clause count, length) |
 | TQL-03 | partial | `TestParseErrorsArePositionedAndClear`, `TestTQL03_SemanticErrorsAreClear` (clear positioned errors, SQL injection attempts are values); a real-world JQL corpus is not yet collected |
-| TQL-04 | partial | `was` and `changed` work for status, priority and assignee; custom fields arrive with M3 |
+| TQL-04 | done | `TestTQL04_CustomFieldQueries` (typed operators, quoted names, `cf[id]`, was, changed, ORDER BY, restricted fields); OpenSearch fallback in `TestTQL08_Routing` |
+| CORE-03 | partial | `TestCORE03_*` (types, contexts, defaults, required, roles, uniqueness, history, conflicts, trash, merge, replace, warnings, convert and clone), `TestHTTP_CORE03_CustomFieldsEndToEnd`, e2e `fields.spec.js`; behavior rules wait for M3.2 |
 | TQL-06 | done | `TestTQL06_PermissionFiltering`: scope injected into every compiled query, internal comments hidden from viewers (also through `!~`), revoked access effective at once, typeahead scoped |
 | TQL-07, TQL-10, TQL-27 | partial | `TestTQL07_IndexFollowsEditsAndTrash`, `TestTQL10_27_IndexerIsIdempotentAndSkipsUnchangedText` (replay of all events changes nothing; unchanged text is not rewritten); GIN bloat and 1 million update runs pending |
 | TQL-21 | done | `TestTQL21_PlanShapes` (`make perf`): GIN, trigram and btree plans on the 100,000-issue dataset |

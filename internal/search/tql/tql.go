@@ -128,7 +128,7 @@ func lex(src string) ([]token, error) {
 }
 
 func isWord(r rune) bool {
-	return r == '_' || r == '-' || r == '+' || r == '.' || r == ':' || r == '@' || r == '/' || r == '*' ||
+	return r == '[' || r == ']' || r == '_' || r == '-' || r == '+' || r == '.' || r == ':' || r == '@' || r == '/' || r == '*' ||
 		(r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
@@ -204,7 +204,7 @@ func Parse(src string) (q *Query, err error) {
 		p.next()
 		for {
 			t := p.next()
-			if t.kind != tWord {
+			if t.kind != tWord && t.kind != tStr { // a quoted custom field name
 				return nil, &Error{t.pos, "expected a field name after ORDER BY"}
 			}
 			o := Order{Field: strings.ToLower(t.s)}

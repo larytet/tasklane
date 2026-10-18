@@ -33,6 +33,8 @@ type Issue struct {
 	Updated     time.Time  `json:"updated"`
 	Resolved    *time.Time `json:"resolved,omitempty"`
 	Estimate    *float64   `json:"estimate,omitempty"` // points, hours or nothing, by the board's estimation setting
+	// Custom holds the custom field values the caller may see, by field key (customfield_<id>)
+	Custom map[string]any `json:"custom,omitempty"`
 }
 
 type TransitionOpt struct {
@@ -74,6 +76,8 @@ type CreateIn struct {
 	Assignee    string   `json:"assignee"`
 	Labels      []string `json:"labels"`
 	Parent      string   `json:"parent"`
+	// Custom sets custom field values by key (customfield_<id>) or by name; defaults fill what is missing and required fields must be set
+	Custom map[string]any `json:"custom"`
 }
 
 func normLabels(in []string) ([]string, error) {
@@ -140,6 +144,7 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 	}
 	_ = removed
 	var key string
+	creatorRole := s.role(ctx, a, pid) // read before the transaction: a pool query inside it would need a second connection
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		var typeID string
 		if err := tx.QueryRow(ctx, `SELECT id FROM issue_type WHERE lower(name)=lower($1)`, in.Type).Scan(&typeID); err != nil {
@@ -148,6 +153,10 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 		var parentID *string
 		var childLevel int
 		tx.QueryRow(ctx, `SELECT level FROM issue_type WHERE id=$1`, typeID).Scan(&childLevel)
+		customVals, cfgs, cerr := s.prepareCreate(ctx, tx, pid, typeID, creatorRole, a.Admin, in.Custom)
+		if cerr != nil {
+			return cerr
+		}
 		if in.Parent != "" {
 			var p string
 			var pl int
@@ -187,6 +196,13 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 		for f, v := range map[string]string{"summary": summary, "description": desc} {
 			if _, err := tx.Exec(ctx, `INSERT INTO text_version(issue_id,field,seq,body,actor_id,actor_label,mode) VALUES($1,$2,1,$3,$4,$5,'create')`, id, f, v, nilIfEmpty(a.ID), a.Label); err != nil {
 				return err
+			}
+		}
+		for _, c := range cfgs {
+			if v, ok := customVals[c.ID]; ok {
+				if err := s.storeValue(ctx, tx, id, c.FieldDef, v); err != nil {
+					return err
+				}
 			}
 		}
 		if err := s.hist(ctx, tx, id, a, "created", nil, sp(key)); err != nil {
@@ -338,6 +354,11 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 		v.Alias = strings.ToUpper(key)
 	}
 	v.Presence = s.Presence.List(is.Key, a.ID)
+	var ptid, ppid string
+	s.DB.QueryRow(ctx, `SELECT i.issue_type_id::text,i.project_id::text FROM issue i WHERE i.id=$1`, is.ID).Scan(&ptid, &ppid)
+	if cv, err := s.CustomValues(ctx, a, is.ID, ppid, ptid, role); err == nil && len(cv) > 0 {
+		v.Issue.Custom = cv
+	}
 	v.Input = s.inputRequest(ctx, is.ID)
 	if v.Mirror = s.mirrorInfo(ctx, is.Project); v.Mirror != nil {
 		s.DB.QueryRow(ctx, `SELECT COALESCE(origin_key,'') FROM issue WHERE id=$1`, is.ID).Scan(&v.Mirror.IssueKey)
@@ -352,6 +373,8 @@ type Changes struct {
 	// Estimate sets the estimate (not negative); ClearEstimate removes it
 	Estimate      *float64 `json:"estimate,omitempty"`
 	ClearEstimate bool     `json:"clear_estimate,omitempty"`
+	// Custom sets custom field values by key or name; a null value clears the field
+	Custom map[string]any `json:"custom,omitempty"`
 }
 
 // UpdateFields applies scalar changes. baseVersion is the issue version the caller last saw
@@ -398,6 +421,49 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 		changed["estimate"] = fmt.Sprint(*ch.Estimate)
 	} else if ch.ClearEstimate {
 		changed["estimate"] = ""
+	}
+	type customChange struct {
+		f     FieldConfig
+		v     any
+		clear bool
+	}
+	var customs []customChange
+	if len(ch.Custom) > 0 {
+		var typeID string
+		s.DB.QueryRow(ctx, `SELECT id::text FROM issue_type WHERE lower(name)=lower($1)`, is.Type).Scan(&typeID)
+		cfgs, err := s.FieldsFor(ctx, pid, typeID)
+		if err != nil {
+			return is, err
+		}
+		byKey := map[string]FieldConfig{}
+		for _, c := range cfgs {
+			byKey[c.Key] = c
+			byKey[strings.ToLower(c.Name)] = c
+		}
+		for k, raw := range ch.Custom {
+			c, ok := byKey[strings.ToLower(k)]
+			if !ok {
+				return is, invalid("the field %q does not apply to this issue", k)
+			}
+			if !roleIn(c.EditRoles, role, a.Admin) {
+				return is, invalid("%s: your role may not change this field", c.Name)
+			}
+			if isEmptyValue(raw) {
+				if c.Required {
+					return is, invalid("%s is required and cannot be cleared", c.Name)
+				}
+				customs = append(customs, customChange{f: c, clear: true})
+				changed[c.Key] = "cleared"
+				continue
+			}
+			v, err := s.normalize(ctx, s.DB, c.FieldDef, c.Options, raw, is.ID)
+			if err != nil {
+				return is, invalid("%s: %v", c.Name, err)
+			}
+			customs = append(customs, customChange{f: c, v: v})
+			j, _ := json.Marshal(v)
+			changed[c.Key] = string(j)
+		}
 	}
 	if len(changed) == 0 {
 		return is, invalid("no changes")
@@ -480,6 +546,37 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 				add("estimate", val)
 				s.hist(ctx, tx, is.ID, a, "estimate", &old, &es)
 				fv["estimate"] = next
+			}
+		}
+		for _, cc := range customs {
+			var oldRaw []byte
+			tx.QueryRow(ctx, `SELECT value FROM issue_field_value WHERE issue_id=$1 AND field_id=$2`, is.ID, cc.f.ID).Scan(&oldRaw)
+			var newRaw []byte
+			if !cc.clear {
+				newRaw, _ = json.Marshal(cc.v)
+			}
+			if string(oldRaw) == string(newRaw) {
+				continue
+			}
+			var val any
+			if !cc.clear {
+				val = cc.v
+			}
+			if err := s.storeValue(ctx, tx, is.ID, cc.f.FieldDef, val); err != nil {
+				return err
+			}
+			fv[cc.f.Key] = next
+			if cc.f.TrackHistory {
+				var before, after *string
+				if len(oldRaw) > 0 {
+					b := string(oldRaw)
+					before = &b
+				}
+				if len(newRaw) > 0 {
+					af := string(newRaw)
+					after = &af
+				}
+				tx.Exec(ctx, `INSERT INTO issue_history(issue_id,field,before,after,actor_id,actor_label,at) VALUES($1,$2,$3,$4,$5,$6,$7)`, is.ID, cc.f.Key, before, after, nilIfEmpty(a.ID), a.Label, s.Now())
 			}
 		}
 		fvj, _ := json.Marshal(fv)

@@ -14,13 +14,15 @@ import (
 // Scope is who is searching and what they may see. Every compiled query is constrained by it;
 // there is no code path that builds a query without one (TQL-06, TQL-13).
 type Scope struct {
-	UserID    string
-	All       bool     // global administrator: every project
-	Readable  []string // project ids the user may read
-	Writable  []string // project ids where internal comments are visible
-	OnlyKeys  []string // when not nil, only these issue keys can match (used for the own-edit overlay)
-	WeekStart time.Weekday
-	Now       func() time.Time
+	UserID     string
+	All        bool                       // global administrator: every project
+	Readable   []string                   // project ids the user may read
+	Writable   []string                   // project ids where internal comments are visible
+	OnlyKeys   []string                   // when not nil, only these issue keys can match (used for the own-edit overlay)
+	Fields     map[string]FieldDef        // custom fields by lower-case name, cf[id] and customfield_id (filled by the engine)
+	UserLookup func(name string) []string // resolves a name or email to user ids, for user-typed custom fields
+	WeekStart  time.Weekday
+	Now        func() time.Time
 }
 
 type compiled struct {
@@ -35,6 +37,7 @@ type compiler struct {
 	args  []any
 	rank  int
 	nowFn func() time.Time
+	users func(string) []string
 }
 
 func (c *compiler) arg(v any) string {
@@ -44,7 +47,7 @@ func (c *compiler) arg(v any) string {
 
 // compile builds the WHERE clause (always starting with the scope and the trash filter) and ORDER BY.
 func compile(q *tql.Query, sc Scope) (*compiled, error) {
-	c := &compiler{sc: sc, nowFn: sc.Now}
+	c := &compiler{sc: sc, nowFn: sc.Now, users: sc.UserLookup}
 	if c.nowFn == nil {
 		c.nowFn = time.Now
 	}
@@ -264,6 +267,9 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 		}
 		return "", errAt(x.Pos, "operator %s cannot be used with %s", opName(x.Op), x.Field)
 	}
+	if f, ok := c.sc.Fields[x.Field]; ok {
+		return c.customClause(x, f)
+	}
 	return "", errAt(x.Pos, "unknown field %q", x.Field)
 }
 
@@ -441,6 +447,14 @@ func (c *compiler) order(os []tql.Order) (string, error) {
 	for _, o := range os {
 		col, ok := orderCols[o.Field]
 		if !ok {
+			if f, isField := c.sc.Fields[o.Field]; isField {
+				dir := " ASC"
+				if o.Desc {
+					dir = " DESC"
+				}
+				parts = append(parts, c.customOrder(f)+dir+" NULLS LAST")
+				continue
+			}
 			return "", errAt(0, "cannot sort by %q", o.Field)
 		}
 		dir := " ASC"

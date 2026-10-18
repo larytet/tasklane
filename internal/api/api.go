@@ -325,6 +325,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerSprints(mux)
 	s.registerReports(mux)
 	s.registerGit(mux)
+	s.registerFields(mux)
 	s.registerJira(mux)
 	s.registerSearchAdmin(mux)
 	s.registerAttachments(mux)

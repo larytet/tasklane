@@ -195,6 +195,11 @@ func (s *Service) opConvert(ctx context.Context, tx pgx.Tx, a Actor, key string,
 	if err := s.hist(ctx, tx, r.ID, a, "type", sp(r.TypeName), sp(newName)); err != nil {
 		return err
 	}
+	var convPID string
+	tx.QueryRow(ctx, `SELECT project_id::text FROM issue WHERE id=$1`, r.ID).Scan(&convPID)
+	if err := s.dropInapplicableFields(ctx, tx, r.ID, convPID, newID, "convert", p); err != nil {
+		return err
+	}
 	if err := outbox(ctx, tx, "issue:"+r.Key, "issue.updated", map[string]any{"key": r.Key, "fields": []string{"type"}, "actor": a.Label, "actor_id": a.ID}); err != nil {
 		return err
 	}
@@ -355,6 +360,9 @@ func (s *Service) opMove(ctx context.Context, tx pgx.Tx, a Actor, key string, in
 			return err
 		}
 		s.hist(ctx, tx, m.id, a, "key", sp(m.key), sp(newKey))
+		if err := s.dropInapplicableFields(ctx, tx, m.id, tpid, tid, "move", p); err != nil {
+			return err
+		}
 		outbox(ctx, tx, "issue:"+newKey, "issue.moved", map[string]any{"key": newKey, "old_key": m.key, "from": r.ProjectKey, "to": tkey, "actor": a.Label, "actor_id": a.ID})
 		*ev = append(*ev, Event{Type: "issue.moved", Issue: m.key, Fields: []string{newKey}, Actor: a.Label, ActorID: a.ID})
 		p.NewKeys[m.key] = newKey
@@ -471,6 +479,11 @@ func (s *Service) opClone(ctx context.Context, tx pgx.Tx, a Actor, key string, i
 			}
 		}
 		s.hist(ctx, tx, id, a, "created", nil, sp(newKey))
+		if n, err := s.copyFieldsOnClone(ctx, tx, src.ID, id, tpid, src.TypeID); err != nil {
+			return "", err
+		} else {
+			p.Counts["custom_fields_copied"] += n
+		}
 		if attach { // shared by reference: the blob is not copied, its reference count goes up
 			n, err := s.cloneAttachments(ctx, tx, src.ID, id)
 			if err != nil {
@@ -635,4 +648,67 @@ func (s *Service) listLinks(ctx context.Context, issueID string) ([]Link, error)
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// dropInapplicableFields removes the custom field values that no longer apply after a move or a type change, and keeps
+// them in a "removed values" record for the trash retention, so nothing is lost and converting back can restore them.
+func (s *Service) dropInapplicableFields(ctx context.Context, tx pgx.Tx, issueID, projectID, typeID, kind string, p *Plan) error {
+	cfgs, err := s.fieldsFor(ctx, tx, projectID, typeID)
+	if err != nil {
+		return err
+	}
+	keep := []int64{}
+	for _, c := range cfgs {
+		keep = append(keep, c.ID)
+	}
+	rows, err := tx.Query(ctx, `SELECT v.field_id,f.name,v.value FROM issue_field_value v JOIN custom_field f ON f.id=v.field_id WHERE v.issue_id=$1 AND NOT (v.field_id = ANY($2))`, issueID, keep)
+	if err != nil {
+		return err
+	}
+	dropped := map[string]any{}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		var name string
+		var raw []byte
+		rows.Scan(&id, &name, &raw)
+		var v any
+		json.Unmarshal(raw, &v)
+		dropped[fieldKey(id)] = map[string]any{"name": name, "value": v}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := saveRemoved(ctx, s, tx, issueID, "fields", dropped); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM issue_field_value WHERE issue_id=$1 AND field_id = ANY($2)`, issueID, ids); err != nil {
+		return err
+	}
+	p.Counts["custom_fields_dropped"] += len(ids)
+	p.drop("%d custom field value(s) do not apply in the new place and are kept in the removed-values record", len(ids))
+	_ = kind
+	return nil
+}
+
+// copyFieldsOnClone copies the values of fields flagged "copy on clone" that apply to the target project and type.
+func (s *Service) copyFieldsOnClone(ctx context.Context, tx pgx.Tx, from, to, projectID, typeID string) (int, error) {
+	cfgs, err := s.fieldsFor(ctx, tx, projectID, typeID)
+	if err != nil {
+		return 0, err
+	}
+	ids := []int64{}
+	for _, c := range cfgs {
+		if c.CopyOnClone {
+			ids = append(ids, c.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO issue_field_value(issue_id,field_id,value,text_value,num_value,date_value,updated_at)
+		SELECT $2,field_id,value,text_value,num_value,date_value,$4 FROM issue_field_value WHERE issue_id=$1 AND field_id = ANY($3)`, from, to, ids, s.Now())
+	return int(tag.RowsAffected()), err
 }

@@ -126,15 +126,64 @@
     }
   }
 
+
+  // ----- custom fields: one control per field type; get() returns the JSON value to send (null clears, undefined means untouched/empty)
+  function fieldControl(f, value, disabled) {
+    const lab = f.name + (f.unit ? ' (' + f.unit + ')' : '');
+    const base = { 'aria-label': lab, disabled: !!disabled, title: f.help_text || '' };
+    const opts = (f.options || []).filter(o => !o.archived);
+    const asList = v => Array.isArray(v) ? v : (v == null || v === '' ? [] : [v]);
+    let el, get;
+    switch (f.type) {
+      case 'textarea': el = h('textarea', Object.assign({ rows: 3 }, base)); el.value = value == null ? '' : value; get = () => el.value || null; break;
+      case 'number': case 'float': case 'integer': case 'rating':
+        el = h('input', Object.assign({ type: 'number', step: f.type === 'float' || f.type === 'number' ? 'any' : '1', style: 'width:120px' }, base, f.type === 'rating' ? { min: 0, max: 5 } : {}));
+        el.value = value == null ? '' : value; get = () => el.value === '' ? null : Number(el.value); break;
+      case 'duration': el = h('input', Object.assign({ type: 'text', placeholder: '2h 30m', style: 'width:120px' }, base)); el.value = value == null ? '' : (typeof value === 'number' ? L.fmtDuration ? L.fmtDuration(value) : value + 's' : value); get = () => el.value.trim() || null; break;
+      case 'date': el = h('input', Object.assign({ type: 'date' }, base)); el.value = value || ''; get = () => el.value || null; break;
+      case 'datetime': el = h('input', Object.assign({ type: 'datetime-local' }, base)); el.value = value ? String(value).slice(0, 16) : '';
+        get = () => el.value ? new Date(el.value).toISOString().replace('.000', '') : null; break;
+      case 'select': case 'radio':
+        el = h('select', base, h('option', { value: '' }, '—'), opts.map(o => h('option', { value: o.value }, o.value))); el.value = value || ''; get = () => el.value || null; break;
+      case 'multi_select': case 'checkbox_group': {
+        const have = new Set(asList(value));
+        el = h('select', Object.assign({ multiple: true, size: Math.min(5, Math.max(2, opts.length)) }, base), opts.map(o => h('option', { value: o.value, selected: have.has(o.value) }, o.value)));
+        get = () => { const r = [...el.selectedOptions].map(o => o.value); return r.length ? r : null; }; break; }
+      case 'user': case 'multi_user': {
+        const have = new Set(asList(value).map(x => x && x.id ? x.id : x)), multi = f.type === 'multi_user';
+        el = h('select', Object.assign(multi ? { multiple: true, size: 4 } : {}, base), multi ? null : h('option', { value: '' }, '—'), S.users.map(u => h('option', { value: u.id, selected: have.has(u.id) }, u.name)));
+        if (!multi) el.value = [...have][0] || '';
+        get = () => { const r = multi ? [...el.selectedOptions].map(o => o.value) : (el.value ? [el.value] : []); return r.length ? (multi ? r : r[0]) : null; }; break; }
+      case 'labels': el = h('input', Object.assign({ type: 'text', placeholder: 'labels' }, base)); el.value = asList(value).join(' '); get = () => { const r = el.value.split(/[\s,]+/).filter(Boolean); return r.length ? r : null; }; break;
+      default: el = h('input', Object.assign({ type: f.type === 'url' ? 'url' : 'text' }, base)); el.value = value == null ? '' : value; get = () => el.value.trim() || null;
+    }
+    return { el, get, name: lab };
+  }
+  function fieldRow(f, ctl) {
+    return h('label', { class: 'cf-row' }, h('span', { class: 'cf-name' }, f.name + (f.required ? ' *' : '')), ctl.el, f.help_text ? h('span', { class: 'muted' }, f.help_text) : null);
+  }
+
   function createDialog() {
     const proj = h('select', { 'aria-label': 'Project' }, S.projects.map(p => h('option', { value: p.key }, p.key + ' · ' + p.name)));
     const type = h('select', { 'aria-label': 'Type' }, ['Task', 'Bug', 'Story', 'Epic'].map(t => h('option', {}, t)));
     const sum = h('input', { type: 'text', placeholder: 'Summary', 'aria-label': 'Summary', style: 'width:100%' });
     const desc = h('textarea', { placeholder: 'Description', 'aria-label': 'Description' }), msg = h('div', { class: 'err', role: 'alert' });
-    const close = modal(h('div', {}, h('h2', {}, 'Create issue'), h('div', { class: 'chips' }, proj, type), sum, h('div', { style: 'height:8px' }), desc, msg,
+    const cfBox = h('div', { class: 'cf-box' });
+    let cfCtl = [];
+    async function loadFields() {
+      const r = await api('GET', '/api/v1/projects/' + proj.value + '/fields?type=' + encodeURIComponent(type.value));
+      clear(cfBox); cfCtl = [];
+      if (r.status !== 200) return;
+      for (const f of r.data || []) { const c = fieldControl(f, f.default, false); if (f.default != null && c.get() == null) c.el.value = f.default; cfCtl.push([f, c]); cfBox.append(fieldRow(f, c)); }
+    }
+    proj.addEventListener('change', loadFields); type.addEventListener('change', loadFields);
+    loadFields();
+    const close = modal(h('div', {}, h('h2', {}, 'Create issue'), h('div', { class: 'chips' }, proj, type), sum, h('div', { style: 'height:8px' }), desc, cfBox, msg,
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'),
         h('button', { class: 'btn primary', onclick: async () => {
-          const r = await api('POST', '/api/v1/issues', { project: proj.value, type: type.value, summary: sum.value, description: desc.value });
+          const custom = {};
+          for (const [f, c] of cfCtl) { const x = c.get(); if (x != null) custom[f.key] = x; }
+          const r = await api('POST', '/api/v1/issues', { project: proj.value, type: type.value, summary: sum.value, description: desc.value, custom });
           if (r.status === 201) { close(); location.hash = '#/issue/' + r.data.key; } else msg.textContent = r.data.error;
         } }, 'Create'))));
     sum.focus();
@@ -235,6 +284,7 @@
       root.append(subjectEl(is));
       root.append(chipLine(is));
       root.append(descriptionEl(is));
+      root.append(customFieldsEl(is));
       root.append(attachmentsEl());
       root.append(developmentEl());
       root.append(threadEl());
@@ -346,6 +396,34 @@
         toast('Someone else changed ' + (r.data.detail.fields || [field]).join(', ') + '; your change was not applied.', { label: 'Reapply', fn: reapply });
       } else toast((r.data && r.data.error) || 'Could not save');
       reloadAll();
+    }
+
+    // ----- custom fields: each field saves on change through the same versioned PATCH as the built-ins
+    function customFieldsEl(is) {
+      const box = h('div', { class: 'card cf-card', style: 'padding:12px;margin:8px 0', hidden: true, 'aria-label': 'Custom fields' });
+      // the form definition is cached so a re-render builds the controls synchronously (an async fill would replace a control the person is using)
+      const ck = is.project + '/' + is.type, cache = S.fieldDefs || (S.fieldDefs = {});
+      if (!cache[ck]) {
+        if (!cache['pending:' + ck]) {
+          cache['pending:' + ck] = true;
+          api('GET', '/api/v1/projects/' + is.project + '/fields?type=' + encodeURIComponent(is.type)).then(r => { cache[ck] = r.status === 200 ? (r.data || []) : []; delete cache['pending:' + ck]; render(); });
+        }
+        return box;
+      }
+      const fs = cache[ck];
+      if (!fs.length) return box;
+      box.hidden = false;
+      box.append(h('strong', {}, 'Fields'));
+      for (const f of fs) {
+        const ctl = fieldControl(f, (is.custom || {})[f.key], !canEdit()); // the server enforces per-field edit roles
+        const err = h('span', { class: 'err', role: 'alert' });
+        ctl.el.addEventListener('change', async () => {
+          const r2 = await api('PATCH', '/api/v1/issues/' + key, { custom: { [f.key]: ctl.get() } });
+          if (r2.status === 200) { err.textContent = ''; await reloadAll(); } else err.textContent = (r2.data && r2.data.error) || 'Could not save';
+        });
+        box.append(h('div', {}, fieldRow(f, ctl), err));
+      }
+      return box;
     }
 
     // ----- description with autosaved drafts
