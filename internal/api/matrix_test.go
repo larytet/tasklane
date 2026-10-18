@@ -227,6 +227,16 @@ func (f *fixture) autoRule() int64 {
 	return r.ID
 }
 
+// eraseTarget makes a fresh account, so each role's request erases a different one
+func (f *fixture) eraseTarget() string {
+	f.n++
+	u, err := f.e.Svc.CreateUser(testutil.Ctx(), fmt.Sprintf("erase%d@example.com", f.n), "Erase Me", "password123", false)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return u.ID
+}
+
 func (f *fixture) attachment(key string) string {
 	a, err := f.e.Svc.AttachStream(testutil.Ctx(), f.e.Alice, key, "n.txt", "text/plain", strings.NewReader("hello matrix"))
 	if err != nil {
@@ -586,6 +596,10 @@ func rows() []row {
 		{"POST /oauth/revoke", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("POST", "/oauth/revoke", map[string]any{}) }},
 		{"GET /api/v1/me/oauth/grants", authed, func(f *fixture) req { return J("GET", "/api/v1/me/oauth/grants", nil) }},
 		{"DELETE /api/v1/me/oauth/grants/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/me/oauth/grants/999999", nil) }},
+		{"GET /api/v1/admin/users/{id}/personal-data", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/users/"+f.spare.ID+"/personal-data", nil) }},
+		{"POST /api/v1/admin/users/{id}/erase", adminer, func(f *fixture) req {
+			return J("POST", "/api/v1/admin/users/"+f.eraseTarget()+"/erase", map[string]any{"delete_content": true, "scrub_mentions": true})
+		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

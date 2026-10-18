@@ -541,6 +541,9 @@ func (s *Service) RunLifecycle(ctx context.Context, logf func(string, ...any)) {
 		} else if n > 0 {
 			logf("purged %d expired issue(s) from the trash", n)
 		}
+		if _, err := s.CleanExpired(ctx); err != nil && ctx.Err() == nil {
+			logf("clean-up: %v", err)
+		}
 		if n, err := s.AutoArchive(ctx, 500); err != nil && ctx.Err() == nil {
 			logf("auto-archive: %v", err)
 		} else if n > 0 {
