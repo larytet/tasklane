@@ -28,10 +28,12 @@ type Service struct {
 	// HookEgress and WebhookAllowPrivate shape the egress policy for webhook post-functions (private targets are refused unless allowed).
 	HookEgress          func(egress.Policy) egress.Policy
 	WebhookAllowPrivate bool
-	secretMu            sync.Mutex
-	derived             []byte
-	gateOnce            sync.Once
-	gate                *gate
+	// Matcher answers TQL questions for automation (conditions and scheduled rules); set by the server
+	Matcher  IssueMatcher
+	secretMu sync.Mutex
+	derived  []byte
+	gateOnce sync.Once
+	gate     *gate
 	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
 	TrashRetention time.Duration
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:
@@ -87,7 +89,7 @@ func (s *Service) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 }
 
 func outbox(ctx context.Context, tx pgx.Tx, aggregate, typ string, payload any) error {
-	b, _ := json.Marshal(payload)
+	b, _ := json.Marshal(autoPayload(ctx, payload))
 	_, err := tx.Exec(ctx, `INSERT INTO outbox(aggregate,type,payload) VALUES($1,$2,$3)`, aggregate, typ, b)
 	return err
 }

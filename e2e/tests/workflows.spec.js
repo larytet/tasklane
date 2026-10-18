@@ -97,3 +97,49 @@ test('SEC-07: the audit log shows administrative changes, filters, verifies and 
   expect(res.headers()['content-type']).toContain('text/csv');
   expect(await res.text()).toContain('workflow.create');
 });
+
+test('CORE-10: an automation rule is created in the admin screen, dry-run, runs on an event and logs it', async ({ browser }) => {
+  const { page, call } = await adminPage(browser);
+  const key = 'A' + uniq();
+  expect((await call('POST', '/api/v1/projects', { key, name: 'Automation test' })).status).toBe(201);
+  await page.goto('/#/admin/automation/' + key);
+  await expect(page.getByRole('heading', { name: 'Automation' })).toBeVisible();
+  await page.getByRole('button', { name: 'New rule' }).click();
+  const dlg = page.getByRole('dialog');
+  await dlg.getByLabel('Rule name').fill('Say thanks');
+  await dlg.getByLabel('Trigger').fill(JSON.stringify({ type: 'issue.created' }));
+  await dlg.getByLabel('Actions').fill(JSON.stringify([{ kind: 'comment', text: 'Thanks for reporting {{issue.key}}' }]));
+  await dlg.getByLabel('Enabled').check();
+  const a11y = await new AxeBuilder({ page }).analyze();
+  expect(a11y.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await dlg.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Say thanks' })).toBeVisible();
+  // a bad rule is refused with the reason
+  await page.getByRole('button', { name: 'New rule' }).click();
+  await page.getByRole('dialog').getByLabel('Actions').fill(JSON.stringify([{ kind: 'format_disk' }]));
+  await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('unknown action');
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  // an issue is created: the rule comments, as the automation
+  const created = (await call('POST', '/api/v1/issues', { project: key, type: 'Task', summary: 'automated' })).body;
+  await expect.poll(async () => {
+    const v = (await call('GET', `/api/v1/issues/${created.key}/view`)).body;
+    return v.comments.map(c => c.body).join('|');
+  }, { timeout: 20000 }).toContain('Thanks for reporting ' + created.key);
+  // dry run and the run log
+  await page.getByRole('button', { name: 'Dry run Say thanks' }).click();
+  await page.getByRole('dialog').getByLabel('Issue key').fill(created.key);
+  await page.getByRole('dialog').getByRole('button', { name: 'Show what it would do' }).click();
+  await expect(page.getByRole('dialog')).toContainText('comment: Thanks for reporting ' + created.key);
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: 'Runs of Say thanks' }).click();
+  await expect(page.getByRole('dialog')).toContainText(created.key + ' · done');
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  // disabling stops it
+  await page.getByLabel('Enable Say thanks').uncheck();
+  await page.waitForTimeout(300);
+  const second = (await call('POST', '/api/v1/issues', { project: key, type: 'Task', summary: 'quiet' })).body;
+  await new Promise(r => setTimeout(r, 3500));
+  const v2 = (await call('GET', `/api/v1/issues/${second.key}/view`)).body;
+  expect(v2.comments.length).toBe(0);
+});

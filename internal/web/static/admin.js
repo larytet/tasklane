@@ -11,6 +11,7 @@
   function adminTabs(active) {
     return h('nav', { class: 'tabs', 'aria-label': 'Administration' }, h('span', { class: 'tabs-title' }, 'Administration'),
       h('a', { href: '#/admin/workflows', class: 'tab', 'aria-current': active === 'workflows' ? 'page' : null }, 'Workflows'),
+      h('a', { href: '#/admin/automation', class: 'tab', 'aria-current': active === 'automation' ? 'page' : null }, 'Automation'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
   }
 
@@ -71,6 +72,81 @@
       h('a', { class: 'btn', href: '/api/v1/admin/audit/export?' + qs(), download: 'audit.csv', onclick: e => { e.currentTarget.href = '/api/v1/admin/audit/export?' + qs(); } }, 'Export CSV')),
       h('div', { class: 'chips', style: 'margin:8px 0' }, actor, action), state, list, h('div', { style: 'margin-top:8px' }, more)));
     await load(true);
+  }
+
+
+  // ---------- automation ----------
+  const RULE_TEMPLATE = { name: 'New rule', enabled: false, trigger: { type: 'issue.transitioned', to: 'Done' }, conditions: [], actions: [{ kind: 'comment', text: '{{issue.key}} is done' }] };
+  async function automationView(project) {
+    const app = clear(document.getElementById('app'));
+    if (!S.me.admin) { app.append(topbar(), h('div', { class: 'page' }, h('p', {}, 'Only administrators can edit automation rules.'))); return; }
+    project = project || (S.projects[0] && S.projects[0].key) || '';
+    const sel = h('select', { 'aria-label': 'Project' }, S.projects.map(p => h('option', { value: p.key, selected: p.key === project }, p.key + ' · ' + p.name)));
+    sel.addEventListener('change', () => { location.hash = '#/admin/automation/' + sel.value; });
+    const list = h('div', { class: 'card', role: 'list' });
+    app.append(topbar(), adminTabs('automation'), h('div', { class: 'page' }, h('div', { class: 'chips' }, h('h2', { style: 'margin:0' }, 'Automation'), sel, h('span', { class: 'grow' }),
+      h('button', { class: 'btn primary', onclick: () => editRule(null) }, 'New rule')), h('p', { class: 'muted' }, 'A rule runs in the background when its trigger happens, as "Automation: <name>", through the same workflow checks a person meets. Use a dry run to see what a rule would do to an issue.'), list));
+    async function load() {
+      clear(list);
+      const r = await api('GET', '/api/v1/automation/rules?project=' + project);
+      if (r.status !== 200) { list.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      if (!r.data.length) list.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'This project has no automation rules.')));
+      for (const ru of r.data) {
+        const on = h('input', { type: 'checkbox', checked: ru.enabled, 'aria-label': 'Enable ' + ru.name });
+        on.addEventListener('change', async () => { const x = await api('PUT', '/api/v1/automation/rules/' + ru.id, Object.assign({}, ru, { enabled: on.checked })); if (x.status !== 200) { toast(errText(x)); on.checked = !on.checked; } });
+        list.append(h('div', { class: 'row', role: 'listitem' }, on, h('span', { class: 'sum' }, h('strong', {}, ru.name), ' ', h('span', { class: 'muted' }, ru.trigger.type + (ru.trigger.to ? ' → ' + ru.trigger.to : '') + ' · ' + ru.actions.length + ' action(s)')),
+          h('button', { class: 'btn ghost', 'aria-label': 'Edit ' + ru.name, onclick: () => editRule(ru) }, 'Edit'),
+          h('button', { class: 'btn ghost', 'aria-label': 'Dry run ' + ru.name, onclick: () => dryRun(ru) }, 'Dry run'),
+          h('button', { class: 'btn ghost', 'aria-label': 'Runs of ' + ru.name, onclick: () => runsDialog(ru) }, 'Runs'),
+          h('button', { class: 'btn ghost', 'aria-label': 'Delete ' + ru.name, onclick: () => deleteRule(ru) }, 'Delete')));
+      }
+    }
+    function editRule(ru) {
+      const cur = ru || RULE_TEMPLATE;
+      const name = h('input', { type: 'text', value: cur.name, 'aria-label': 'Rule name', style: 'width:100%' });
+      const ta = (label, v) => { const t = h('textarea', { 'aria-label': label, rows: 5, spellcheck: 'false', style: 'width:100%;font-family:monospace' }); t.value = JSON.stringify(v, null, 1); return t; };
+      const trig = ta('Trigger', cur.trigger), cond = ta('Conditions', cur.conditions || []), acts = ta('Actions', cur.actions);
+      const enabled = h('input', { type: 'checkbox', checked: cur.enabled });
+      const msg = h('div', { class: 'err', role: 'alert' });
+      const close = modal(h('div', {}, h('h2', {}, ru ? 'Edit ' + ru.name : 'New rule'), name,
+        h('label', { style: 'display:flex;gap:6px;align-items:center' }, enabled, 'Enabled'),
+        h('div', {}, h('strong', {}, 'Trigger '), h('span', { class: 'muted' }, 'issue.created, issue.updated (fields), issue.transitioned (from, to), comment.added (contains), schedule (every_minutes or daily_at, query)'), trig),
+        h('div', {}, h('strong', {}, 'Conditions '), h('span', { class: 'muted' }, 'query (TQL), field (field, op, value)'), cond),
+        h('div', {}, h('strong', {}, 'Actions '), h('span', { class: 'muted' }, 'transition, assign, set_field, comment, create_subtask, webhook, notify; smart values such as {{issue.key}}'), acts), msg,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
+          let body;
+          try { body = { name: name.value, project, enabled: enabled.checked, trigger: JSON.parse(trig.value), conditions: JSON.parse(cond.value || '[]'), actions: JSON.parse(acts.value) }; } catch (e) { msg.textContent = 'Not valid JSON: ' + e.message; return; }
+          const r = ru ? await api('PUT', '/api/v1/automation/rules/' + ru.id, body) : await api('POST', '/api/v1/automation/rules', body);
+          if (r.status === 200 || r.status === 201) { close(); toast('Rule saved'); load(); } else msg.textContent = errText(r);
+        } }, 'Save'))));
+    }
+    function dryRun(ru) {
+      const key = h('input', { type: 'text', 'aria-label': 'Issue key', placeholder: project + '-1' }), out = h('div', { 'aria-live': 'polite' });
+      const go = async () => {
+        clear(out);
+        const r = await api('POST', '/api/v1/automation/rules/' + ru.id + '/dry-run', { issue: key.value });
+        if (r.status !== 200) { out.append(h('div', { class: 'err' }, errText(r))); return; }
+        const d = r.data;
+        out.append(h('strong', {}, d.would_run ? 'The rule would run on ' + d.issue + '.' : 'The rule would not run: a condition fails.'),
+          h('ul', {}, d.conditions.map(c => h('li', {}, 'Condition ' + c.kind + ': ' + (c.passed ? 'passes' : 'fails — ' + c.why)))),
+          h('ul', {}, d.actions.map(a => h('li', { class: a.problem ? 'err' : '' }, a.problem ? a.kind + ': ' + a.problem : a.would))));
+      };
+      const close = modal(h('div', {}, h('h2', {}, 'Dry run: ' + ru.name), h('div', { class: 'chips' }, key, h('button', { class: 'btn', onclick: go }, 'Show what it would do')), out,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Close'))));
+    }
+    async function runsDialog(ru) {
+      const body = h('div', { role: 'list' });
+      const close = modal(h('div', {}, h('h2', {}, 'Runs of ' + ru.name), body, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Close'))));
+      const r = await api('GET', '/api/v1/automation/rules/' + ru.id + '/runs');
+      if (r.status !== 200) { body.append(h('p', { class: 'err' }, errText(r))); return; }
+      if (!r.data.length) body.append(h('div', { role: 'listitem', class: 'muted' }, 'No runs yet.'));
+      for (const x of r.data) body.append(h('div', { role: 'listitem' }, new Date(x.started).toLocaleString() + ' · ' + x.issue + ' · ' + x.state + (x.detail && (x.detail.error || x.detail.reason) ? ' — ' + (x.detail.error || x.detail.reason) : '')));
+    }
+    function deleteRule(ru) {
+      const close = modal(h('div', {}, h('h2', {}, 'Delete ' + ru.name + '?'), h('p', {}, 'The rule and its run history are removed.'), h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => close() }, 'Keep it'), h('button', { class: 'btn primary', onclick: async () => { const r = await api('DELETE', '/api/v1/automation/rules/' + ru.id); close(); if (r.status === 200) load(); else toast(errText(r)); } }, 'Delete'))));
+    }
+    await load();
   }
 
   // ---------- the diagram ----------
@@ -248,4 +324,5 @@
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/([0-9a-f-]{36})/, run: m => editorView(m[1]) });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/?$/, run: () => listView() });
   A.EXT.routes.push({ re: /^#\/admin\/audit\/?$/, run: () => auditView() });
+  A.EXT.routes.push({ re: /^#\/admin\/automation(?:\/([A-Za-z0-9]+))?\/?$/, run: m => automationView(m[1] ? m[1].toUpperCase() : '') });
 })();

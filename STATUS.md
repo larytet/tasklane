@@ -16,7 +16,7 @@ this file is updated, and the work is committed and pushed.
 | M1c Agents | **MCP server, gates, kill switch built** | milestones M1c.1 and M1c.2 below; OAuth, subscriptions and bulk tools are open |
 | M2 Agile | **built, exit gate not passed** | M2.1 to M2.9 below; the audit at the end of the M2 section lists what only a real service or a scale run can prove |
 | M3 Fields and workflow | **built, exit gate not passed** | M3.1 to M3.4 below; the exit gate's golden bundles from released versions (EXP-05) and the gaps listed per milestone are open |
-| M4 Enterprise | **in progress** | M4.1 audit log and M4.2 notifications built; SSO and SCIM, permission schemes, automation, retention and the rest are open |
+| M4 Enterprise | **in progress** | M4.1 audit log, M4.2 notifications and M4.3 automation built; SSO and SCIM, permission schemes, retention and the rest are open |
 | M5 | not started | |
 
 ## M4 milestones
@@ -26,6 +26,10 @@ this file is updated, and the work is committed and pushed.
 | M4.1 | Audit log (SEC-07): append-only (the database refuses update, delete and truncate), hash-chained in commit order with a verifier that names the first altered or missing entry, every successful administrative change recorded by a wrapper around the routes (new routes are audited unless declared ordinary work), a test over the authorization matrix, viewer API with filters and paging, CSV export that is itself recorded, Admin Audit log tab, `docs/AUDIT.md` | **built** |
 
 | M4.2 | Notifications (CORE-10, part): in-app inbox (unread, read, archived; counts; refreshes itself; permission re-checked on every read; internal comments protected), watchers with explicit mute, per-person preferences (auto-watch, channels, muted kinds, quiet hours with time zone), per-project notification schemes, exactly-once per person, event and kind (replay-safe), one planner for inbox and email, the notifier runs with or without mail, REST routes with matrix rows, Inbox view with bell, watch button, preferences dialog, `docs/NOTIFICATIONS.md` | **built** |
+
+| M4.3 | Automation (CORE-10, rest): rules of trigger, conditions and actions (created, updated, transitioned, commented, scheduled every N minutes or daily in a time zone; TQL and field conditions; transition, assign, set field, comment, create subtask, signed webhook, notify), smart values, run once per rule, issue and event, loop protection carried by the events themselves (chain and depth), per-rule throttle, dry run, run log, project administrators for their project and instance administrators for all, REST routes with matrix rows, Admin Automation screen, `docs/AUTOMATION.md` | **built** |
+
+M4.3 gaps: no manual-button, webhook-received, sprint or version triggers; no clone, link, log-work, add-to-sprint or branch actions; rules are edited as JSON lists in a dialog; an interrupted run is marked failed and not retried (at most once); the trigger match for scheduled rules uses PostgreSQL search only; webhook actions cannot yet loop back through inbound webhooks because there are none (MCP-20 for agents is covered by the same chain: an agent's events carry no rule chain, so an agent-triggered rule runs once).
 
 M4.2 gaps: no digest mode, no push or chat channels, no admin screen for notification schemes (API only), no per-event-type scheme beyond the five events, the inbox is polled (no realtime push), and the event types worklog, attachment, link, approval and sprint events are not notified. Issue found: the planner read the issue's current assignee, so a created event processed after a later assignment said "created and assigned it to you"; the created event now carries who was assigned at creation (clones and imports no longer notify). Issue found: an empty list with `role=list` fails axe, so empty-state rows are list items.
 

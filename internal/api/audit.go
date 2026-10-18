@@ -34,7 +34,8 @@ var ordinaryWork = map[string]bool{
 	"PUT /api/v1/sprints/{id}/retro":      true,
 	"POST /api/v1/notifications/read-all": true, "POST /api/v1/notifications/{id}/state": true, "PUT /api/v1/me/notification-prefs": true, // a person managing their own inbox
 	"PUT /api/v1/issues/{key}/watch": true, "DELETE /api/v1/issues/{key}/watch": true,
-	"POST /api/v1/workflows/{id}/draft/check": true, // a read: it plans and changes nothing
+	"POST /api/v1/automation/rules/{id}/dry-run": true, // a read: it shows what would happen and changes nothing
+	"POST /api/v1/workflows/{id}/draft/check":    true, // a read: it plans and changes nothing
 }
 
 type statusWriter struct {

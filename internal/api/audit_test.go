@@ -13,8 +13,9 @@ import (
 // notAdminActions lists matrix rows that only an administrator may call but that are not administrative changes:
 // they sign in, sign out, or only read or plan.
 var notAudited = map[string]string{
-	"POST /api/v1/login":  "sign-in is not an administrative change",
-	"POST /api/v1/logout": "sign-out is not an administrative change",
+	"POST /api/v1/login":                         "sign-in is not an administrative change",
+	"POST /api/v1/logout":                        "sign-out is not an administrative change",
+	"POST /api/v1/automation/rules/{id}/dry-run": "a read: it shows what a rule would do and changes nothing",
 }
 
 func isMutation(pattern string) bool {

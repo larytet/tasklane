@@ -42,12 +42,13 @@ func codes(c ...int) []int { return c }
 type exp map[role][]int
 
 var (
-	public  = exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}
-	authed  = exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}
-	reader  = exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}
-	writer  = exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200, 201), admin: codes(200, 201)}
-	adminer = exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200, 201)}
-	owner   = func(ok ...int) exp { // only the person who created it; everyone else sees nothing, administrators included
+	public    = exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}
+	authed    = exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}
+	reader    = exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}
+	writer    = exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(200, 201), admin: codes(200, 201)}
+	projAdmin = exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200, 201)} // a project's administrators; others do not learn the project exists
+	adminer   = exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(200, 201)}
+	owner     = func(ok ...int) exp { // only the person who created it; everyone else sees nothing, administrators included
 		return exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: ok, admin: codes(404)}
 	}
 )
@@ -215,6 +216,15 @@ func (f *fixture) workflow() string {
 		f.t.Fatal(err)
 	}
 	return w.ID
+}
+
+func (f *fixture) autoRule() int64 {
+	r, err := f.e.Svc.SaveAutoRule(testutil.Ctx(), f.e.Admin, 0, domain.AutoRule{Name: "matrix rule", Project: "ABC", Enabled: false,
+		Trigger: domain.Spec{"type": "issue.created"}, Actions: []domain.Spec{{"kind": "comment", "text": "hi"}}})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return r.ID
 }
 
 func (f *fixture) attachment(key string) string {
@@ -489,6 +499,23 @@ func rows() []row {
 		}},
 		{"PUT /api/v1/projects/{key}/notification-scheme", adminer, func(f *fixture) req {
 			return J("PUT", "/api/v1/projects/ABC/notification-scheme", map[string]any{"issue.transitioned": []string{"assignee"}})
+		}},
+		{"GET /api/v1/automation/rules", projAdmin, func(f *fixture) req { return J("GET", "/api/v1/automation/rules?project=ABC", nil) }},
+		{"POST /api/v1/automation/rules", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/automation/rules", map[string]any{"name": "new", "project": "ABC", "enabled": false, "trigger": map[string]any{"type": "issue.created"}, "actions": []map[string]any{{"kind": "comment", "text": "hi"}}})
+		}},
+		{"GET /api/v1/automation/rules/{id}", projAdmin, func(f *fixture) req { return J("GET", fmt.Sprintf("/api/v1/automation/rules/%d", f.autoRule()), nil) }},
+		{"PUT /api/v1/automation/rules/{id}", projAdmin, func(f *fixture) req {
+			return J("PUT", fmt.Sprintf("/api/v1/automation/rules/%d", f.autoRule()), map[string]any{"name": "renamed", "project": "ABC", "enabled": false, "trigger": map[string]any{"type": "issue.created"}, "actions": []map[string]any{{"kind": "comment", "text": "hi"}}})
+		}},
+		{"DELETE /api/v1/automation/rules/{id}", projAdmin, func(f *fixture) req {
+			return J("DELETE", fmt.Sprintf("/api/v1/automation/rules/%d", f.autoRule()), nil)
+		}},
+		{"POST /api/v1/automation/rules/{id}/dry-run", projAdmin, func(f *fixture) req {
+			return J("POST", fmt.Sprintf("/api/v1/automation/rules/%d/dry-run", f.autoRule()), map[string]any{"issue": f.issue()})
+		}},
+		{"GET /api/v1/automation/rules/{id}/runs", projAdmin, func(f *fixture) req {
+			return J("GET", fmt.Sprintf("/api/v1/automation/rules/%d/runs", f.autoRule()), nil)
 		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {

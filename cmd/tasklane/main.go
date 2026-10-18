@@ -253,6 +253,8 @@ func serve(ctx context.Context, cfg config.Config) {
 		}()
 		go searchAdmin.RunMaintenance(ixCtx, 6*time.Hour, log.Printf)
 	}
+	svc.Matcher = search.Matcher{Engine: pgEngine, Now: svc.Now} // automation reads PostgreSQL, never a lagging copy
+	go svc.RunAutomation(ctx, log.Printf)
 	go sprintJobs(ctx, svc)
 	hub := rt.New(svc)
 	go hub.SweepLoop(ctx)
