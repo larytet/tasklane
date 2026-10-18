@@ -107,8 +107,9 @@ test('LIFE-12: archive a finished issue from the ticket, find it by query, resto
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
   // hidden from the default list, found by archived = true
+  const searched = page.waitForResponse(r => r.url().includes('/api/v1/issues?') && r.url().includes('q=' + encodeURIComponent('key = ' + key)));
   await page.goto('/#/?q=' + encodeURIComponent('key = ' + key));
-  await page.waitForLoadState('networkidle');
+  await searched; // the answer is in: the empty list below is a result, not a page that has not loaded yet
   await expect(page.getByText(sum)).toHaveCount(0);
   await page.goto('/#/?q=' + encodeURIComponent('archived = true AND key = ' + key));
   await expect(page.getByText(sum)).toBeVisible();
