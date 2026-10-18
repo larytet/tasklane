@@ -40,6 +40,16 @@ type DevPanel struct {
 	Builds      []DevItem `json:"builds"`
 	Deployments []DevItem `json:"deployments"`
 	Build       string    `json:"build,omitempty"` // passing, running or failing across the builds shown
+	// Automation is what rules and smart commands did to this issue, or why they did not: the record people look for when an
+	// issue moved, or a command in a commit seemed to be ignored.
+	Automation []DevAuto `json:"automation,omitempty"`
+}
+
+type DevAuto struct {
+	Source  string    `json:"source"` // rule or smart_commit
+	Outcome string    `json:"outcome"`
+	Text    string    `json:"text"`
+	At      time.Time `json:"at"`
 }
 
 const devCommitCap = 25
@@ -106,6 +116,17 @@ func (s *Service) Development(ctx context.Context, a Actor, key string) (DevPane
 		}
 	}
 	d.Summary = devSummary(d)
+	// the last few things code events did here (their reasons name no one's private details: a person is never named)
+	rows, err := s.DB.Query(ctx, `SELECT 'rule',r.outcome,g.name||': '||r.detail,r.at FROM git_rule_run r JOIN git_rule g ON g.id=r.rule_id WHERE r.issue_id::text=$1 AND r.detail<>'claimed'
+		UNION ALL SELECT 'smart_commit',m.outcome,m.command||': '||m.reason,m.at FROM git_smart_run m WHERE m.issue_key=$2 AND m.reason<>'claimed' ORDER BY 4 DESC LIMIT 10`, is.ID, is.Key)
+	if err == nil {
+		for rows.Next() {
+			var x DevAuto
+			rows.Scan(&x.Source, &x.Outcome, &x.Text, &x.At)
+			d.Automation = append(d.Automation, x)
+		}
+		rows.Close()
+	}
 	return d, nil
 }
 
@@ -291,7 +312,7 @@ func (s *Service) syncGitRepo(ctx context.Context, repoID string) (int, error) {
 		s.DB.Exec(ctx, `UPDATE git_repo SET sync_error=$2 WHERE id::text=$1`, repoID, trimErr(err))
 		return 0, err
 	}
-	if err := s.applyGitEvents(ctx, connID, evs); err != nil {
+	if err := s.applyGitEvents(ctx, connID, evs, false); err != nil {
 		s.DB.Exec(ctx, `UPDATE git_repo SET sync_error=$2 WHERE id::text=$1`, repoID, trimErr(err))
 		return 0, err
 	}

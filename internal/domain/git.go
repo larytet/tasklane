@@ -383,7 +383,7 @@ func (s *Service) ProcessGitInbox(ctx context.Context, limit int) (int, error) {
 		p, _ := git.ByName(it.prov)
 		evs, perr := p.Parse(it.e, it.payload)
 		if perr == nil {
-			perr = s.applyGitEvents(ctx, it.conn, evs)
+			perr = s.applyGitEvents(ctx, it.conn, evs, true)
 		}
 		if perr != nil {
 			s.DB.Exec(ctx, `UPDATE git_inbox SET attempts=attempts+1,error=$2 WHERE id=$1`, it.id, trimErr(perr))
@@ -405,13 +405,15 @@ func trimErr(err error) string {
 }
 
 type repoInfo struct {
-	id       string
-	projects map[string]string // project key -> project id
+	id            string
+	projects      map[string]string // project key -> project id
+	provider      string
+	defaultBranch string
 }
 
 func (s *Service) repoFor(ctx context.Context, connID, full string) (*repoInfo, error) {
 	var r repoInfo
-	err := s.DB.QueryRow(ctx, `SELECT id::text FROM git_repo WHERE connection_id::text=$1 AND lower(full_name)=lower($2)`, connID, full).Scan(&r.id)
+	err := s.DB.QueryRow(ctx, `SELECT r.id::text,c.provider,r.default_branch FROM git_repo r JOIN git_connection c ON c.id=r.connection_id WHERE r.connection_id::text=$1 AND lower(r.full_name)=lower($2)`, connID, full).Scan(&r.id, &r.provider, &r.defaultBranch)
 	if err == pgx.ErrNoRows {
 		return nil, nil // an event for a repository nobody mapped: ignored
 	}
@@ -432,7 +434,9 @@ func (s *Service) repoFor(ctx context.Context, connID, full string) (*repoInfo, 
 	return &r, nil
 }
 
-func (s *Service) applyGitEvents(ctx context.Context, connID string, evs []git.Event) error {
+// applyGitEvents stores the events. With live (a webhook delivery, not a backfill or reconcile) the rules and smart commits the
+// events trigger run afterwards: replaying a repository's history must never move issues that finished long ago.
+func (s *Service) applyGitEvents(ctx context.Context, connID string, evs []git.Event, live bool) error {
 	repos := map[string]*repoInfo{}
 	touched := map[string]bool{}
 	for _, e := range evs {
@@ -447,12 +451,20 @@ func (s *Service) applyGitEvents(ctx context.Context, connID string, evs []git.E
 		if ri == nil {
 			continue
 		}
-		keys, err := s.applyGitEvent(ctx, ri, e)
+		if e.DefaultBranch != "" && e.DefaultBranch != ri.defaultBranch {
+			s.DB.Exec(ctx, `UPDATE git_repo SET default_branch=$2 WHERE id::text=$1`, ri.id, e.DefaultBranch)
+			ri.defaultBranch = e.DefaultBranch
+		}
+		keys, ap, err := s.applyGitEvent(ctx, ri, e)
 		if err != nil {
 			return err
 		}
 		for _, k := range keys {
 			touched[k] = true
+		}
+		if live && ap != nil {
+			s.runGitRules(ctx, ri, *ap)
+			s.runSmartCommits(ctx, ri, *ap)
 		}
 	}
 	for k := range touched {
@@ -463,9 +475,10 @@ func (s *Service) applyGitEvents(ctx context.Context, connID string, evs []git.E
 
 // applyGitEvent upserts one object (the provider's newer version wins) and recomputes its automatic links. It returns the
 // keys of issues whose development panel changed.
-func (s *Service) applyGitEvent(ctx context.Context, r *repoInfo, e git.Event) ([]string, error) {
+func (s *Service) applyGitEvent(ctx context.Context, r *repoInfo, e git.Event) ([]string, *gitApplied, error) {
 	var objID string
 	var affected []string
+	var applied *gitApplied
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		if e.Deleted {
 			rows, err := tx.Query(ctx, `SELECT i.key FROM git_object o JOIN git_link l ON l.object_id=o.id JOIN issue i ON i.id=l.issue_id WHERE o.repo_id::text=$1 AND o.kind=$2 AND o.ext_id=$3`, r.id, e.Kind, e.ExtID)
@@ -481,13 +494,13 @@ func (s *Service) applyGitEvent(ctx context.Context, r *repoInfo, e git.Event) (
 			_, err = tx.Exec(ctx, `DELETE FROM git_object WHERE repo_id::text=$1 AND kind=$2 AND ext_id=$3`, r.id, e.Kind, e.ExtID)
 			return err
 		}
+		// who did it: a linked provider account, or an email the provider vouches for. A name or email written in a commit never maps.
 		var user any
-		if e.Email != "" {
-			var uid string
-			if tx.QueryRow(ctx, `SELECT id::text FROM app_user WHERE lower(email)=lower($1) AND active`, e.Email).Scan(&uid) == nil {
-				user = uid
-			}
+		if uid := s.gitUser(ctx, tx, r.provider, e.Login, e.VerifiedEmail); uid != nil {
+			user = *uid
 		}
+		var prev string
+		existed := tx.QueryRow(ctx, `SELECT state FROM git_object WHERE repo_id::text=$1 AND kind=$2 AND ext_id=$3`, r.id, e.Kind, e.ExtID).Scan(&prev) == nil
 		meta := map[string]any{}
 		for k, v := range e.Extra {
 			meta[k] = v
@@ -524,6 +537,9 @@ func (s *Service) applyGitEvent(ctx context.Context, r *repoInfo, e git.Event) (
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM git_object WHERE repo_id::text=$1 AND kind=$2 AND ext_id=$3`, r.id, e.Kind, e.ExtID).Scan(&objID); err != nil {
 			return err
 		}
+		if !reviewOnly {
+			applied = &gitApplied{objID: objID, ev: e, existed: existed, prev: prev}
+		}
 		if e.Kind == git.KindPR || e.Kind == git.KindBranch || e.Kind == git.KindCommit {
 			text := e.Title + "\n" + e.Body
 			if e.Kind == git.KindPR {
@@ -538,7 +554,10 @@ func (s *Service) applyGitEvent(ctx context.Context, r *repoInfo, e git.Event) (
 		}
 		return nil
 	})
-	return affected, err
+	if err != nil {
+		return nil, nil, err
+	}
+	return affected, applied, nil
 }
 
 // issueKeyRe builds the matcher for the keys of the projects a repository is mapped to: case-insensitive, and never
@@ -552,7 +571,29 @@ func issueKeyRe(projects map[string]string) *regexp.Regexp {
 		ks = append(ks, regexp.QuoteMeta(k))
 	}
 	sort.Strings(ks)
-	return regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(` + strings.Join(ks, "|") + `)-(\d{1,9})(?:$|[^A-Za-z0-9])`)
+	// the character after the key is checked by keyHits, not consumed here: otherwise "ABC-1 ABC-2" with one space between would
+	// lose the second key, whose leading separator the first match had taken
+	return regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])(` + strings.Join(ks, "|") + `)-(\d{1,9})`)
+}
+
+type keyHit struct {
+	key string // upper case, "ABC-12"
+	end int    // where the key ends in the text
+}
+
+// keyHits finds the issue keys in text: case-insensitive, never inside a longer word or number (UTF-8, ABC-12x, ABC-1234567890).
+func keyHits(re *regexp.Regexp, text string) []keyHit {
+	var out []keyHit
+	for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
+		if m[1] < len(text) {
+			c := text[m[1]]
+			if c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' {
+				continue
+			}
+		}
+		out = append(out, keyHit{key: strings.ToUpper(text[m[2]:m[3]]) + "-" + text[m[4]:m[5]], end: m[1]})
+	}
+	return out
 }
 
 // relink replaces the object's automatic links with the issues named in text. Manual links stay. It returns the keys
@@ -560,8 +601,8 @@ func issueKeyRe(projects map[string]string) *regexp.Regexp {
 func (s *Service) relink(ctx context.Context, tx pgx.Tx, r *repoInfo, objID, text string) ([]string, error) {
 	want := map[string]string{} // issue id -> key
 	if re := issueKeyRe(r.projects); re != nil {
-		for _, m := range re.FindAllStringSubmatch(text+" ", -1) {
-			key := strings.ToUpper(m[1]) + "-" + m[2]
+		for _, h := range keyHits(re, text) {
+			key := h.key
 			var id, cur string
 			// the key may be an old one: resolve through aliases, and ignore trashed or missing issues
 			err := tx.QueryRow(ctx, `SELECT i.id::text,i.key FROM issue i WHERE i.deleted_at IS NULL AND (i.key=$1 OR i.id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1)) LIMIT 1`, key).Scan(&id, &cur)

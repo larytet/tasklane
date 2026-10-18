@@ -43,6 +43,14 @@ type Event struct {
 	Deleted bool      // a branch that was deleted
 	At      time.Time // the provider's own timestamp for this version of the object: later wins
 	Extra   map[string]any
+	// Login is the provider account the provider itself says made this (a GitHub commit's author username, which GitHub fills in only
+	// when the commit email belongs to that account; the GitLab user who pushed or opened the merge request). It is the basis for
+	// mapping a code event to a person, never the free-text author name or the commit email, which anyone can write.
+	Login string
+	// VerifiedEmail is an email the provider vouches for as belonging to Login (empty when it does not).
+	VerifiedEmail string
+	// DefaultBranch is the repository's default branch as the payload states it.
+	DefaultBranch string
 }
 
 var ErrBadSignature = errors.New("webhook signature does not verify")
@@ -173,7 +181,7 @@ func ghPR(repo string, pr map[string]any, at time.Time) Event {
 		at = t
 	}
 	return Event{Kind: KindPR, Repo: repo, ExtID: fmt.Sprint(num(pr, "number")), Title: trunc(str(pr, "title"), 500), Body: str(pr, "body"), State: state,
-		Author: str(user, "login"), URL: str(pr, "html_url"), SHA: str(head, "sha"), Branch: str(head, "ref"), Base: str(base, "ref"), At: at}
+		Author: str(user, "login"), Login: str(user, "login"), URL: str(pr, "html_url"), SHA: str(head, "sha"), Branch: str(head, "ref"), Base: str(base, "ref"), At: at}
 }
 
 func (GitHub) Parse(event string, body []byte) ([]Event, error) {
@@ -219,8 +227,9 @@ func (GitHub) Parse(event string, body []byte) ([]Event, error) {
 		if boolean(m, "deleted") {
 			return []Event{{Kind: KindBranch, Repo: repo, ExtID: branch, Title: branch, Branch: branch, Deleted: true, At: time.Now().UTC()}}, nil
 		}
-		evs := []Event{{Kind: KindBranch, Repo: repo, ExtID: branch, Title: branch, Branch: branch, SHA: str(m, "after"), State: "open", At: at,
-			URL: strings.TrimSuffix(str(obj(m, "repository"), "html_url"), "/") + "/tree/" + branch}}
+		def := str(obj(m, "repository"), "default_branch")
+		evs := []Event{{Kind: KindBranch, Repo: repo, ExtID: branch, Title: branch, Branch: branch, SHA: str(m, "after"), State: "open", At: at, DefaultBranch: def,
+			Login: str(obj(m, "pusher"), "name"), URL: strings.TrimSuffix(str(obj(m, "repository"), "html_url"), "/") + "/tree/" + branch}}
 		cs := arr(m, "commits")
 		for i, c := range cs {
 			if i >= MaxCommitsPerPush {
@@ -234,8 +243,12 @@ func (GitHub) Parse(event string, body []byte) ([]Event, error) {
 			if name == "" {
 				name = str(au, "name")
 			}
+			login, verified := str(au, "username"), ""
+			if login != "" { // GitHub fills the username in only when the commit email belongs to that account
+				verified = str(au, "email")
+			}
 			evs = append(evs, Event{Kind: KindCommit, Repo: repo, ExtID: str(cm, "id"), Title: trunc(subj, 300), Body: rest, Author: name, Email: str(au, "email"),
-				URL: str(cm, "url"), SHA: str(cm, "id"), Branch: branch, At: ts(ghTime, str(cm, "timestamp"))})
+				Login: login, VerifiedEmail: verified, DefaultBranch: def, URL: str(cm, "url"), SHA: str(cm, "id"), Branch: branch, At: ts(ghTime, str(cm, "timestamp"))})
 		}
 		return evs, nil
 	case "check_run":
@@ -327,7 +340,8 @@ func (GitLab) Parse(event string, body []byte) ([]Event, error) {
 			state = "draft"
 		}
 		e := Event{Kind: KindPR, Repo: repo, ExtID: fmt.Sprint(num(a, "iid")), Title: trunc(str(a, "title"), 500), Body: str(a, "description"), State: state,
-			Author: str(obj(m, "user"), "username"), Email: str(obj(m, "user"), "email"), URL: str(a, "url"), SHA: str(obj(a, "last_commit"), "id"), Branch: str(a, "source_branch"),
+			Author: str(obj(m, "user"), "username"), Email: str(obj(m, "user"), "email"), Login: str(obj(m, "user"), "username"), VerifiedEmail: str(obj(m, "user"), "email"),
+			DefaultBranch: str(obj(m, "project"), "default_branch"), URL: str(a, "url"), SHA: str(obj(a, "last_commit"), "id"), Branch: str(a, "source_branch"),
 			Base: str(a, "target_branch"), At: ts(glTime, str(a, "updated_at"))}
 		switch str(a, "action") {
 		case "approved":
@@ -347,7 +361,8 @@ func (GitLab) Parse(event string, body []byte) ([]Event, error) {
 			return []Event{{Kind: KindBranch, Repo: repo, ExtID: branch, Title: branch, Branch: branch, Deleted: true, At: time.Now().UTC()}}, nil
 		}
 		var last time.Time
-		evs := []Event{{Kind: KindBranch, Repo: repo, ExtID: branch, Title: branch, Branch: branch, SHA: after, State: "open",
+		def, pusher, pusherEmail := str(obj(m, "project"), "default_branch"), str(m, "user_username"), str(m, "user_email")
+		evs := []Event{{Kind: KindBranch, Repo: repo, ExtID: branch, Title: branch, Branch: branch, SHA: after, State: "open", DefaultBranch: def, Login: pusher,
 			URL: strings.TrimSuffix(str(obj(m, "project"), "web_url"), "/") + "/-/tree/" + branch}}
 		cs := arr(m, "commits")
 		for i, c := range cs {
@@ -365,8 +380,14 @@ func (GitLab) Parse(event string, body []byte) ([]Event, error) {
 			if at.After(last) {
 				last = at
 			}
+			// the pusher is authenticated by GitLab; the commit author's name and email are whatever the commit says, so the commit
+			// is attributed to the pusher only when the commit email is the pusher's own
+			login, verified := "", ""
+			if pusher != "" && pusherEmail != "" && strings.EqualFold(str(au, "email"), pusherEmail) {
+				login, verified = pusher, pusherEmail
+			}
 			evs = append(evs, Event{Kind: KindCommit, Repo: repo, ExtID: str(cm, "id"), Title: trunc(subj, 300), Body: rest, Author: str(au, "name"), Email: str(au, "email"),
-				URL: str(cm, "url"), SHA: str(cm, "id"), Branch: branch, At: at})
+				Login: login, VerifiedEmail: verified, DefaultBranch: def, URL: str(cm, "url"), SHA: str(cm, "id"), Branch: branch, At: at})
 		}
 		evs[0].At = last
 		return evs, nil

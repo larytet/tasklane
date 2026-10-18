@@ -57,8 +57,29 @@ func GHPR(repo string, number int, title, body, branch, sha, state string, merge
 }
 
 func GHPush(repo, branch, after string, commits []M, ts time.Time) M {
-	return M{"ref": "refs/heads/" + branch, "after": after, "repository": M{"full_name": repo, "html_url": "https://github.com/" + repo},
+	return M{"ref": "refs/heads/" + branch, "after": after, "repository": M{"full_name": repo, "html_url": "https://github.com/" + repo, "default_branch": "main"},
 		"head_commit": M{"timestamp": ts.UTC().Format(time.RFC3339)}, "commits": commits}
+}
+
+// GHCommitBy is a commit whose author the provider names: with a login, GitHub vouches that the email belongs to that account;
+// without one (an empty login) the name and email are only what the commit says.
+func GHCommitBy(sha, msg, login, email string, ts time.Time) M {
+	au := M{"name": "Some Body", "email": email}
+	if login != "" {
+		au["username"] = login
+	}
+	return M{"id": sha, "message": msg, "timestamp": ts.UTC().Format(time.RFC3339), "url": "https://github.com/x/y/commit/" + sha, "author": au}
+}
+
+// GLPush is a GitLab push: the pusher is authenticated by GitLab; the commit authors are whatever the commits say.
+func GLPush(repo, branch, after, pusher, pusherEmail string, commits []M, ts time.Time) M {
+	return M{"ref": "refs/heads/" + branch, "after": after, "user_username": pusher, "user_email": pusherEmail,
+		"project": M{"path_with_namespace": repo, "web_url": "https://gitlab.example/" + repo, "default_branch": "main"}, "commits": commits}
+}
+
+func GLCommit(sha, msg, name, email string, ts time.Time) M {
+	return M{"id": sha, "message": msg, "title": strings.SplitN(msg, "\n", 2)[0], "timestamp": ts.UTC().Format("2006-01-02T15:04:05Z"), "url": "https://gitlab.example/x/y/-/commit/" + sha,
+		"author": M{"name": name, "email": email}}
 }
 
 func GHCommit(sha, msg, email string, ts time.Time) M {

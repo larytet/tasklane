@@ -366,6 +366,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerGroups(mux)
 	s.registerQuota(mux)
 	s.registerInboundMail(mux)
+	s.registerGitAuto(mux)
 	s.registerSCIM(mux)
 	s.registerJira(mux)
 	s.registerSearchAdmin(mux)

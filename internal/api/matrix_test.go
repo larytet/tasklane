@@ -727,6 +727,24 @@ func rows() []row {
 			return J("PUT", "/api/v1/admin/storage/tiering/rules", map[string]any{"rules": []any{map[string]any{"name": "old logs", "class": "log", "min_age_days": 30, "enabled": true}}})
 		}},
 		{"POST /api/v1/admin/storage/tiering/run", adminer, func(f *fixture) req { return J("POST", "/api/v1/admin/storage/tiering/run", nil) }},
+		{"GET /api/v1/projects/{key}/git/rules", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/git/rules", nil) }},
+		{"POST /api/v1/projects/{key}/git/rules", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/projects/ABC/git/rules", map[string]any{"name": "r", "trigger": "pr_merged", "comment": "merged", "mode": "off"})
+		}},
+		{"PUT /api/v1/projects/{key}/git/rules/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/git/rules/999999", map[string]any{"name": "r", "trigger": "pr_merged", "comment": "merged", "mode": "off"})
+		}},
+		{"DELETE /api/v1/projects/{key}/git/rules/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/projects/ABC/git/rules/999999", nil) }},
+		{"GET /api/v1/projects/{key}/git/rule-runs", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/git/rule-runs", nil) }},
+		{"PUT /api/v1/projects/{key}/git/smart-commits", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/git/smart-commits", map[string]any{"mode": "off"})
+		}},
+		{"GET /api/v1/git/identities", adminer, func(f *fixture) req { return J("GET", "/api/v1/git/identities", nil) }},
+		{"POST /api/v1/git/identities", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/git/identities", map[string]any{"provider": "github", "login": fmt.Sprint("octo", f.n), "user": f.spare.ID})
+		}},
+		{"DELETE /api/v1/git/identities/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/git/identities/999999", nil) }},
 		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
 		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
 		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},
