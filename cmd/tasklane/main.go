@@ -203,6 +203,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	go svc.RunBlobWorkers(ctx, log.Printf)
 	go svc.RunLifecycle(ctx, log.Printf)
 	go svc.RunGitWorkers(ctx, log.Printf)
+	go svc.RunJiraWorkers(ctx, log.Printf)
 	if cfg.SMTPHost != "" {
 		dom := "tasklane.local"
 		if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {

@@ -144,7 +144,7 @@ func (e *Postgres) Typeahead(ctx context.Context, sc Scope, term string, limit i
 		args = append(args, sc.Readable)
 	}
 	rows, err := e.DB.Query(ctx, `SELECT i.key,i.summary,t.name,st.name,st.category,i.priority,COALESCE(asg.name,''),p.key,i.labels,i.updated_at,0`+listFrom+
-		` WHERE i.deleted_at IS NULL`+scope+` AND (i.key ILIKE $1 || '%' OR EXISTS (SELECT 1 FROM issue_search s WHERE s.issue_id=i.id AND s.summary_norm LIKE '%' || lower(unaccent($1)) || '%'))
+		` WHERE i.deleted_at IS NULL AND NOT i.restricted`+scope+` AND (i.key ILIKE $1 || '%' OR EXISTS (SELECT 1 FROM issue_search s WHERE s.issue_id=i.id AND s.summary_norm LIKE '%' || lower(unaccent($1)) || '%'))
 		ORDER BY (i.key ILIKE $1 || '%') DESC, i.updated_at DESC LIMIT $2`, args...)
 	if err != nil {
 		return nil, err

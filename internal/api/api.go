@@ -325,6 +325,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerSprints(mux)
 	s.registerReports(mux)
 	s.registerGit(mux)
+	s.registerJira(mux)
 	s.registerSearchAdmin(mux)
 	s.registerAttachments(mux)
 	s.registerExchange(mux)
@@ -568,6 +569,7 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		pm  *domain.PatchMismatch
 		om  *domain.OffsetMismatch
 		be  *domain.BlockedError
+		rom *domain.ReadOnlyMirror
 		ep  *domain.ErrPaused
 		ce  *domain.ConflictError
 		nd  *domain.NotDownloadable
@@ -596,6 +598,8 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.fail(w, 409, "drain_timeout", err.Error(), nil)
 	case errors.As(err, &be):
 		s.fail(w, 409, "blocked", be.Error(), be.Plan)
+	case errors.As(err, &rom):
+		s.fail(w, 403, "read_only_mirror", rom.Error(), map[string]string{"project": rom.Project, "jira_url": rom.SiteURL})
 	case errors.As(err, &ce):
 		s.fail(w, 409, "conflict", ce.Error(), nil)
 	case errors.As(err, &nd):

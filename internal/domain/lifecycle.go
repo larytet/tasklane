@@ -208,7 +208,7 @@ func (s *Service) projectRole(ctx context.Context, tx pgx.Tx, a Actor, projectID
 		return "admin"
 	}
 	var r string
-	tx.QueryRow(ctx, `SELECT role FROM project_member WHERE project_id=$1 AND user_id=$2`, projectID, a.ID).Scan(&r)
+	tx.QueryRow(ctx, `SELECT role FROM effective_member WHERE project_id=$1 AND user_id=$2`, projectID, a.ID).Scan(&r)
 	return r
 }
 

@@ -134,6 +134,9 @@ func (s *Service) StartUpload(ctx context.Context, a Actor, key, name, declaredM
 	if !canWrite(role) {
 		return UploadSession{}, ErrForbidden
 	}
+	if site := s.mirrorSite(ctx, is.Project); site != "" { // no file goes onto a mirrored issue, not even into a staging session
+		return UploadSession{}, &ReadOnlyMirror{Project: is.Project, SiteURL: site}
+	}
 	if size <= 0 {
 		return UploadSession{}, invalid("file size is required")
 	}

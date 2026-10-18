@@ -179,6 +179,9 @@ func (s *Service) CreateSprint(ctx context.Context, a Actor, boardID string, in 
 	if b.Kind != "scrum" {
 		return Sprint{}, invalid("only scrum boards have sprints")
 	}
+	if site := s.mirrorSite(ctx, b.Project); site != "" { // weekly sprints and rollover are not available on mirrored projects
+		return Sprint{}, &ReadOnlyMirror{Project: b.Project, SiteURL: site}
+	}
 	if len(in.Name) > 100 || len(in.Goal) > 500 {
 		return Sprint{}, invalid("a sprint name is up to 100 characters and a goal up to 500")
 	}
@@ -201,7 +204,7 @@ func (s *Service) CreateSprint(ctx context.Context, a Actor, boardID string, in 
 // EnsureSprints creates future sprints until the board has its configured number ready (idempotent, safe on every node).
 func (s *Service) EnsureSprints(ctx context.Context, boardID string) (int, error) {
 	b, _, err := s.boardRow(ctx, s.DB, boardID)
-	if err != nil || b.Kind != "scrum" {
+	if err != nil || b.Kind != "scrum" || s.mirrorSite(ctx, b.Project) != "" {
 		return 0, err
 	}
 	created := 0
@@ -556,7 +559,7 @@ func (s *Service) containerCards(ctx context.Context, b Board, pid, sprintID str
 	if sprintID != "" {
 		arg = sprintID
 	}
-	rows, err := s.DB.Query(ctx, cardSQL+` WHERE i.project_id=$2 AND i.deleted_at IS NULL AND `+fmt.Sprintf(cond, 3)+` ORDER BY COALESCE(br.rank,i.rank) COLLATE "C", i.number`, b.ID, pid, arg)
+	rows, err := s.DB.Query(ctx, cardSQL+` WHERE i.project_id=$2 AND i.deleted_at IS NULL AND NOT i.restricted AND `+fmt.Sprintf(cond, 3)+` ORDER BY COALESCE(br.rank,i.rank) COLLATE "C", i.number`, b.ID, pid, arg)
 	_ = extra
 	if err != nil {
 		return nil, err

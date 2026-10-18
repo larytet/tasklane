@@ -505,6 +505,9 @@ func (c *importCtx) projects(ctx context.Context, d *BundleData) error {
 		var existingIssues int
 		err := c.tx.QueryRow(ctx, `SELECT id FROM project WHERE key=$1`, key).Scan(&pid)
 		if err == nil {
+			if site := c.s.mirrorSite(ctx, key); site != "" { // a mirrored project is only ever written by its sync
+				return &ReadOnlyMirror{Project: key, SiteURL: site}
+			}
 			c.tx.QueryRow(ctx, `SELECT count(*) FROM issue WHERE project_id=$1`, pid).Scan(&existingIssues)
 			var matching int
 			c.tx.QueryRow(ctx, `SELECT count(*) FROM issue WHERE project_id=$1 AND external_id IS NOT NULL`, pid).Scan(&matching)

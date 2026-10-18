@@ -364,6 +364,7 @@ func errorText(err error) string {
 	var lh *domain.LeaseHeld
 	var ep *domain.ErrPaused
 	var be *domain.BlockedError
+	var rom *domain.ReadOnlyMirror
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return "not found, or you do not have access"
@@ -385,6 +386,8 @@ func errorText(err error) string {
 		return ep.Error()
 	case errors.As(err, &be):
 		return be.Error()
+	case errors.As(err, &rom):
+		return rom.Error() // names the Jira site: the agent can tell the person where to make the change
 	}
 	return "the call failed"
 }

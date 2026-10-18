@@ -302,7 +302,7 @@ func (s *Service) mayReceive(ctx context.Context, q interface {
 	var admin bool
 	var role string
 	q.QueryRow(ctx, `SELECT is_admin FROM app_user WHERE id=$1 AND active`, userID).Scan(&admin)
-	q.QueryRow(ctx, `SELECT role FROM project_member WHERE project_id=$1 AND user_id=$2`, projectID, userID).Scan(&role)
+	q.QueryRow(ctx, `SELECT role FROM effective_member WHERE project_id=$1 AND user_id=$2`, projectID, userID).Scan(&role)
 	if admin {
 		role = "admin"
 	}

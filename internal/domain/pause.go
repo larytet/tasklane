@@ -111,6 +111,14 @@ func (s *Service) blockedBy(ctx context.Context, projectKey string) *PauseLease 
 // admit is called at the start of every write that a pause covers. It waits briefly for a pause to end, then refuses with
 // ErrPaused. The returned function must be called when the write is done: it is what the drain waits for.
 func (s *Service) admit(ctx context.Context, projectKey string) (func(), error) {
+	if site := s.mirrorSite(ctx, projectKey); site != "" { // a mirrored project is read-only on every path
+		return nil, &ReadOnlyMirror{Project: strings.ToUpper(projectKey), SiteURL: site}
+	}
+	return s.admitGate(ctx, projectKey)
+}
+
+// admitGate is the pause gate alone: the Jira sync writes mirrored projects with its own SQL but still honours a pause.
+func (s *Service) admitGate(ctx context.Context, projectKey string) (func(), error) {
 	projectKey = strings.ToUpper(projectKey)
 	deadline := time.Now().Add(PauseAdmitWait)
 	for {

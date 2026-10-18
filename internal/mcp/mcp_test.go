@@ -20,6 +20,7 @@ import (
 	"github.com/larytet/tasklane/internal/mcp"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/testutil"
+	"github.com/larytet/tasklane/internal/testutil/jiramock"
 )
 
 var ctx = context.Background()
@@ -960,5 +961,42 @@ func TestMCP14_KillSwitchAndAgentPause(t *testing.T) {
 	e.Svc.KillAgents(ctx, e.Admin, false)
 	if code, _, _ := a2.post(a2.token, map[string]any{"jsonrpc": "2.0", "id": 8, "method": "ping"}, nil); code != 200 {
 		t.Fatalf("after the switch is off: %d", code)
+	}
+}
+
+// MIR-07 for agents: write tools on a mirrored issue return the typed refusal with the Jira site; read tools still work.
+func TestMCP_MirroredIssuesAreReadOnlyForAgents(t *testing.T) {
+	e := newEnv(t)
+	jm := jiramock.New("sync@example.com", "tok")
+	defer jm.Close()
+	jm.Upsert(jiramock.IssueJSON("10001", "WEB-1", "WEB", "Mirrored issue", "To Do", "new", "Task", time.Now().Add(-time.Hour), time.Now().Add(-time.Minute)))
+	c, _, err := e.Svc.CreateJiraConnection(ctx, e.Admin, domain.JiraConnIn{Name: "acme", SiteURL: jm.URL, Email: "sync@example.com", Token: "tok", AllowPrivate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Svc.MirrorJiraProject(ctx, e.Admin, c.ID, "WEB", "WEB", "Web", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Svc.SyncJiraProject(ctx, e.Admin, "WEB"); err != nil {
+		t.Fatal(err)
+	}
+	ag := e.newAgent("jira-reader", "", nil)
+	ag.init()
+	e.Store.Pool.Exec(ctx, `INSERT INTO project_member(project_id,user_id,role) SELECT p.id,$1::uuid,'member' FROM project p WHERE p.key='WEB'`, ag.user.ID)
+	e.Store.Pool.Exec(ctx, `UPDATE jira_project SET perm_synced_at=now()`)
+	if r := ag.ok("get_issue", map[string]any{"key": "WEB-1"}); !strings.Contains(r.Text, "Mirrored issue") {
+		t.Fatalf("%s", r.Text)
+	}
+	for tool, args := range map[string]map[string]any{
+		"add_comment":     {"key": "WEB-1", "body": "hi"},
+		"update_fields":   {"key": "WEB-1", "priority": "high"},
+		"claim_issue":     {"key": "WEB-1"},
+		"create_issue":    {"project": "WEB", "summary": "x"},
+		"edit_issue_text": {"key": "WEB-1", "field": "summary", "old_text": "Mirrored", "new_text": "Changed"},
+	} {
+		r := ag.call(tool, args)
+		if !r.Err || !strings.Contains(r.Text, "mirrored from Jira") || !strings.Contains(r.Text, jm.URL) {
+			t.Errorf("%s: %+v", tool, r)
+		}
 	}
 }

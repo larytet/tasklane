@@ -130,7 +130,7 @@ const docSelect = `SELECT i.id::text,i.key,p.key,p.id::text,i.summary,COALESCE(d
 	COALESCE((SELECT string_agg(left(c.body,20000),E'\n') FROM comment c WHERE c.issue_id=i.id AND NOT c.internal),''),
 	COALESCE((SELECT string_agg(left(c.body,20000),E'\n') FROM comment c WHERE c.issue_id=i.id AND c.internal),'')
 	FROM issue i JOIN project p ON p.id=i.project_id JOIN issue_type t ON t.id=i.issue_type_id JOIN status st ON st.id=i.status_id LEFT JOIN issue_text d ON d.issue_id=i.id AND d.field='description'
-	LEFT JOIN app_user asg ON asg.id=i.assignee_id LEFT JOIN issue par ON par.id=i.parent_id WHERE i.deleted_at IS NULL`
+	LEFT JOIN app_user asg ON asg.id=i.assignee_id LEFT JOIN issue par ON par.id=i.parent_id WHERE i.deleted_at IS NULL AND NOT i.restricted`
 
 var priorityRank = map[string]int{"highest": 5, "high": 4, "medium": 3, "low": 2, "lowest": 1}
 
@@ -282,7 +282,7 @@ func (x *OSIndex) RunOnce(ctx context.Context) (int, error) {
 	for key, ver := range maxFor {
 		var id string
 		var deleted bool
-		err := tx.QueryRow(ctx, `SELECT i.id::text, i.deleted_at IS NOT NULL FROM issue i WHERE i.key=$1 OR i.id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1) ORDER BY (i.key=$1) DESC LIMIT 1`, key).Scan(&id, &deleted)
+		err := tx.QueryRow(ctx, `SELECT i.id::text, (i.deleted_at IS NOT NULL OR i.restricted) FROM issue i WHERE i.key=$1 OR i.id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1) ORDER BY (i.key=$1) DESC LIMIT 1`, key).Scan(&id, &deleted)
 		if err == pgx.ErrNoRows {
 			byKey = append(byKey, key)
 			continue

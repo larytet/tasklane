@@ -359,7 +359,7 @@ func (s *Service) flowScope(ctx context.Context, a Actor, boardID string, restri
 	if err != nil {
 		return b, "", nil, nil, err
 	}
-	q := `SELECT id::text FROM issue WHERE project_id::text=$1 AND deleted_at IS NULL`
+	q := `SELECT id::text FROM issue WHERE project_id::text=$1 AND deleted_at IS NULL AND NOT restricted`
 	args := []any{pid}
 	if restrict != nil {
 		q += ` AND key = ANY($2)`

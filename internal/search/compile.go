@@ -51,6 +51,9 @@ func compile(q *tql.Query, sc Scope) (*compiled, error) {
 	var where []string
 	where = append(where, "i.deleted_at IS NULL")
 	if !sc.All {
+		where = append(where, "NOT i.restricted") // Jira security levels Tasklane cannot evaluate: administrators only
+	}
+	if !sc.All {
 		if len(sc.Readable) == 0 {
 			where = append(where, "false")
 		} else {

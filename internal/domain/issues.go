@@ -60,6 +60,7 @@ type IssueView struct {
 	Role        string          `json:"role"`
 	Presence    []PresenceEntry `json:"presence"`
 	Input       *InputRequest   `json:"input_requested,omitempty"`
+	Mirror      *MirrorInfo     `json:"mirror,omitempty"` // set on issues mirrored from Jira: read-only, and how fresh the copy is
 }
 
 var priorities = map[string]bool{"lowest": true, "low": true, "medium": true, "high": true, "highest": true}
@@ -295,6 +296,13 @@ func (s *Service) access(ctx context.Context, a Actor, key string) (Issue, strin
 	if r == "" {
 		return is, "", ErrNotFound // do not reveal existence
 	}
+	if !a.Admin { // a Jira security level that Tasklane cannot evaluate: hidden from everyone but administrators
+		var restricted bool
+		s.DB.QueryRow(ctx, `SELECT restricted FROM issue WHERE id=$1`, is.ID).Scan(&restricted)
+		if restricted {
+			return is, "", ErrNotFound
+		}
+	}
 	return is, r, nil
 }
 
@@ -331,6 +339,9 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 	}
 	v.Presence = s.Presence.List(is.Key, a.ID)
 	v.Input = s.inputRequest(ctx, is.ID)
+	if v.Mirror = s.mirrorInfo(ctx, is.Project); v.Mirror != nil {
+		s.DB.QueryRow(ctx, `SELECT COALESCE(origin_key,'') FROM issue WHERE id=$1`, is.ID).Scan(&v.Mirror.IssueKey)
+	}
 	return v, nil
 }
 

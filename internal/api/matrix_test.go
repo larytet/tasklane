@@ -17,6 +17,7 @@ import (
 	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/testutil"
 	"github.com/larytet/tasklane/internal/testutil/gitmock"
+	"github.com/larytet/tasklane/internal/testutil/jiramock"
 	"github.com/larytet/tasklane/internal/testutil/s3mock"
 )
 
@@ -65,6 +66,7 @@ type fixture struct {
 	spare domain.User
 	mock  *s3mock.Server
 	git   *gitmock.API
+	jira  *jiramock.Server
 }
 
 func (f *fixture) issue() string {
@@ -143,6 +145,29 @@ func (f *fixture) gitConn() (conn, repo string) {
 		f.t.Fatal(err)
 	}
 	return c.ID, r.ID
+}
+
+// jiraConn creates a Jira connection to the in-process site; mirrored makes a mirrored project on it.
+func (f *fixture) jiraConn() string {
+	f.n++
+	if f.jira == nil {
+		f.jira = jiramock.New("sync@example.com", "tok")
+		f.t.Cleanup(f.jira.Close)
+	}
+	c, _, err := f.e.Svc.CreateJiraConnection(testutil.Ctx(), f.e.Admin, domain.JiraConnIn{Name: fmt.Sprint("jira", f.n), SiteURL: f.jira.URL, Email: "sync@example.com", Token: "tok", AllowPrivate: true})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return c.ID
+}
+
+func (f *fixture) mirrored() string {
+	c := f.jiraConn()
+	key := fmt.Sprintf("M%d", f.n)
+	if _, err := f.e.Svc.MirrorJiraProject(testutil.Ctx(), f.e.Admin, c, key, key, "Mirror "+key, ""); err != nil {
+		f.t.Fatal(err)
+	}
+	return key
 }
 
 func (f *fixture) attachment(key string) string {
@@ -283,6 +308,25 @@ func rows() []row {
 			return J("POST", "/api/v1/admin/search/reindex", map[string]any{"project": "ABC"})
 		}},
 		{"POST /api/v1/admin/search/rollback", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/search/rollback", nil) }},
+		{"POST /api/v1/jira/webhooks/{id}", exp{anon: codes(403), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req {
+			return J("POST", "/api/v1/jira/webhooks/"+f.jiraConn(), map[string]any{"webhookEvent": "x"})
+		}},
+		{"GET /api/v1/jira/connections", adminer, func(f *fixture) req { return J("GET", "/api/v1/jira/connections", nil) }},
+		{"POST /api/v1/jira/connections", adminer, func(f *fixture) req {
+			f.n++
+			if f.jira == nil {
+				f.jiraConn()
+			}
+			return J("POST", "/api/v1/jira/connections", map[string]any{"name": fmt.Sprint("new", f.n), "site_url": f.jira.URL, "email": "sync@example.com", "token": "tok", "allow_private": true})
+		}},
+		{"POST /api/v1/jira/connections/{id}/projects", adminer, func(f *fixture) req {
+			c := f.jiraConn()
+			return J("POST", "/api/v1/jira/connections/"+c+"/projects", map[string]any{"jira_key": fmt.Sprintf("JP%d", f.n), "key": fmt.Sprintf("JP%d", f.n)})
+		}},
+		{"POST /api/v1/jira/projects/{key}/sync", adminer, func(f *fixture) req { return J("POST", "/api/v1/jira/projects/"+f.mirrored()+"/sync", nil) }},
+		{"POST /api/v1/jira/projects/{key}/reconcile", adminer, func(f *fixture) req { return J("POST", "/api/v1/jira/projects/"+f.mirrored()+"/reconcile", nil) }},
+		{"POST /api/v1/jira/projects/{key}/cutover", adminer, func(f *fixture) req { return J("POST", "/api/v1/jira/projects/"+f.mirrored()+"/cutover", nil) }},
+		{"GET /api/v1/jira/status", adminer, func(f *fixture) req { return J("GET", "/api/v1/jira/status", nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

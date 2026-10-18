@@ -17,6 +17,7 @@ import (
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/testutil"
 	"github.com/larytet/tasklane/internal/testutil/gitmock"
+	"github.com/larytet/tasklane/internal/testutil/jiramock"
 	"github.com/larytet/tasklane/internal/testutil/osmock"
 )
 
@@ -338,5 +339,81 @@ func TestHTTP_OpenSearchEngineAndAdminEndpoints(t *testing.T) {
 	code, out, _ = bob.do("GET", "/api/v1/issues?q="+url.QueryEscape(`text ~ "checkout"`), nil)
 	if code != 200 || out["engine"] != nil || !strings.Contains(out["warning"].(string), "search is limited") {
 		t.Fatalf("%d %v", code, out)
+	}
+}
+
+// MIR-07 over HTTP: the typed error carries the Jira link, reads carry the freshness marker, and the mirror is visible in
+// the project list.
+func TestHTTP_MirroredProjectIsReadOnlyWithATypedError(t *testing.T) {
+	e, alice, _, _ := setup(t)
+	jm := jiramock.New("sync@example.com", "tok")
+	defer jm.Close()
+	jm.Upsert(jiramock.IssueJSON("10001", "WEB-1", "WEB", "Mirrored issue", "To Do", "new", "Task", time.Now().Add(-time.Hour), time.Now().Add(-time.Minute)))
+	root := rootClient(t, e, alice)
+	code, out, _ := root.do("POST", "/api/v1/jira/connections", map[string]any{"name": "acme", "site_url": jm.URL, "email": "sync@example.com", "token": "tok", "allow_private": true})
+	if code != 201 || out["webhook_secret"] == nil {
+		t.Fatalf("%d %v", code, out)
+	}
+	connID := out["connection"].(map[string]any)["id"].(string)
+	secret := out["webhook_secret"].(string)
+	if s, _ := json.Marshal(out); strings.Contains(string(s), `"tok"`) {
+		t.Fatal("the token came back")
+	}
+	if code, out, _ := root.do("POST", "/api/v1/jira/connections/"+connID+"/projects", map[string]any{"jira_key": "WEB", "key": "WEB"}); code != 201 {
+		t.Fatalf("%d %v", code, out)
+	}
+	if code, out, _ := root.do("POST", "/api/v1/jira/projects/WEB/sync", nil); code != 200 || out["issues"] != float64(1) {
+		t.Fatalf("%d %v", code, out)
+	}
+	code, v, _ := root.do("GET", "/api/v1/issues/WEB-1/view", nil)
+	if code != 200 || v["mirror"] == nil || v["mirror"].(map[string]any)["stale"] != false {
+		t.Fatalf("%d %v", code, v)
+	}
+	for name, call := range map[string]func() (int, map[string]any){
+		"patch": func() (int, map[string]any) {
+			c, o, _ := root.do("PATCH", "/api/v1/issues/WEB-1", map[string]any{"priority": "high"})
+			return c, o
+		},
+		"comment": func() (int, map[string]any) {
+			c, o, _ := root.do("POST", "/api/v1/issues/WEB-1/comments", map[string]any{"body": "x"})
+			return c, o
+		},
+		"transition": func() (int, map[string]any) {
+			c, o, _ := root.do("POST", "/api/v1/issues/WEB-1/transitions", map[string]any{"transition": uuid0})
+			return c, o
+		},
+		"create": func() (int, map[string]any) {
+			c, o, _ := root.do("POST", "/api/v1/issues", map[string]any{"project": "WEB", "summary": "n"})
+			return c, o
+		},
+	} {
+		code, out := call()
+		d, _ := out["detail"].(map[string]any)
+		if code != 403 || out["code"] != "read_only_mirror" || d == nil || !strings.HasPrefix(d["jira_url"].(string), "http") {
+			t.Errorf("%s: %d %v", name, code, out)
+		}
+	}
+	if _, ps, _ := root.do("GET", "/api/v1/bootstrap", nil); ps == nil {
+		t.Fatal("no bootstrap")
+	} else if raw, _ := json.Marshal(ps["projects"]); !strings.Contains(string(raw), `"mirrored":true`) {
+		t.Fatalf("the project list does not say which projects are mirrors: %s", raw)
+	}
+	// a webhook is a signed hint, a bad one is refused for everyone
+	body := []byte(`{"webhookEvent":"jira:issue_updated"}`)
+	post := func(sig string) int {
+		req, _ := http.NewRequest("POST", alice.base+"/api/v1/jira/webhooks/"+connID, bytes.NewReader(body))
+		req.Header.Set("X-Hub-Signature", sig)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := post("sha256=00"); c != 403 {
+		t.Fatalf("%d", c)
+	}
+	if c := post(jiramock.Sign(secret, body)); c != 202 {
+		t.Fatalf("%d", c)
 	}
 }

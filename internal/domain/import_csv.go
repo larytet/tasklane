@@ -53,6 +53,9 @@ func (s *Service) ImportCSV(ctx context.Context, a Actor, data []byte, in CSVImp
 	}
 	var pkey string
 	s.DB.QueryRow(ctx, `SELECT key FROM project WHERE id=$1`, pid).Scan(&pkey)
+	if site := s.mirrorSite(ctx, pkey); site != "" { // import into a mirrored project is not available: Jira is the source
+		return nil, &ReadOnlyMirror{Project: pkey, SiteURL: site}
+	}
 	m := in.Mapping
 	for h, f := range m.Columns {
 		if !csvFields[f] {

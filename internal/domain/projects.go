@@ -14,6 +14,7 @@ type Project struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
 	Archived bool   `json:"archived"`
+	Mirrored bool   `json:"mirrored,omitempty"` // mirrored from Jira: read-only here
 }
 
 // EnsureDefaults creates the standard issue types and workflow template; idempotent.
@@ -126,17 +127,17 @@ func (s *Service) role(ctx context.Context, a Actor, projectID string) string {
 		return "admin"
 	}
 	var r string
-	s.DB.QueryRow(ctx, `SELECT role FROM project_member WHERE project_id=$1 AND user_id=$2`, projectID, a.ID).Scan(&r)
+	s.DB.QueryRow(ctx, `SELECT role FROM effective_member WHERE project_id=$1 AND user_id=$2`, projectID, a.ID).Scan(&r)
 	return r
 }
 
 func canWrite(role string) bool { return role == "member" || role == "admin" }
 
 func (s *Service) ListProjects(ctx context.Context, a Actor) ([]Project, error) {
-	q := `SELECT p.id,p.key,p.name,p.type,p.archived FROM project p `
+	q := `SELECT p.id,p.key,p.name,p.type,p.archived,p.mirror_of IS NOT NULL FROM project p `
 	args := []any{}
 	if !a.Admin {
-		q += `JOIN project_member m ON m.project_id=p.id AND m.user_id=$1 `
+		q += `JOIN effective_member m ON m.project_id=p.id AND m.user_id=$1 `
 		args = append(args, a.ID)
 	}
 	rows, err := s.DB.Query(ctx, q+`ORDER BY p.key`, args...)
@@ -147,7 +148,7 @@ func (s *Service) ListProjects(ctx context.Context, a Actor) ([]Project, error) 
 	out := []Project{}
 	for rows.Next() {
 		var p Project
-		rows.Scan(&p.ID, &p.Key, &p.Name, &p.Type, &p.Archived)
+		rows.Scan(&p.ID, &p.Key, &p.Name, &p.Type, &p.Archived, &p.Mirrored)
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -158,7 +159,7 @@ func (s *Service) SearchScope(ctx context.Context, a Actor) (all bool, readable,
 	if a.Admin {
 		return true, nil, nil, nil
 	}
-	rows, err := s.DB.Query(ctx, `SELECT project_id, role FROM project_member WHERE user_id=$1`, a.ID)
+	rows, err := s.DB.Query(ctx, `SELECT project_id, role FROM effective_member WHERE user_id=$1`, a.ID)
 	if err != nil {
 		return false, nil, nil, err
 	}

@@ -38,7 +38,14 @@ func (s *Service) CreateUser(ctx context.Context, email, name, password string, 
 	err = s.DB.QueryRow(ctx, `INSERT INTO app_user(email,name,password_hash,is_admin) VALUES($1,$2,$3,$4) RETURNING id`,
 		email, name, string(h), admin).Scan(&u.ID)
 	if err != nil && strings.Contains(err.Error(), "app_user_email_key") {
-		return User{}, invalid("a user with this email already exists")
+		// an inactive placeholder with no credentials (created by an import or the Jira mirror for someone who had no
+		// account yet) is claimed by the person it stood for: their history stays attached
+		cerr := s.DB.QueryRow(ctx, `UPDATE app_user SET name=$2,password_hash=$3,is_admin=$4,active=true WHERE email=$1 AND NOT active AND password_hash IS NULL AND kind='human' RETURNING id`,
+			email, name, string(h), admin).Scan(&u.ID)
+		if cerr != nil {
+			return User{}, invalid("a user with this email already exists")
+		}
+		err = nil
 	}
 	if err == nil {
 		s.queueAccountMail(ctx, u)

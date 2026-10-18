@@ -214,7 +214,7 @@
     S.view = st;
     render();
 
-    function canEdit() { return v.role === 'member' || v.role === 'admin'; }
+    function canEdit() { return !v.mirror && (v.role === 'member' || v.role === 'admin'); } // a mirrored issue is edited in Jira
 
     function render() {
       const is = v.issue;
@@ -226,6 +226,12 @@
         canEdit() ? h('button', { class: 'btn', 'aria-haspopup': 'dialog', onclick: actionsMenu }, 'Actions ▾') : null));
       if (st.deleted) root.append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted' + (st.deleted.by ? ' by ' + st.deleted.by : '') + '. Anything you were typing stays in your draft. ', h('a', { href: '#/trash/' + is.project }, 'Open the trash')));
       fillPresence();
+      if (v.mirror) {
+        const m = v.mirror, ago = m.synced_at ? L.relTime(m.synced_at) : 'not yet';
+        root.append(h('div', { class: 'banner ' + (m.stale ? 'warn' : 'info'), role: 'status' },
+          'Mirrored from Jira and read-only here. Synced ' + ago + (m.stale && m.error ? ' (the last sync failed: ' + m.error + ')' : '') + '. ',
+          h('a', { href: m.site_url.replace(/\/$/, '') + '/browse/' + encodeURIComponent(m.issue_key || is.key), rel: 'noopener noreferrer', target: '_blank' }, 'Edit in Jira')));
+      }
       root.append(subjectEl(is));
       root.append(chipLine(is));
       root.append(descriptionEl(is));

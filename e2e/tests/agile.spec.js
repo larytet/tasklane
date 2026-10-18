@@ -249,3 +249,58 @@ test('GIT: a signed webhook shows on the ticket as a one-line summary that expan
   await expect(p.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(p.locator('details.dev')).toBeHidden();
 });
+
+// MIR-07/08 in the browser: a mirrored issue shows a banner with the freshness and an "Edit in Jira" link, and offers no
+// way to edit. A tiny Jira stands in for the site (the Go suites use a fuller double).
+test('JIRA: a mirrored issue is read-only in the UI with an Edit in Jira link', async ({ browser }) => {
+  const http = await import('node:http');
+  const now = new Date().toISOString().replace('Z', '+0000');
+  const issue = { id: '70001', key: 'MIR-7', fields: { summary: 'Mirrored from the site', created: now, updated: now, project: { key: 'MIR' }, issuetype: { name: 'Task' }, status: { name: 'To Do', statusCategory: { key: 'new' } },
+    priority: { name: 'High' }, labels: ['jira'], reporter: { accountId: 'acc-r', displayName: 'Rita R.' }, assignee: null, description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Body written in Jira.' }] }] },
+    parent: null, issuelinks: [], security: null, comment: { comments: [], total: 0 }, resolutiondate: null } };
+  const site = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const auth = req.headers.authorization || '';
+    res.setHeader('Content-Type', 'application/json');
+    if (auth !== 'Basic ' + Buffer.from('svc@example.com:tok').toString('base64')) { res.statusCode = 401; return res.end('{}'); }
+    if (u.pathname === '/rest/api/3/myself') return res.end(JSON.stringify({ accountId: 'acc-svc', displayName: 'Svc', emailAddress: 'svc@example.com', timeZone: 'UTC' }));
+    if (u.pathname === '/rest/api/3/search/jql') return res.end(JSON.stringify({ issues: [{ id: issue.id, key: issue.key, fields: issue.fields, changelog: { histories: [], total: 0 } }] }));
+    if (u.pathname === '/rest/api/3/project/MIR/role') return res.end('{}');
+    res.statusCode = 404; res.end('{}');
+  });
+  await new Promise(r => site.listen(0, '127.0.0.1', r));
+  const url = 'http://127.0.0.1:' + site.address().port;
+  try {
+    const adm = await admin(browser);
+    const conn = (await adm.call('POST', '/api/v1/jira/connections', { name: 'site-' + uniq(), site_url: url, email: 'svc@example.com', token: 'tok', allow_private: true })).body;
+    expect(conn.connection).toBeTruthy();
+    const key = 'M' + uniq().toUpperCase().slice(0, 3);
+    const pr = await adm.call('POST', `/api/v1/jira/connections/${conn.connection.id}/projects`, { jira_key: 'MIR', key, name: 'Mirror' });
+    expect(pr.status).toBe(201);
+    const sync = await adm.call('POST', `/api/v1/jira/projects/${key}/sync`);
+    expect(sync.status).toBe(200);
+    expect(sync.body.issues).toBe(1);
+    const boss = await browser.newContext();
+    boss.on('page', watch);
+    const p = await boss.newPage();
+    await p.goto('/');
+    await p.getByLabel('Email').fill('admin@example.com');
+    await p.getByLabel('Password').fill('adminpass1');
+    await p.getByRole('button', { name: 'Sign in' }).click();
+    await expect(p.getByRole('button', { name: '+ Create' })).toBeVisible();
+    await p.goto(`/#/issue/${key}-7`);
+    await expect(p.getByLabel('Summary')).toHaveValue('Mirrored from the site');
+    const banner = p.getByRole('status').filter({ hasText: 'Mirrored from Jira' });
+    await expect(banner).toContainText('read-only');
+    await expect(banner.getByRole('link', { name: 'Edit in Jira' })).toHaveAttribute('href', url + '/browse/MIR-7');
+    await expect(p.getByText('Body written in Jira.')).toBeVisible();
+    // nothing can be edited: no Actions menu, no Edit button, a read-only summary and no reply box
+    await expect(p.getByRole('button', { name: /Actions/ })).toHaveCount(0);
+    await expect(p.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+    await expect(p.getByLabel('Summary')).toHaveAttribute('readonly', '');
+    await expect(p.getByLabel('Reply')).toHaveCount(0);
+    await expect(p.getByLabel('Priority')).toBeDisabled();
+  } finally {
+    site.close();
+  }
+});
