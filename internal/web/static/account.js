@@ -3,7 +3,7 @@
   'use strict';
   const A = window.TLApp;
   if (!A) return;
-  const { h, clear, api, toast, topbar, modal } = A;
+  const { h, clear, api, toast, topbar, modal, b64u } = A;
   const errText = r => (r.data && r.data.error) || 'Something went wrong';
   const when = iso => iso ? new Date(iso).toLocaleString() : 'never';
 
@@ -51,6 +51,53 @@
           const x = await api('DELETE', '/api/v1/me/2fa', { password: pw.value });
           if (x.status === 200) { close(); toast('Two-factor authentication is off'); loadMFA(); } else msg.textContent = x.status === 403 ? 'That password is not right.' : errText(x);
         } }, 'Turn off'))));
+      pw.focus();
+    }
+
+    // ----- passkeys and security keys
+    const keysBox = h('div', {});
+    async function loadKeys() {
+      clear(keysBox);
+      const r = await api('GET', '/api/v1/me/passkeys');
+      if (r.status !== 200) { keysBox.append(h('p', { class: 'err' }, errText(r))); return; }
+      if (!r.data.available || !window.PublicKeyCredential) {
+        keysBox.append(h('p', { class: 'muted' }, !r.data.available ? 'Passkeys need Tasklane to be reached by a host name, not an IP address, and the address Tasklane is set to use to be known (base_url).' : 'This browser does not support passkeys.'));
+        if (!r.data.keys.length) return;
+      }
+      if (!r.data.keys.length) keysBox.append(h('p', { class: 'muted' }, 'No passkey or security key is registered.'));
+      else {
+        const list = h('div', { class: 'list', role: 'list', 'aria-label': 'Passkeys' }); // a list role only where there are items
+        for (const k of r.data.keys) list.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, k.name), ' ', h('span', { class: 'muted' }, 'added ' + when(k.created_at) + ' · last used ' + when(k.last_used_at))),
+          h('button', { class: 'btn ghost', 'aria-label': 'Remove ' + k.name, onclick: () => removeKey(k) }, 'Remove')));
+        keysBox.append(list);
+      }
+      if (r.data.available && window.PublicKeyCredential) keysBox.append(h('div', { class: 'chips', style: 'margin-top:8px' }, h('button', { class: 'btn primary', onclick: addKey }, 'Add a passkey or security key')));
+    }
+    function addKey() {
+      const name = h('input', { type: 'text', 'aria-label': 'Name for the key', placeholder: 'Laptop, phone, YubiKey', maxlength: 60 }), pw = h('input', { type: 'password', autocomplete: 'current-password', 'aria-label': 'Your password' }), msg = h('div', { class: 'err', role: 'alert' });
+      const close = modal(h('div', {}, h('h2', {}, 'Add a passkey or security key'), h('p', {}, 'Name it and enter your password, then follow your browser\u2019s prompt.'), name, pw, msg,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
+          msg.textContent = '';
+          const o = await api('POST', '/api/v1/me/passkeys/options', { password: pw.value });
+          if (o.status !== 200) { msg.textContent = o.status === 403 ? 'That password is not right.' : errText(o); return; }
+          let cred;
+          try {
+            const pk = o.data.publicKey;
+            cred = await navigator.credentials.create({ publicKey: Object.assign({}, pk, { challenge: b64u.dec(pk.challenge), user: Object.assign({}, pk.user, { id: b64u.dec(pk.user.id) }), excludeCredentials: (pk.excludeCredentials || []).map(c => Object.assign({}, c, { id: b64u.dec(c.id) })) }) });
+          } catch (e) { msg.textContent = 'The browser did not create the key (' + (e && e.name || 'cancelled') + ').'; return; }
+          const x = await api('POST', '/api/v1/me/passkeys', { name: name.value, client_data_json: b64u.enc(cred.response.clientDataJSON), attestation_object: b64u.enc(cred.response.attestationObject) });
+          if (x.status !== 201) { msg.textContent = errText(x); return; }
+          close(); toast('Key added'); loadKeys();
+        } }, 'Add'))));
+      name.focus();
+    }
+    function removeKey(k) {
+      const pw = h('input', { type: 'password', autocomplete: 'current-password', 'aria-label': 'Your password' }), msg = h('div', { class: 'err', role: 'alert' });
+      const close = modal(h('div', {}, h('h2', {}, 'Remove ' + k.name), h('p', {}, 'Enter your password to confirm.'), pw, msg,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
+          const x = await api('DELETE', '/api/v1/me/passkeys/' + k.id, { password: pw.value });
+          if (x.status === 200) { close(); toast('Key removed'); loadKeys(); } else msg.textContent = x.status === 403 ? 'That password is not right.' : errText(x);
+        } }, 'Remove'))));
       pw.focus();
     }
 
@@ -117,11 +164,12 @@
 
     body.append(
       section('Two-factor authentication', mfaBox),
+      section('Passkeys and security keys', h('p', { class: 'muted' }, 'A passkey or security key can finish signing in after your password, beside an authenticator app. Adding or removing one asks for your password again.'), keysBox),
       section('Password', pwBox),
       section('Sessions', h('div', { class: 'chips' }, others), sessBox),
       section('Connected applications', h('p', { class: 'muted' }, 'Applications such as AI assistants that you allowed to act for you, with the permissions you gave them. They never do more than you can.'), appsBox),
       section('API tokens', h('div', { class: 'chips' }, tname, tdays, newTok), tmsg, tokBox));
-    await Promise.all([loadMFA(), loadSessions(), loadTokens(), loadApps()]);
+    await Promise.all([loadMFA(), loadKeys(), loadSessions(), loadTokens(), loadApps()]);
   }
 
   // the screen an application sends a person to when it asks for access (OAuth authorization)

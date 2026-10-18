@@ -35,6 +35,9 @@ type Config struct {
 	BlobEncKeys                               string
 	IMAPAllowPrivate                          bool
 	MailRawDays, MailBounceDays, MinClient    int
+	WebAuthnRPID                              string
+	WebAuthnOrigins                           []string
+	WebAuthnRequireUV                         bool
 	BlobCold, BlobColdDir                     string
 	SMTPListen, SMTPListenCert, SMTPListenKey string
 	BlobEncCurrent                            string
@@ -90,6 +93,9 @@ var Schema = []Key{
 	{Name: "smtp_listen", Default: "", Kind: "string", Doc: "Receive inbound email directly: the address for the built-in SMTP receiver to listen on, such as `:25` (empty: off). It accepts mail only for the reply, bounce and project addresses of the mail domain (the host of `base_url`), never relays, and never sends a bounce. Mail it receives needs its own DKIM signature to count; put a receiver you run in front and use the webhook if you want its verdict believed"},
 	{Name: "smtp_listen_tls_cert", Default: "", Kind: "string", Doc: "Certificate file (PEM) for STARTTLS on the built-in SMTP receiver; with `smtp_listen_tls_key`. Without them STARTTLS is not offered"},
 	{Name: "smtp_listen_tls_key", Default: "", Kind: "string", Doc: "Private key file (PEM) for STARTTLS on the built-in SMTP receiver"},
+	{Name: "webauthn_rp_id", Default: "", Kind: "string", Doc: "The relying party id that passkeys and security keys are bound to: a host name (never an IP address). Empty: the host of `base_url`. A key registered for one id does not work for another, so change it only if you mean to re-register keys"},
+	{Name: "webauthn_origins", Default: "", Kind: "string", Doc: "Comma-separated origins (scheme, host and port) pages may use passkeys from. Empty: the origin of `base_url`"},
+	{Name: "webauthn_require_user_verification", Default: "false", Kind: "enum", Enum: []string{"true", "false"}, Doc: "Require the key to verify the person (a PIN or biometric) as well as being present. Off: presence is enough as a second factor after the password"},
 	{Name: "min_client_version", Default: "0", Kind: "int", Doc: "The oldest browser client the server still serves (0: the previous one). A page older than this is told to reload, keeping its drafts. Raise it to force a reload after an upgrade that a cached page cannot survive; API tokens and MCP clients are never affected"},
 	{Name: "mail_raw_retention_days", Default: "90", Kind: "int", Doc: "How long the original of an inbound message, its text, its subject and its sender are kept, in days (SPEC 17.3). After that the message row stays without them, so a redelivery is still recognised. 0 keeps them for ever. Mail waiting for a decision and mail on an issue under legal hold is never purged. Erasing a person removes their mail at once, whatever this is"},
 	{Name: "mail_bounce_retention_days", Default: "365", Kind: "int", Doc: "How long bounce records and cleared suppressions are kept, in days (0 keeps them). An address that is still suppressed is never removed by age"},
@@ -487,7 +493,7 @@ func Load(o Options) (Config, error) {
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
 	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], SearchEngine: m["search_engine"], OSURL: m["opensearch_url"], OSUser: m["opensearch_user"], OSPassword: m["opensearch_password"],
 		OSAPIKey: m["opensearch_api_key"], OSAllowPrivate: m["opensearch_allow_private"] == "true", WebhookAllowPrivate: m["webhook_allow_private"] == "true", PasswordMinLength: n("password_min_length"), SSOAllowPrivate: m["sso_allow_private"] == "true", OSIndex: m["opensearch_index"], OSShards: n("opensearch_shards"), OSReplicas: n("opensearch_replicas"), MaxUploadMB: n("max_upload_mb"),
-		BlobBackend: m["blob_backend"], BlobFallback: m["blob_fallback"], BlobFallbackDir: m["blob_fallback_dir"], BlobEncKeys: m["blob_encryption_keys"], IMAPAllowPrivate: m["imap_allow_private"] == "true", MinClient: int(n("min_client_version")), MailRawDays: int(n("mail_raw_retention_days")), MailBounceDays: int(n("mail_bounce_retention_days")), BlobCold: m["blob_cold_backend"], BlobColdDir: m["blob_cold_dir"], SMTPListen: m["smtp_listen"], SMTPListenCert: m["smtp_listen_tls_cert"], SMTPListenKey: m["smtp_listen_tls_key"], BlobEncCurrent: m["blob_encryption_current"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
+		BlobBackend: m["blob_backend"], BlobFallback: m["blob_fallback"], BlobFallbackDir: m["blob_fallback_dir"], BlobEncKeys: m["blob_encryption_keys"], IMAPAllowPrivate: m["imap_allow_private"] == "true", MinClient: int(n("min_client_version")), WebAuthnRPID: m["webauthn_rp_id"], WebAuthnOrigins: splitList(m["webauthn_origins"]), WebAuthnRequireUV: m["webauthn_require_user_verification"] == "true", MailRawDays: int(n("mail_raw_retention_days")), MailBounceDays: int(n("mail_bounce_retention_days")), BlobCold: m["blob_cold_backend"], BlobColdDir: m["blob_cold_dir"], SMTPListen: m["smtp_listen"], SMTPListenCert: m["smtp_listen_tls_cert"], SMTPListenKey: m["smtp_listen_tls_key"], BlobEncCurrent: m["blob_encryption_current"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
 		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],
 		SMTPTLS: m["smtp_tls"], SMTPUser: m["smtp_user"], SMTPPass: m["smtp_pass"], AdminEmail: m["admin_email"], AdminPassword: m["admin_password"],
@@ -533,4 +539,14 @@ func Docs() string {
 		fmt.Fprintf(&b, "| `%s` | %s | `--%s` | %s | %s |\n", k.Name, env, strings.ReplaceAll(k.Name, "_", "-"), def, k.Doc)
 	}
 	return b.String()
+}
+
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

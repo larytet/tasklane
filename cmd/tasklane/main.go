@@ -261,6 +261,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	host, _ := os.Hostname()
 	nb := make([]byte, 4)
 	rand.Read(nb)
+	svc.WebAuthnRPID, svc.WebAuthnOrigins, svc.WebAuthnRequireUV = cfg.WebAuthnRPID, cfg.WebAuthnOrigins, cfg.WebAuthnRequireUV
 	svc.NodeID, svc.NodeVersion = fmt.Sprintf("%s-%d-%x", host, os.Getpid(), nb), releaseVersion()
 	if err := svc.CheckNodeAgainstGates(ctx, svc.NodeVersion); err != nil { // rolling back past an activated behaviour is refused
 		log.Fatalf("refusing to start: %v", err)

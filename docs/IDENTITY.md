@@ -26,3 +26,15 @@
 - Setting `active` to false, or `DELETE`, **deactivates** the account: nothing is removed, and its sessions and API tokens end at once. The last active administrator cannot be deactivated from outside.
 - Provisioning is recorded in the audit log by "SCIM".
 - Not built: `Groups`, bulk operations, sorting.
+
+## Passkeys and security keys (WebAuthn)
+
+A passkey or a hardware security key can finish a sign-in after the password, beside an authenticator app. Nothing replaces the password: a key is a second factor.
+
+- **Adding one:** Account and security → *Passkeys and security keys* → add. Naming it and entering the password again are required, so a stolen session cannot plant a key of its own. Removing one asks for the password too. Each add and remove is in the audit log.
+- **Signing in:** after the password, a person with a key is offered **Use passkey or security key** (and the code field too, if they also have an authenticator app). A person with no key signs in as before.
+- **What is checked:** the challenge (single use, bound to that sign-in), the origin and the relying party id (a key made for another site, or answered on another origin, does not work), that the person was present (and verified, if `webauthn_require_user_verification` is on), the signature (ES256, EdDSA and RS256), and the signature counter: a counter that does not move forward means the credential may have been cloned, the sign-in is refused and `security.passkey_clone_suspected` is written to the audit log. Keys that never count (counter 0) are accepted. Five wrong answers end the sign-in.
+- **The relying party** is the host of `base_url` (override with `webauthn_rp_id` and `webauthn_origins`). **It must be a host name, never an IP address**: with an address the page says passkeys are unavailable. A key registered for one id does not work for another, so changing `base_url` to a different host orphans the keys (people sign in with their other factor and add the key again).
+- **Not verified:** attestation. Tasklane asks for none and does not check who made the key; a key is trusted because the person proved their password when they added it.
+- **Lost keys:** an administrator's *reset two-factor* removes the person's keys with the authenticator app and ends their sessions. Erasing a person removes their keys; the personal-data export lists them (name and dates, never key material).
+- Single sign-on sign-ins do not ask for a key: the identity provider is the one that authenticates.

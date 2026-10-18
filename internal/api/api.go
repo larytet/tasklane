@@ -91,6 +91,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	s.handle(mux, "POST /api/v1/login", s.login)
 	s.handle(mux, "POST /api/v1/login/mfa", s.loginMFA)
+	s.handle(mux, "POST /api/v1/login/passkey", s.loginPasskey)
 	s.handle(mux, "POST /api/v1/logout", s.auth(s.logout))
 	s.handle(mux, "GET /api/v1/me", s.auth(func(w http.ResponseWriter, r *http.Request) { s.json(w, 200, actorOf(r)) }))
 	s.handle(mux, "GET /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
@@ -524,7 +525,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	res, err := s.Svc.LoginWith(r.Context(), in.Email, in.Password, s.SessionTTL, clientMeta(r))
 	var mfa *domain.MFARequired
 	if errors.As(err, &mfa) {
-		s.json(w, 200, map[string]any{"mfa_required": true, "mfa_token": mfa.Token})
+		out := map[string]any{"mfa_required": true, "mfa_token": mfa.Token, "totp": mfa.TOTP}
+		if mfa.Key != nil {
+			out["passkey"] = mfa.Key
+		}
+		s.json(w, 200, out)
 		return
 	}
 	if err != nil {
@@ -545,6 +550,19 @@ func (s *Server) loginMFA(w http.ResponseWriter, r *http.Request) {
 	res, err := s.Svc.LoginMFA(r.Context(), in.Token, in.Code, clientMeta(r))
 	if err != nil {
 		s.fail(w, 401, "bad_code", "that code is not right", nil)
+		return
+	}
+	s.startSession(w, res.Token, res.User)
+}
+
+func (s *Server) loginPasskey(w http.ResponseWriter, r *http.Request) {
+	var in domain.PasskeyAssertion
+	if !s.decode(w, r, &in) {
+		return
+	}
+	res, err := s.Svc.LoginWebAuthn(r.Context(), in, clientMeta(r))
+	if err != nil {
+		s.fail(w, 401, "bad_key", "that key could not sign you in", nil)
 		return
 	}
 	s.startSession(w, res.Token, res.User)

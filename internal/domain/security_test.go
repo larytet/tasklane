@@ -240,6 +240,12 @@ func TestSEC04_TwoFactorEnrolmentSignInReplayAndRecovery(t *testing.T) {
 	if _, left := e.Svc.MFAStatus(ctx, e.Alice); left != 9 {
 		t.Fatalf("%d left", left)
 	}
+	// using a recovery code is recorded (it was not, for a while: the audit statement was invalid and its error ignored)
+	var used int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_event WHERE action='security.recovery_code_used' AND target=$1`, e.Alice.ID).Scan(&used)
+	if used != 1 {
+		t.Fatalf("%d audit records of a recovery code being used", used)
+	}
 	// the pending token expires
 	_, err = e.Svc.LoginWith(ctx, "alice@example.com", "password123", time.Hour, meta)
 	asMFA(err, &need)

@@ -61,6 +61,11 @@ type Service struct {
 	// NodeID and NodeVersion say which node this is and what it runs (the cluster version gate); Gates overrides BuiltinGates.
 	NodeID, NodeVersion string
 	Gates               []Gate
+	// WebAuthnRPID and WebAuthnOrigins override the relying party that passkeys are bound to (default: the host of BaseURL);
+	// WebAuthnRequireUV demands a PIN or biometric on the key as well as its presence.
+	WebAuthnRPID      string
+	WebAuthnOrigins   []string
+	WebAuthnRequireUV bool
 	// MailWorkers is how many messages are sent at the same time (default 8).
 	MailWorkers      int
 	lastMailBatch    atomic.Int64

@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 	"time"
@@ -32,7 +33,11 @@ const (
 )
 
 // ErrMFARequired is returned by Login for an account with two-factor authentication: the password was right, a code is due.
-type MFARequired struct{ Token string }
+type MFARequired struct {
+	Token string
+	TOTP  bool           // a code from an authenticator app (or a recovery code) is accepted
+	Key   map[string]any // when the person has a passkey or security key: the options for navigator.credentials.get
+}
 
 func (e *MFARequired) Error() string { return "a second factor is required" }
 
@@ -121,12 +126,13 @@ func (s *Service) LoginWith(ctx context.Context, email, password string, ttl tim
 	}
 	var enabled bool
 	s.DB.QueryRow(ctx, `SELECT enabled FROM user_mfa WHERE user_id=$1`, u.ID).Scan(&enabled)
-	if enabled {
+	keyOpts, keyChallenge := s.webauthnLoginOptions(ctx, u.ID)
+	if enabled || keyOpts != nil {
 		pt := newToken()
-		if _, err := s.DB.Exec(ctx, `INSERT INTO mfa_pending(token_hash,user_id,expires_at,ttl_secs,user_agent,ip) VALUES($1,$2,$3,$4,$5,$6)`, hashToken(pt), u.ID, s.Now().Add(mfaPendingTTL), int(ttl.Seconds()), meta.UserAgent, meta.IP); err != nil {
+		if _, err := s.DB.Exec(ctx, `INSERT INTO mfa_pending(token_hash,user_id,expires_at,ttl_secs,user_agent,ip,wa_challenge) VALUES($1,$2,$3,$4,$5,$6,$7)`, hashToken(pt), u.ID, s.Now().Add(mfaPendingTTL), int(ttl.Seconds()), meta.UserAgent, meta.IP, keyChallenge); err != nil {
 			return LoginResult{}, err
 		}
-		return LoginResult{User: u}, &MFARequired{Token: pt}
+		return LoginResult{User: u}, &MFARequired{Token: pt, TOTP: enabled, Key: keyOpts}
 	}
 	s.recordAttempt(ctx, email, meta, true)
 	tok, err := s.newSession(ctx, u.ID, ttl, meta)
@@ -276,7 +282,11 @@ func (s *Service) ResetMFA(ctx context.Context, a Actor, userID string) error {
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
+		keys, err := tx.Exec(ctx, `DELETE FROM webauthn_credential WHERE user_id::text=$1`, userID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected()+keys.RowsAffected() == 0 {
 			return ErrNotFound
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM session WHERE user_id::text=$1`, userID); err != nil {
@@ -331,7 +341,7 @@ func (s *Service) LoginMFA(ctx context.Context, pendingToken, code string, meta 
 		if err != nil || tag.RowsAffected() == 0 {
 			return fail()
 		}
-		s.DB.Exec(ctx, `INSERT INTO audit_event(actor_id,actor_label,action,target,detail) VALUES($1,$2,'security.recovery_code_used',$1::text,'{}')`, userID, u.Name)
+		s.auditAbout(ctx, userID, u.Name, "security.recovery_code_used")
 	}
 	s.DB.Exec(ctx, `DELETE FROM mfa_pending WHERE token_hash=$1`, hashToken(pendingToken))
 	s.recordAttempt(ctx, u.Email, meta, true)
@@ -517,3 +527,11 @@ func (s *Service) ChangePassword(ctx context.Context, a Actor, current, next, cu
 }
 
 var _ = errors.New
+
+// auditAbout records a security event about a person that no administrator caused (a recovery code used, a credential that may
+// have been cloned). The parameters are separate because PostgreSQL cannot give one placeholder a uuid column and a text one.
+func (s *Service) auditAbout(ctx context.Context, userID, label, action string) {
+	if _, err := s.DB.Exec(ctx, `INSERT INTO audit_event(actor_id,actor_label,action,target,detail) VALUES($1,$2,$3,$4,'{}')`, userID, label, action, userID); err != nil {
+		log.Printf("audit %s: %v", action, err)
+	}
+}

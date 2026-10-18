@@ -536,6 +536,13 @@ func rows() []row {
 		{"GET /api/v1/automation/rules/{id}/runs", projAdmin, func(f *fixture) req {
 			return J("GET", fmt.Sprintf("/api/v1/automation/rules/%d/runs", f.autoRule()), nil)
 		}},
+		{"POST /api/v1/login/passkey", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("POST", "/api/v1/login/passkey", map[string]any{"mfa_token": "nope", "id": "AA", "client_data_json": "AA", "authenticator_data": "AA", "signature": "AA"})
+		}},
+		{"GET /api/v1/me/passkeys", exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/me/passkeys", nil) }},
+		{"POST /api/v1/me/passkeys/options", exp{anon: codes(401), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/me/passkeys/options", map[string]any{"password": "x"}) }},
+		{"POST /api/v1/me/passkeys", exp{anon: codes(401), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/me/passkeys", map[string]any{"name": "k"}) }},
+		{"DELETE /api/v1/me/passkeys/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(403)}, func(f *fixture) req { return J("DELETE", "/api/v1/me/passkeys/1", map[string]any{"password": "wrong"}) }},
 		{"POST /api/v1/login/mfa", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
 			return J("POST", "/api/v1/login/mfa", map[string]any{"mfa_token": "nope", "code": "000000"})
 		}},

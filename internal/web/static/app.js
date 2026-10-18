@@ -21,6 +21,11 @@
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
   // The page says which client it is (X-Tasklane-Client); a server that no longer serves it answers 426 and the page asks for a reload.
   // A 503 "paused" means maintenance is under way: a banner says so, reads continue, and saves keep their drafts and retry when it ends.
+  // WebAuthn carries binary values as base64url; the browser API wants buffers
+  const b64u = {
+    enc: buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+    dec: s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)),
+  };
   const CLIENT_VERSION = 1;
   async function api(method, path, body, headers) {
     const r = await fetch(path, { method, credentials: 'same-origin', headers: Object.assign({ 'X-Requested-With': 'tasklane', 'Content-Type': 'application/json', 'X-Tasklane-Client': String(CLIENT_VERSION) }, headers || {}), body: body === undefined ? undefined : JSON.stringify(body) });
@@ -121,22 +126,36 @@
   function loginView() {
     const email = h('input', { type: 'email', id: 'email', autocomplete: 'username' }), pw = h('input', { type: 'password', id: 'pw', autocomplete: 'current-password' });
     const msg = h('div', { class: 'err', role: 'alert' });
-    // the second step: a code from the authenticator app, or a recovery code
-    const codeStep = mfaToken => {
+    // the second step: a passkey or security key, and/or a code from the authenticator app or a recovery code
+    const codeStep = (mfaToken, totp, key) => {
       const code = h('input', { type: 'text', id: 'code', autocomplete: 'one-time-code', inputmode: 'numeric', 'aria-label': 'Authentication code' });
       const err = h('div', { class: 'err', role: 'alert' });
+      const useKey = async () => {
+        err.textContent = '';
+        try {
+          const pk = key.publicKey;
+          const cred = await navigator.credentials.get({ publicKey: Object.assign({}, pk, { challenge: b64u.dec(pk.challenge), allowCredentials: (pk.allowCredentials || []).map(c => Object.assign({}, c, { id: b64u.dec(c.id) })) }) });
+          const r = await api('POST', '/api/v1/login/passkey', { mfa_token: mfaToken, id: b64u.enc(cred.rawId), client_data_json: b64u.enc(cred.response.clientDataJSON), authenticator_data: b64u.enc(cred.response.authenticatorData), signature: b64u.enc(cred.response.signature) });
+          if (r.status === 200) { await boot(); } else err.textContent = 'That key could not sign you in. Start again from your password.';
+        } catch (e) { err.textContent = 'The key was not used. You can try again.'; }
+      };
+      const kids = [h('h1', {}, 'Tasklane')];
+      if (key) kids.push(h('p', {}, 'Use your passkey or security key to finish signing in.'), h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'button', onclick: useKey }, 'Use passkey or security key')));
+      if (totp) kids.push(h('p', {}, key ? 'Or enter the code from your authenticator app, or a recovery code.' : 'Enter the code from your authenticator app, or a recovery code.'), h('label', { for: 'code' }, 'Authentication code'), code,
+        h('div', { class: 'actions' }, h('button', { class: 'btn' + (key ? '' : ' primary'), type: 'submit' }, 'Verify')));
+      kids.push(err);
       clear($app).append(h('form', { class: 'login card', onsubmit: async e => {
         e.preventDefault();
+        if (!totp) return;
         const r = await api('POST', '/api/v1/login/mfa', { mfa_token: mfaToken, code: code.value });
         if (r.status === 200) { await boot(); } else { err.textContent = (r.data && r.data.error) || 'That code is not right'; code.value = ''; code.focus(); }
-      } }, h('h1', {}, 'Tasklane'), h('p', {}, 'Enter the code from your authenticator app, or a recovery code.'), h('label', { for: 'code' }, 'Authentication code'), code, err,
-        h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Verify'))));
-      code.focus();
+      } }, ...kids));
+      if (totp && !key) code.focus();
     };
     const go = async e => {
       e.preventDefault();
       const r = await api('POST', '/api/v1/login', { email: email.value, password: pw.value });
-      if (r.status === 200 && r.data.mfa_required) { codeStep(r.data.mfa_token); return; }
+      if (r.status === 200 && r.data.mfa_required) { codeStep(r.data.mfa_token, r.data.totp, r.data.passkey); return; }
       if (r.status === 200) { await boot(); } else msg.textContent = r.status === 429 ? 'Too many failed attempts. Try again in a few minutes.' : (r.data && r.data.error) || 'Sign in failed';
     };
     const sso = h('div', { class: 'sso' });
@@ -938,7 +957,7 @@
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [] };
-  window.TLApp = { bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route };
+  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route };
   window.addEventListener('hashchange', route);
   boot();
 })();

@@ -2,8 +2,11 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/larytet/tasklane/internal/domain"
 )
 
 // bearer returns the credential a request came with (a session cookie or a bearer token).
@@ -90,6 +93,38 @@ func (s *Server) registerSecurity(mux *http.ServeMux) {
 		if s.decode(w, r, &in) {
 			s.reply(w, ok, s.Svc.DisableMFA(r.Context(), actorOf(r), in.Password))
 		}
+	}))
+	s.handle(mux, "GET /api/v1/me/passkeys", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		keys, err := s.Svc.ListPasskeys(r.Context(), actorOf(r))
+		s.reply(w, map[string]any{"available": s.Svc.WebAuthnAvailable(), "keys": keys}, err)
+	}))
+	s.handle(mux, "POST /api/v1/me/passkeys/options", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Password string `json:"password"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		v, err := s.Svc.PasskeyRegistrationOptions(r.Context(), actorOf(r), in.Password)
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/me/passkeys", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.PasskeyRegistration
+		if !s.decode(w, r, &in) {
+			return
+		}
+		v, err := s.Svc.AddPasskey(r.Context(), actorOf(r), in)
+		s.replyStatus(w, 201, v, err)
+	}))
+	s.handle(mux, "DELETE /api/v1/me/passkeys/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Password string `json:"password"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		s.reply(w, ok, s.Svc.RemovePasskey(r.Context(), actorOf(r), id, in.Password))
 	}))
 	s.handle(mux, "POST /api/v1/users/{id}/revoke-access", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
