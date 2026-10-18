@@ -184,6 +184,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	}
 	svc := domain.New(st.Pool)
 	svc.WebhookAllowPrivate = cfg.WebhookAllowPrivate
+	svc.PasswordMinLength = int(cfg.PasswordMinLength)
 	if cfg.SecretKey != "" {
 		k, err := hex.DecodeString(cfg.SecretKey)
 		if err != nil || len(k) != 32 {

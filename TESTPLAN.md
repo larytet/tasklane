@@ -365,6 +365,7 @@ live in a version-controlled file so changes are reviewed.
 | CORE-07 | Concurrency of scalar fields | Two users change the same and different fields at once; per-field merge; optimistic rollback with explanation |
 | CORE-08 | Attachments | Upload (paste, drag, chunked, resume), scan states, previewer for each type, permissions, limits |
 | CORE-09 | Comments and activity | Visibility restrictions, reactions, collapse behavior, filters |
+| SEC-04 | partial (tokens, sessions, 2FA, lockout, password; SSO, SCIM, WebAuthn, policy open) | `TestSEC04_TokensExpireAndRevokeAtOnceAndScopedTokensAreNotRESTCredentials`, `_SessionsAreListedAndRevokedAtOnce`, `_TwoFactorEnrolmentSignInReplayAndRecovery`, `_LockoutAfterRepeatedFailuresWithoutRevealingAccounts`, `_PasswordChangeAndPolicy`, `TestSEC04_HTTPSignInTwoFactorLockoutAndTokens`, e2e `account.spec.js` |
 | CORE-10 | Notifications and automation | Outbox delivery exactly once, batching, rule loops prevented, dry run |
 | CORE-11 | Time-dependent behavior | Sprint rollover and schedules tested with a controllable clock, including DST changes and leap days |
 | CORE-12 | Dashboards, reports, releases | Gadget data matches filter results; report math (burndown, velocity) against hand-computed fixtures |

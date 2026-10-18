@@ -27,8 +27,8 @@ func (s *Service) CreateUser(ctx context.Context, email, name, password string, 
 	if !strings.Contains(email, "@") || name == "" {
 		return User{}, invalid("email and name are required")
 	}
-	if len(password) < 8 {
-		return User{}, invalid("password must be at least 8 characters")
+	if err := s.checkPassword(email, password); err != nil {
+		return User{}, err
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -61,25 +61,6 @@ func newToken() string {
 	return hex.EncodeToString(b)
 }
 
-// Login checks credentials and returns a session token (stored hashed).
-func (s *Service) Login(ctx context.Context, email, password string, ttl time.Duration) (string, User, error) {
-	var u User
-	var hash *string
-	var active bool
-	err := s.DB.QueryRow(ctx, `SELECT id,email,name,kind,is_admin,password_hash,active FROM app_user WHERE email=$1`,
-		strings.ToLower(strings.TrimSpace(email))).Scan(&u.ID, &u.Email, &u.Name, &u.Kind, &u.Admin, &hash, &active)
-	if err != nil || hash == nil || !active {
-		bcrypt.CompareHashAndPassword([]byte("$2a$10$7EqJtq98hPqEX7fNZaFWoOhi5BUAdfHnVbCySeS0W5iuEQ2sYD8mS"), []byte(password)) // constant-ish time
-		return "", User{}, ErrForbidden
-	}
-	if bcrypt.CompareHashAndPassword([]byte(*hash), []byte(password)) != nil {
-		return "", User{}, ErrForbidden
-	}
-	tok := newToken()
-	_, err = s.DB.Exec(ctx, `INSERT INTO session(token_hash,user_id,expires_at) VALUES($1,$2,$3)`, hashToken(tok), u.ID, s.Now().Add(ttl))
-	return tok, u, err
-}
-
 func (s *Service) Logout(ctx context.Context, tok string) {
 	s.DB.Exec(ctx, `DELETE FROM session WHERE token_hash=$1`, hashToken(tok))
 }
@@ -94,19 +75,28 @@ func (s *Service) Authenticate(ctx context.Context, tok string) (Actor, error) {
 	err := s.DB.QueryRow(ctx, `SELECT u.id,u.email,u.name,u.kind,u.is_admin FROM session s JOIN app_user u ON u.id=s.user_id
 		WHERE s.token_hash=$1 AND s.expires_at>$2 AND u.active`, hashToken(tok), s.Now()).Scan(&u.ID, &u.Email, &u.Name, &u.Kind, &u.Admin)
 	if err == nil {
+		s.DB.Exec(ctx, `UPDATE session SET last_seen_at=$2 WHERE token_hash=$1 AND (last_seen_at IS NULL OR last_seen_at < $2::timestamptz - interval '5 minutes')`, hashToken(tok), s.Now())
 		return Actor{ID: u.ID, Label: u.Name, Admin: u.Admin, Kind: u.Kind}, nil
 	}
 	if err != pgx.ErrNoRows {
 		return Actor{}, err
 	}
-	err = s.DB.QueryRow(ctx, `SELECT u.id,u.name,u.kind,u.is_admin,t.name FROM api_token t JOIN app_user u ON u.id=t.user_id
-		WHERE t.token_hash=$1 AND u.active`, hashToken(tok)).Scan(&u.ID, &u.Name, &u.Kind, &u.Admin, &label)
+	var scoped bool
+	var exp, revoked *time.Time
+	err = s.DB.QueryRow(ctx, `SELECT u.id,u.name,u.kind,u.is_admin,t.name,t.scopes IS NOT NULL,t.expires_at,t.revoked_at FROM api_token t JOIN app_user u ON u.id=t.user_id
+		WHERE t.token_hash=$1 AND u.active`, hashToken(tok)).Scan(&u.ID, &u.Name, &u.Kind, &u.Admin, &label, &scoped, &exp, &revoked)
 	if err == pgx.ErrNoRows {
 		return Actor{}, ErrForbidden
 	}
 	if err != nil {
 		return Actor{}, err
 	}
+	// an expired or revoked token is dead everywhere; a scoped (agent) token is for the MCP server, whose scopes it
+	// enforces, and is not a general REST credential
+	if revoked != nil || exp != nil && !exp.After(s.Now()) || scoped {
+		return Actor{}, ErrForbidden
+	}
+	s.DB.Exec(ctx, `UPDATE api_token SET last_used_at=$2 WHERE token_hash=$1 AND (last_used_at IS NULL OR last_used_at < $2::timestamptz - interval '5 minutes')`, hashToken(tok), s.Now())
 	return Actor{ID: u.ID, Label: "API: " + label, Admin: u.Admin, Kind: "bot"}, nil
 }
 

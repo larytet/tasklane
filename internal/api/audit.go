@@ -17,7 +17,7 @@ import (
 // own history, events or domain audit. Every other route that changes something and succeeds is written to the audit log,
 // so a new administrative route is audited unless someone decides on purpose that it is ordinary work.
 var ordinaryWork = map[string]bool{
-	"POST /api/v1/login": true, "POST /api/v1/logout": true, "POST /api/v1/ws/ticket": true,
+	"POST /api/v1/login": true, "POST /api/v1/login/mfa": true, "POST /api/v1/logout": true, "POST /api/v1/ws/ticket": true,
 	"POST /mcp": true, "DELETE /mcp": true, // the MCP server keeps its own call log
 	"POST /api/v1/git/webhooks/{id}": true, "POST /api/v1/jira/webhooks/{id}": true, // inbound, signed by the provider
 	"POST /api/v1/issues": true, "PATCH /api/v1/issues/{key}": true, "POST /api/v1/issues/{key}/comments": true, "PATCH /api/v1/issues/{key}/comments/{id}": true,

@@ -23,6 +23,7 @@ type Config struct {
 	OSAPIKey            string
 	OSAllowPrivate      bool
 	WebhookAllowPrivate bool
+	PasswordMinLength   int64
 	OSIndex             string
 	OSShards            int64
 	OSReplicas          int64
@@ -88,6 +89,7 @@ var Schema = []Key{
 	{Name: "opensearch_api_key", Default: "", Kind: "string", Secret: true, Doc: "OpenSearch API key (used instead of user and password when set)"},
 	{Name: "opensearch_allow_private", Default: "false", Kind: "enum", Enum: []string{"true", "false"}, Doc: "Allow the cluster to be on a private or loopback address (the usual case in a private network)"},
 	{Name: "webhook_allow_private", Default: "false", Kind: "enum", Enum: []string{"true", "false"}, Doc: "Allow workflow webhook post-functions to call private or loopback addresses (refused by default so a webhook cannot reach internal services)"},
+	{Name: "password_min_length", Default: "8", Kind: "int", Doc: "Shortest accepted password for local accounts (at least 8)"},
 	{Name: "opensearch_index", Default: "tasklane-issues", Kind: "string", Doc: "Alias name for the issue index; versioned indexes are created behind it"},
 	{Name: "opensearch_shards", Default: "1", Kind: "int", Doc: "Primary shards for new indexes"},
 	{Name: "opensearch_replicas", Default: "0", Kind: "int", Doc: "Replicas for new indexes (use at least 1 on a multi-node cluster)"},
@@ -371,7 +373,7 @@ func Load(o Options) (Config, error) {
 	n := func(k string) int64 { v, _ := strconv.ParseInt(m[k], 10, 64); return v }
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
 	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], SearchEngine: m["search_engine"], OSURL: m["opensearch_url"], OSUser: m["opensearch_user"], OSPassword: m["opensearch_password"],
-		OSAPIKey: m["opensearch_api_key"], OSAllowPrivate: m["opensearch_allow_private"] == "true", WebhookAllowPrivate: m["webhook_allow_private"] == "true", OSIndex: m["opensearch_index"], OSShards: n("opensearch_shards"), OSReplicas: n("opensearch_replicas"), MaxUploadMB: n("max_upload_mb"),
+		OSAPIKey: m["opensearch_api_key"], OSAllowPrivate: m["opensearch_allow_private"] == "true", WebhookAllowPrivate: m["webhook_allow_private"] == "true", PasswordMinLength: n("password_min_length"), OSIndex: m["opensearch_index"], OSShards: n("opensearch_shards"), OSReplicas: n("opensearch_replicas"), MaxUploadMB: n("max_upload_mb"),
 		BlobBackend: m["blob_backend"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
 		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],

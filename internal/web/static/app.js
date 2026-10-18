@@ -89,17 +89,30 @@
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
-      h('span', { class: 'muted' }, S.me ? S.me.label : ''),
+      S.me ? h('button', { class: 'btn ghost', 'aria-label': 'Account and security', onclick: () => { location.hash = '#/account'; } }, S.me.label) : null,
       h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/logout'); S.me = null; route(); } }, 'Sign out'));
   }
 
   function loginView() {
     const email = h('input', { type: 'email', id: 'email', autocomplete: 'username' }), pw = h('input', { type: 'password', id: 'pw', autocomplete: 'current-password' });
     const msg = h('div', { class: 'err', role: 'alert' });
+    // the second step: a code from the authenticator app, or a recovery code
+    const codeStep = mfaToken => {
+      const code = h('input', { type: 'text', id: 'code', autocomplete: 'one-time-code', inputmode: 'numeric', 'aria-label': 'Authentication code' });
+      const err = h('div', { class: 'err', role: 'alert' });
+      clear($app).append(h('form', { class: 'login card', onsubmit: async e => {
+        e.preventDefault();
+        const r = await api('POST', '/api/v1/login/mfa', { mfa_token: mfaToken, code: code.value });
+        if (r.status === 200) { await boot(); } else { err.textContent = (r.data && r.data.error) || 'That code is not right'; code.value = ''; code.focus(); }
+      } }, h('h1', {}, 'Tasklane'), h('p', {}, 'Enter the code from your authenticator app, or a recovery code.'), h('label', { for: 'code' }, 'Authentication code'), code, err,
+        h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Verify'))));
+      code.focus();
+    };
     const go = async e => {
       e.preventDefault();
       const r = await api('POST', '/api/v1/login', { email: email.value, password: pw.value });
-      if (r.status === 200) { await boot(); } else msg.textContent = (r.data && r.data.error) || 'Sign in failed';
+      if (r.status === 200 && r.data.mfa_required) { codeStep(r.data.mfa_token); return; }
+      if (r.status === 200) { await boot(); } else msg.textContent = r.status === 429 ? 'Too many failed attempts. Try again in a few minutes.' : (r.data && r.data.error) || 'Sign in failed';
     };
     clear($app).append(h('form', { class: 'login card', onsubmit: go },
       h('h1', {}, 'Tasklane'), h('label', { for: 'email' }, 'Email'), email, h('label', { for: 'pw' }, 'Password'), pw, msg,

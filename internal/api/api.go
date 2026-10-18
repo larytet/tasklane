@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte("ready"))
 	})
 	s.handle(mux, "POST /api/v1/login", s.login)
+	s.handle(mux, "POST /api/v1/login/mfa", s.loginMFA)
 	s.handle(mux, "POST /api/v1/logout", s.auth(s.logout))
 	s.handle(mux, "GET /api/v1/me", s.auth(func(w http.ResponseWriter, r *http.Request) { s.json(w, 200, actorOf(r)) }))
 	s.handle(mux, "GET /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +338,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAudit(mux)
 	s.registerInbox(mux)
 	s.registerAutomation(mux)
+	s.registerSecurity(mux)
 	s.registerJira(mux)
 	s.registerSearchAdmin(mux)
 	s.registerAttachments(mux)
@@ -432,18 +434,63 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func clientMeta(r *http.Request) domain.ClientMeta {
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return domain.ClientMeta{IP: ip, UserAgent: r.UserAgent()}
+}
+
+func (s *Server) startSession(w http.ResponseWriter, tok string, u domain.User) {
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: tok, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
+	s.json(w, 200, u)
+}
+
+// signInFailed answers a refused sign-in: the same words whether the account exists or not, a lockout with when to retry.
+func (s *Server) signInFailed(w http.ResponseWriter, err error) {
+	var locked *domain.LockedError
+	if errors.As(err, &locked) {
+		secs := int(time.Until(locked.Until).Seconds()) + 1
+		if secs < 1 {
+			secs = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		s.fail(w, 429, "locked", "too many failed sign-ins; try again later", nil)
+		return
+	}
+	s.fail(w, 401, "bad_credentials", "wrong email or password", nil)
+}
+
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Email, Password string }
 	if !s.decode(w, r, &in) {
 		return
 	}
-	tok, u, err := s.Svc.Login(r.Context(), in.Email, in.Password, s.SessionTTL)
-	if err != nil {
-		s.fail(w, 401, "bad_credentials", "wrong email or password", nil)
+	res, err := s.Svc.LoginWith(r.Context(), in.Email, in.Password, s.SessionTTL, clientMeta(r))
+	var mfa *domain.MFARequired
+	if errors.As(err, &mfa) {
+		s.json(w, 200, map[string]any{"mfa_required": true, "mfa_token": mfa.Token})
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: tok, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
-	s.json(w, 200, u)
+	if err != nil {
+		s.signInFailed(w, err)
+		return
+	}
+	s.startSession(w, res.Token, res.User)
+}
+
+func (s *Server) loginMFA(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Token string `json:"mfa_token"`
+		Code  string `json:"code"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	res, err := s.Svc.LoginMFA(r.Context(), in.Token, in.Code, clientMeta(r))
+	if err != nil {
+		s.fail(w, 401, "bad_code", "that code is not right", nil)
+		return
+	}
+	s.startSession(w, res.Token, res.User)
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

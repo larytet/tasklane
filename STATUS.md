@@ -16,7 +16,7 @@ this file is updated, and the work is committed and pushed.
 | M1c Agents | **MCP server, gates, kill switch built** | milestones M1c.1 and M1c.2 below; OAuth, subscriptions and bulk tools are open |
 | M2 Agile | **built, exit gate not passed** | M2.1 to M2.9 below; the audit at the end of the M2 section lists what only a real service or a scale run can prove |
 | M3 Fields and workflow | **built, exit gate not passed** | M3.1 to M3.4 below; the exit gate's golden bundles from released versions (EXP-05) and the gaps listed per milestone are open |
-| M4 Enterprise | **in progress** | M4.1 audit log, M4.2 notifications and M4.3 automation built; SSO and SCIM, permission schemes, retention and the rest are open |
+| M4 Enterprise | **in progress** | M4.1 audit log, M4.2 notifications, M4.3 automation and M4.4 account security built; SSO and SCIM, permission schemes, retention and the rest are open |
 | M5 | not started | |
 
 ## M4 milestones
@@ -28,6 +28,10 @@ this file is updated, and the work is committed and pushed.
 | M4.2 | Notifications (CORE-10, part): in-app inbox (unread, read, archived; counts; refreshes itself; permission re-checked on every read; internal comments protected), watchers with explicit mute, per-person preferences (auto-watch, channels, muted kinds, quiet hours with time zone), per-project notification schemes, exactly-once per person, event and kind (replay-safe), one planner for inbox and email, the notifier runs with or without mail, REST routes with matrix rows, Inbox view with bell, watch button, preferences dialog, `docs/NOTIFICATIONS.md` | **built** |
 
 | M4.3 | Automation (CORE-10, rest): rules of trigger, conditions and actions (created, updated, transitioned, commented, scheduled every N minutes or daily in a time zone; TQL and field conditions; transition, assign, set field, comment, create subtask, signed webhook, notify), smart values, run once per rule, issue and event, loop protection carried by the events themselves (chain and depth), per-rule throttle, dry run, run log, project administrators for their project and instance administrators for all, REST routes with matrix rows, Admin Automation screen, `docs/AUTOMATION.md` | **built** |
+
+| M4.4 | Account security (SEC-04, part): sign-in lockout without account enumeration, TOTP two-factor authentication with one-use recovery codes (code replay refused, drift tolerated, pending step expires and dies after five wrong codes, secret encrypted), session list and revoke, revoke-others, API tokens with expiry that are shown once and listed with last use, expired and revoked tokens dead everywhere, scoped agent tokens refused by REST (a hole: they carried the user's full rights there), password change that ends other sessions, password policy and configuration, administrator offboarding and 2FA reset, all audited; sign-in second step and Account page; `docs/IDENTITY.md` | **built** |
+
+M4.4 gaps: no WebAuthn, no organization-wide "require two-factor" policy, no IP allowlist or email domain restriction, no password reset by email, no password history, the lockout is per address and not per source; SSO (OIDC, SAML) and SCIM are the next milestone. Issue found: the REST `Authenticate` ignored token expiry and revocation and accepted scoped agent tokens with the owner's full rights; it now refuses all three.
 
 M4.3 gaps: no manual-button, webhook-received, sprint or version triggers; no clone, link, log-work, add-to-sprint or branch actions; rules are edited as JSON lists in a dialog; an interrupted run is marked failed and not retried (at most once); the trigger match for scheduled rules uses PostgreSQL search only; webhook actions cannot yet loop back through inbound webhooks because there are none (MCP-20 for agents is covered by the same chain: an agent's events carry no rule chain, so an agent-triggered rule runs once).
 

@@ -29,11 +29,13 @@ type Service struct {
 	HookEgress          func(egress.Policy) egress.Policy
 	WebhookAllowPrivate bool
 	// Matcher answers TQL questions for automation (conditions and scheduled rules); set by the server
-	Matcher  IssueMatcher
-	secretMu sync.Mutex
-	derived  []byte
-	gateOnce sync.Once
-	gate     *gate
+	Matcher IssueMatcher
+	// PasswordMinLength is the shortest accepted password (default 8)
+	PasswordMinLength int
+	secretMu          sync.Mutex
+	derived           []byte
+	gateOnce          sync.Once
+	gate              *gate
 	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
 	TrashRetention time.Duration
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:
