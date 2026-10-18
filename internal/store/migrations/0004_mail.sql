@@ -1,3 +1,4 @@
+-- phase: expand
 -- Per-consumer outbox cursors: each consumer (notifier, later webhooks and automation) reads the same
 -- event stream independently. The search indexer keeps using processed_at.
 CREATE TABLE outbox_cursor (

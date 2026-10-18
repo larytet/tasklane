@@ -1,3 +1,4 @@
+-- phase: expand
 -- Metadata only: bytes live in the blob store (SPEC 17.6). No table holds file bytes.
 CREATE TABLE blob (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

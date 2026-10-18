@@ -170,7 +170,7 @@ func TestLIVE09_MiniCampaign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e1, e2, e4, gap := reconcile(tokens, vs)
+	e1, e2, e4, gap := testutil.Reconcile(tokens, vs)
 	if gap {
 		t.Fatal("text_seq has a gap or the final seq is wrong: a save was applied zero or two times")
 	}
@@ -180,64 +180,33 @@ func TestLIVE09_MiniCampaign(t *testing.T) {
 	}
 }
 
-// reconcile is the measurement (SPEC 21): newest-first versions of one text field and the tokens whose saves were
-// acknowledged. It returns the E1 (lost acknowledged save), E2 (stale save replaced a newer change) and E4
-// (stored content differs from what was saved: duplicated) counts, and whether the sequence has a gap.
-func reconcile(tokens []string, vs []domain.TextVersion) (e1, e2, e4 int, gap bool) {
-	final := vs[0].Body
-	for _, tk := range tokens {
-		switch c := strings.Count(final, tk); {
-		case c == 0:
-			e1++
-		case c > 1:
-			e4++
-		}
-	}
-	for i := 0; i < len(vs)-1; i++ {
-		newer, older := vs[i], vs[i+1]
-		if newer.Seq != older.Seq+1 {
-			gap = true
-		}
-		for _, b := range strings.Split(older.Body, "\n\n") {
-			if !strings.Contains(newer.Body, b) {
-				e2++
-				break
-			}
-		}
-	}
-	if int64(1+len(tokens)) != vs[0].Seq {
-		gap = true
-	}
-	return
-}
-
 // LIVE-12: the measurement must detect every injected error class, or its zeros mean nothing.
 func TestLIVE12_ReconcilerDetectsInjectedErrors(t *testing.T) {
 	good := []domain.TextVersion{{Seq: 3, Body: "s\n\n[a]\n\n[b]"}, {Seq: 2, Body: "s\n\n[a]"}, {Seq: 1, Body: "s"}}
 	toks := []string{"[a]", "[b]"}
-	if e1, e2, e4, gap := reconcile(toks, good); e1+e2+e4 != 0 || gap {
+	if e1, e2, e4, gap := testutil.Reconcile(toks, good); e1+e2+e4 != 0 || gap {
 		t.Fatalf("false positive on a clean history: %d %d %d %v", e1, e2, e4, gap)
 	}
 	// E1: an acknowledged save is absent from the final text
-	if e1, _, _, _ := reconcile([]string{"[a]", "[b]", "[c]"}, good); e1 != 1 {
+	if e1, _, _, _ := testutil.Reconcile([]string{"[a]", "[b]", "[c]"}, good); e1 != 1 {
 		t.Fatalf("E1 not detected: %d", e1)
 	}
 	// E2: a stale save was accepted, so the newest version dropped content of the one before it
 	stale := []domain.TextVersion{{Seq: 3, Body: "s\n\n[b]"}, {Seq: 2, Body: "s\n\n[a]"}, {Seq: 1, Body: "s"}}
-	if _, e2, _, _ := reconcile([]string{"[b]"}, stale); e2 != 1 {
+	if _, e2, _, _ := testutil.Reconcile([]string{"[b]"}, stale); e2 != 1 {
 		t.Fatalf("E2 not detected: %d", e2)
 	}
 	// E4: stored content mutated (a save applied twice shows as a duplicate)
 	dup := []domain.TextVersion{{Seq: 3, Body: "s\n\n[a]\n\n[a]"}, {Seq: 2, Body: "s\n\n[a]"}, {Seq: 1, Body: "s"}}
-	if _, _, e4, _ := reconcile([]string{"[a]"}, dup); e4 != 1 {
+	if _, _, e4, _ := testutil.Reconcile([]string{"[a]"}, dup); e4 != 1 {
 		t.Fatalf("E4 not detected: %d", e4)
 	}
 	// a missing version in the chain, and a final seq that does not match the number of acknowledged saves
 	holes := []domain.TextVersion{{Seq: 3, Body: "s\n\n[a]\n\n[b]"}, {Seq: 1, Body: "s"}}
-	if _, _, _, gap := reconcile(toks, holes); !gap {
+	if _, _, _, gap := testutil.Reconcile(toks, holes); !gap {
 		t.Fatal("sequence gap not detected")
 	}
-	if _, _, _, gap := reconcile([]string{"[a]"}, good); !gap {
+	if _, _, _, gap := testutil.Reconcile([]string{"[a]"}, good); !gap {
 		t.Fatal("a save applied more often than acknowledged was not detected")
 	}
 }

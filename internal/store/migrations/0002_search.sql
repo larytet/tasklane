@@ -1,3 +1,4 @@
+-- phase: expand
 CREATE EXTENSION IF NOT EXISTS unaccent SCHEMA public;
 
 -- Narrow side tables written by the indexer worker (an outbox consumer), so typing never
@@ -26,4 +27,3 @@ CREATE TABLE comment_search (
 CREATE INDEX comment_search_tsv   ON comment_search USING gin (tsv);
 CREATE INDEX comment_search_issue ON comment_search (issue_id);
 
-CREATE INDEX issue_history_field_idx ON issue_history (field, issue_id);

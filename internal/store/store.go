@@ -3,10 +3,13 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -55,30 +58,141 @@ func Migrations() ([]Migration, error) {
 	return ms, nil
 }
 
-// Migrate applies pending migrations under an advisory lock so concurrent nodes are safe.
-// Each migration runs in its own transaction and is recorded with it.
+func checksum(sql string) string { h := sha256.Sum256([]byte(sql)); return hex.EncodeToString(h[:]) }
+
+// LintAll checks every embedded migration in order (later ones know which tables earlier ones created).
+func LintAll() []string {
+	ms, err := Migrations()
+	if err != nil {
+		return []string{err.Error()}
+	}
+	var out []string
+	earlier := map[string]bool{}
+	for _, m := range ms {
+		out = append(out, Lint(m.Name, m.SQL, earlier)...)
+		for _, t := range tablesIn(m.SQL) {
+			earlier[t] = true
+		}
+	}
+	return out
+}
+
+// PlanStep is one pending migration, as `tasklane migrate plan` reports it.
+type PlanStep struct {
+	Version int
+	Name    string
+	Phase   Phase
+	NoTx    bool
+}
+
+// ErrChecksum is returned when an applied migration's file changed afterwards (history must not be rewritten).
+type ErrChecksum struct {
+	Version int
+	Name    string
+}
+
+func (e *ErrChecksum) Error() string {
+	return fmt.Sprintf("migration %s was modified after it was applied; applied migrations are immutable (add a new migration instead)", e.Name)
+}
+
+// Plan lists what Migrate would apply, in order, without changing anything. It also verifies the checksums of
+// everything already applied, so a rewritten migration is caught before it can cause drift.
+func (s *Store) Plan(ctx context.Context) ([]PlanStep, error) {
+	ms, err := Migrations()
+	if err != nil {
+		return nil, err
+	}
+	applied := map[int]string{}
+	var have bool
+	if err := s.Pool.QueryRow(ctx, `SELECT to_regclass('schema_migration') IS NOT NULL`).Scan(&have); err != nil {
+		return nil, err
+	}
+	if have {
+		rows, err := s.Pool.Query(ctx, `SELECT version, COALESCE(checksum,'') FROM schema_migration`)
+		if err != nil {
+			// the checksum column does not exist yet on an older database: treat every applied row as unchecked
+			rows, err = s.Pool.Query(ctx, `SELECT version, '' FROM schema_migration`)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for rows.Next() {
+			var v int
+			var c string
+			rows.Scan(&v, &c)
+			applied[v] = c
+		}
+		rows.Close()
+	}
+	var plan []PlanStep
+	for _, m := range ms {
+		if c, ok := applied[m.Version]; ok {
+			if c != "" && c != checksum(m.SQL) {
+				return nil, &ErrChecksum{m.Version, m.Name}
+			}
+			continue
+		}
+		ph, _ := phaseOf(m.SQL)
+		plan = append(plan, PlanStep{m.Version, m.Name, ph, hasNoTx(m.SQL)})
+	}
+	return plan, nil
+}
+
+// Migrate applies pending migrations under an advisory lock so concurrent nodes are safe. Each migration runs in its own
+// transaction (unless marked no-transaction) with a one second lock timeout: a migration that cannot get its lock fails
+// fast and leaves the schema untouched, instead of queueing behind traffic and blocking it.
 func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
+	if problems := LintAll(); len(problems) > 0 {
+		return nil, fmt.Errorf("migration lint failed:\n  %s", strings.Join(problems, "\n  "))
+	}
 	conn, err := s.Pool.Acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Release()
-	if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock(727274)`); err != nil {
-		return nil, err
+	// Poll for the runner lock instead of blocking in pg_advisory_lock: a blocked lock call is an open statement, and
+	// CREATE INDEX CONCURRENTLY in the running node waits for every other open statement, so two nodes would deadlock.
+	// A polling node is idle between attempts and never in the way.
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		var got bool
+		if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(727274)`).Scan(&got); err != nil {
+			return nil, err
+		}
+		if got {
+			break
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("another node has been migrating the schema for more than two minutes")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 	defer conn.Exec(context.Background(), `SELECT pg_advisory_unlock(727274)`)
-	if _, err = conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migration (version int PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+	// every statement of the runner, including its bookkeeping, gives up after a second instead of queueing behind traffic
+	if _, err = conn.Exec(ctx, `SET lock_timeout = '1s'`); err != nil {
 		return nil, err
 	}
-	done := map[int]bool{}
-	rows, err := conn.Query(ctx, `SELECT version FROM schema_migration`)
+	defer conn.Exec(context.Background(), `RESET lock_timeout`)
+	if _, err = conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migration (version int PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now(), checksum text)`); err != nil {
+		return nil, err
+	}
+	if _, err = conn.Exec(ctx, `ALTER TABLE schema_migration ADD COLUMN IF NOT EXISTS checksum text`); err != nil {
+		return nil, err
+	}
+	done := map[int]string{}
+	rows, err := conn.Query(ctx, `SELECT version, COALESCE(checksum,'') FROM schema_migration`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var v int
-		rows.Scan(&v)
-		done[v] = true
+		var c string
+		rows.Scan(&v, &c)
+		done[v] = c
 	}
 	rows.Close()
 	ms, err := Migrations()
@@ -86,15 +200,38 @@ func (s *Store) Migrate(ctx context.Context) (applied []int, err error) {
 		return nil, err
 	}
 	for _, m := range ms {
-		if done[m.Version] {
+		if c, ok := done[m.Version]; ok {
+			switch {
+			case c == "": // a row from before checksums existed: adopt the current file
+				conn.Exec(ctx, `UPDATE schema_migration SET checksum=$2 WHERE version=$1`, m.Version, checksum(m.SQL))
+			case c != checksum(m.SQL):
+				return applied, &ErrChecksum{m.Version, m.Name}
+			}
+			continue
+		}
+		if hasNoTx(m.SQL) {
+			if _, err = conn.Exec(ctx, `SET lock_timeout = '1s'`); err == nil {
+				_, err = conn.Exec(ctx, m.SQL)
+			}
+			conn.Exec(ctx, `RESET lock_timeout`)
+			if err == nil {
+				_, err = conn.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum) VALUES($1,$2,$3)`, m.Version, m.Name, checksum(m.SQL))
+			}
+			if err != nil {
+				return applied, fmt.Errorf("migration %s: %w", m.Name, err)
+			}
+			applied = append(applied, m.Version)
 			continue
 		}
 		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return applied, err
 		}
-		if _, err = tx.Exec(ctx, m.SQL); err == nil {
-			_, err = tx.Exec(ctx, `INSERT INTO schema_migration(version,name) VALUES($1,$2)`, m.Version, m.Name)
+		if _, err = tx.Exec(ctx, `SET LOCAL lock_timeout = '1s'`); err == nil {
+			_, err = tx.Exec(ctx, m.SQL)
+		}
+		if err == nil {
+			_, err = tx.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum) VALUES($1,$2,$3)`, m.Version, m.Name, checksum(m.SQL))
 		}
 		if err != nil {
 			tx.Rollback(ctx)

@@ -82,7 +82,7 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | LIVE-12 | partial | the reconciler detects every injected class; injection into a running system and production counters are not built |
 | LIVE-13 | partial | link schemes, control characters and size are sanitized and reported; no node or attribute schema, no fuzzing |
 | LIVE-15, 17 | partial | `text_seq` on every REST read and on every text event; events are best effort (a dead subscriber never blocks writers, saves work with no hub at all); a hidden tab refetches when shown. Dropped-event fault injection and Redis loss are not tested |
-| DUR-01 | done for lost acknowledgements | real process kill not scripted |
+| DUR-01, DUR-02 | done | the real binary is killed with SIGKILL three times in the middle of a 96-save campaign with 8 users and restarted after each kill; clients retry with the same save id; E1 = E2 = E4 = 0, no sequence gap, and a draft written before the kills is intact (`TestCHAOS01_DUR01_KillTheServerMidSave`). Postgres restart and failover (DUR-03) are not drilled |
 | DUR-02, 03, 05, 06 | open | restart during editing, Postgres restart or failover, validator change, 3-node profile |
 | DUR-04 | not applicable yet | history is written in the same transaction (deviation 2) |
 | PRES-01..04 | partial | over the socket and the HTTP fallback: change broadcast, leave on tab close, expiry sweep, appear-offline flag, never blocks a save; the avatar stack and field notes were checked by hand in Chrome; accessibility of the stack is unchecked |
@@ -93,7 +93,7 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | PERF-02, 04, 06, 08, 09 | open | cold data, board (M2), first visit timing, prefetch, editor on the phone profile |
 | PERF-12, 13 | done (single node) | presence change p95 2.8 ms and saved-change event p95 6.6 ms to another open socket, against 1 s |
 | PERF-16, 17 | done | single machine; reference `perf` hardware undefined |
-| CHAOS-01 | partial | lost acknowledgements injected; no node kill |
+| CHAOS-01 | done (single node) | same test; the multi-node profile (rolling kill with a load balancer) is not built |
 | CHAOS-02 | open | Redis is not implemented (single node only) |
 | CHAOS-03 | partial | lost acknowledgements only; latency and packet loss need the `chaos` profile |
 | CORE-01, 02 | partial | create, edit, keys, standard workflow templates; move, clone, delete are M1b; no conditions, validators or post-functions; hierarchy rules minimal |
@@ -108,7 +108,7 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | SEC-03 | partial | comment visibility across REST, search and mail; no issue security levels |
 | SEC-05 | partial | XSS-safe rendering (no HTML sinks, escaped mail, CSP), sanitized links, parameterized TQL; CSV export injection is M1b |
 | UI-01 | partial | visual baselines of the ticket and the open editor in dark and light (`make e2e`, Linux Chrome, stable over two runs); the other screens, compact and comfortable densities and the dialogs are not baselined |
-| UI-02, 03, 04, 05 | partial | UI-03 done (dark default, stored choice, no flash: the head script is proven necessary by a test that fails without it; the setting is stored in the browser, not yet server side); UI-04 done at 390, 768 and 1280 px (no horizontal scroll, controls reachable, touch targets); UI-02 contrast checker over the tokens and UI-05 Gmail-style collapse, unread and scroll restoration are open |
+| UI-02, 03, 04, 05 | partial | UI-02 done: every token pair in both themes meets 4.5:1 text and 3:1 component contrast, the checker is validated against reference values and DESIGN's own figures; UI-03 done (dark default, stored choice, no flash: the head script is proven necessary by a test that fails without it; the setting is stored in the browser, not yet server side); UI-04 done at 390, 768 and 1280 px; UI-05 Gmail-style collapse, unread and scroll restoration is open |
 | A11Y-01, 02 | partial | axe (WCAG 2 A and AA tags): zero serious or critical violations on sign-in, list, create dialog, ticket, ticket with editor and conflict dialog, in both themes; create, open, comment and transition are completable with the keyboard only, focus rings are visible, dialogs trap focus. Not covered: a screen reader pass, the board and previewer (not built) |
 | BLOB-01, 02, 04..07, 09, 12, 20, 23 | done or partial as listed in section 12 | BLOB-08 external scanner; BLOB-20 mixed-load run |
 | MAIL-01..03 | done or partial | see section 12 |
@@ -119,7 +119,7 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | CFG-01, 02 | done | |
 | CFG-03 | open | hot reload of the safe subset |
 | CFG-04 | partial | secrets masked in `config print` and absent from error text; no crash-dump or diagnostics-bundle check |
-| UPG-01 | partial | advisory lock, idempotency, numbering; expand and contract lint, `migrate plan`, checksum mismatch, lock-time measurement |
+| UPG-01 | partial | advisory lock (polled, so nodes cannot deadlock), idempotency, numbering, expand and contract lint (rejects DROP, rename, type change, SET NOT NULL, plain CREATE INDEX on an existing table), mandatory phase header, per-migration checksum with legacy adoption, `migrate plan` equal to what `migrate` applies, one-second lock timeout that fails fast and changes nothing, concurrent-index migrations run outside a transaction. Not yet: lock-time measurement on the `scale` dataset, a rolling-upgrade drill with two releases |
 | LIC-01, 02, 05 | done | |
 
 **Conclusion.** The tracker core, the editing-safety model, search, attachments, mail, packaging and configuration are built and tested. The M1a gate needs the realtime channel and a browser test harness (accessibility, visual, responsive, presence in a browser), the rich-text schema, and several durability and upgrade drills before it can be declared passed. M1a.10 covers the realtime channel and the harness. M1b and M1c are not started.
@@ -133,3 +133,8 @@ The gate lists the ids below. **Done** means an automated test passes in this re
 | 27 | M1a.10 | The phone layout scrolled sideways (list page 523 px wide on a 390 px screen) | Top bar wraps with the search on its own row, rows wrap with metadata on a second line, spacing tightens; UI-04 at three widths |
 | 28 | M1a.10 | A light-theme user saw a dark flash: the theme was applied by `app.js` at the end of the body | `theme.js` loads in `<head>` before the stylesheet. The first version of the test passed vacuously (its recorder was racy); it now records the theme when the parser creates `<body>` and was shown to fail without the fix |
 | 29 | M1a.10 | Pressing Enter on an unchanged search did nothing (no `hashchange` for an identical hash), so a search that ran before the indexer caught up could not be refreshed | Enter on the same query re-runs the search; found by the UI-05 test, which was written to allow for search lag |
+| 30 | M1a.11 | The migration lint rejected my own migration 0002: a plain `CREATE INDEX` on `issue_history`, created earlier, blocks writes while it builds | The index moved to migration 0005, `CREATE INDEX CONCURRENTLY` outside a transaction. Pre-release, so 0002 was edited in place; from the first release applied migrations are immutable and the checksum enforces it |
+| 31 | M1a.11 | Adding that concurrent index exposed a deadlock between migrating nodes: `CREATE INDEX CONCURRENTLY` waits for every other open statement, and a node waiting in `pg_advisory_lock` is one | Waiting nodes poll `pg_try_advisory_lock` and are idle between attempts. Found by the existing concurrent-nodes test; a good reason to keep it |
+| 32 | M1a.11 | The migration lock test passed for the wrong reason (the lint failure made `Migrate` error); the runner's own bookkeeping statements also ran without a lock timeout | The whole runner session has a one-second lock timeout; the test now asserts the lock-timeout error, the elapsed time and that the schema is unchanged |
+| 33 | M1a.11 | The first crash drill's draft assertion failed: a successful description save deletes the saver's own description draft, by design | The drill keeps its draft on the comment field, which the campaign does not save |
+| 34 | M1a.11 | The contrast checker could not read 3-digit hex colours and flagged the light theme's `#fff` | The checker expands `#abc`; with every token readable, no pair actually failed |

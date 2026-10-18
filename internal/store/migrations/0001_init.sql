@@ -1,3 +1,4 @@
+-- phase: expand
 CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;
 
 CREATE TABLE app_user (

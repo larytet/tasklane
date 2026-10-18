@@ -64,6 +64,19 @@ func main() {
 	case "migrate":
 		st := mustOpen(ctx, cfg)
 		defer st.Close()
+		if len(os.Args) > 2 && os.Args[2] == "plan" {
+			plan, err := st.Plan(ctx)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if len(plan) == 0 {
+				fmt.Println("the schema is up to date; nothing to apply")
+			}
+			for _, p := range plan {
+				fmt.Printf("would apply %04d %s  [%s%s]\n", p.Version, p.Name, p.Phase, map[bool]string{true: ", no transaction", false: ""}[p.NoTx])
+			}
+			return
+		}
 		applied, err := st.Migrate(ctx)
 		if err != nil {
 			log.Fatal(err)
