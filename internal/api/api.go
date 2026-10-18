@@ -1,0 +1,412 @@
+// Package api is the HTTP layer: JSON endpoints for the UI and for API clients.
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/larytet/tasklane/internal/domain"
+)
+
+type Server struct {
+	Svc        *domain.Service
+	SessionTTL time.Duration
+	Secure     bool // set the Secure flag on the session cookie
+	Extra      func(mux *http.ServeMux, s *Server)
+	Ready      func(ctx context.Context) error
+}
+
+type ctxKey struct{}
+
+func actorOf(r *http.Request) domain.Actor {
+	a, _ := r.Context().Value(ctxKey{}).(domain.Actor)
+	return a
+}
+
+const cookieName = "tl_session"
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if s.Ready != nil {
+			if err := s.Ready(r.Context()); err != nil {
+				http.Error(w, "not ready", 503)
+				return
+			}
+		}
+		w.Write([]byte("ready"))
+	})
+	mux.HandleFunc("POST /api/v1/login", s.login)
+	mux.HandleFunc("POST /api/v1/logout", s.auth(s.logout))
+	mux.HandleFunc("GET /api/v1/me", s.auth(func(w http.ResponseWriter, r *http.Request) { s.json(w, 200, actorOf(r)) }))
+	mux.HandleFunc("GET /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		us, err := s.Svc.ListUsers(r.Context())
+		s.reply(w, us, err)
+	}))
+
+	mux.HandleFunc("GET /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		ps, err := s.Svc.ListProjects(r.Context(), actorOf(r))
+		s.reply(w, ps, err)
+	}))
+	mux.HandleFunc("POST /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Key, Name string }
+		if !s.decode(w, r, &in) {
+			return
+		}
+		p, err := s.Svc.CreateProject(r.Context(), actorOf(r), in.Key, in.Name)
+		s.replyStatus(w, 201, p, err)
+	}))
+	mux.HandleFunc("POST /api/v1/projects/{key}/members", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			User string `json:"user"`
+			Role string `json:"role"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.AddMember(r.Context(), actorOf(r), r.PathValue("key"), in.User, in.Role))
+	}))
+
+	mux.HandleFunc("POST /api/v1/issues", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.CreateIn
+		if !s.decode(w, r, &in) {
+			return
+		}
+		is, err := s.Svc.CreateIssue(r.Context(), actorOf(r), in)
+		if err == nil {
+			w.Header().Set("Location", "/api/v1/issues/"+is.Key+"/view")
+		}
+		s.replyStatus(w, 201, is, err)
+	}))
+	mux.HandleFunc("GET /api/v1/issues/{key}/view", s.auth(s.view))
+	mux.HandleFunc("PATCH /api/v1/issues/{key}", s.auth(s.patchIssue))
+	mux.HandleFunc("POST /api/v1/issues/{key}/transitions", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Transition  string `json:"transition"`
+			BaseVersion *int64 `json:"base_version"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		is, err := s.Svc.Transition(r.Context(), actorOf(r), r.PathValue("key"), in.Transition, in.BaseVersion)
+		s.reply(w, is, err)
+	}))
+	mux.HandleFunc("GET /api/v1/issues/{key}/history", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		h, err := s.Svc.History(r.Context(), actorOf(r), r.PathValue("key"))
+		s.reply(w, h, err)
+	}))
+
+	mux.HandleFunc("PUT /api/v1/issues/{key}/text/{field}", s.auth(s.saveText))
+	mux.HandleFunc("POST /api/v1/issues/{key}/text/{field}/patch", s.auth(s.patchText))
+	mux.HandleFunc("POST /api/v1/issues/{key}/text/{field}/replace", s.auth(s.replaceText))
+	mux.HandleFunc("GET /api/v1/issues/{key}/text/{field}/versions", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.TextVersions(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field"))
+		s.reply(w, v, err)
+	}))
+	mux.HandleFunc("POST /api/v1/issues/{key}/text/{field}/restore", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Seq int64 `json:"seq"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		res, err := s.Svc.RestoreText(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field"), in.Seq)
+		s.reply(w, res, err)
+	}))
+
+	mux.HandleFunc("GET /api/v1/issues/{key}/drafts", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		d, err := s.Svc.GetDrafts(r.Context(), actorOf(r), r.PathValue("key"))
+		s.reply(w, d, err)
+	}))
+	mux.HandleFunc("PUT /api/v1/issues/{key}/drafts/{field}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Body    string `json:"body"`
+			BaseSeq int64  `json:"base_seq"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.SaveDraft(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field"), in.Body, in.BaseSeq))
+	}))
+	mux.HandleFunc("DELETE /api/v1/issues/{key}/drafts/{field}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.DeleteDraft(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field")))
+	}))
+
+	mux.HandleFunc("POST /api/v1/issues/{key}/comments", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Body     string `json:"body"`
+			Internal bool   `json:"internal"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		c, err := s.Svc.AddComment(r.Context(), actorOf(r), r.PathValue("key"), in.Body, in.Internal)
+		s.replyStatus(w, 201, c, err)
+	}))
+	mux.HandleFunc("PATCH /api/v1/issues/{key}/comments/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Body string `json:"body"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.EditComment(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("id"), in.Body))
+	}))
+
+	mux.HandleFunc("POST /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Field string `json:"field"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		p, err := s.Svc.Heartbeat(r.Context(), actorOf(r), r.PathValue("key"), in.Field)
+		s.reply(w, p, err)
+	}))
+	mux.HandleFunc("DELETE /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.Svc.Presence.Leave(strings.ToUpper(r.PathValue("key")), actorOf(r).ID)
+		s.json(w, 200, map[string]bool{"ok": true})
+	}))
+	if s.Extra != nil {
+		s.Extra(mux, s)
+	}
+	return s.secure(mux)
+}
+
+// secure adds the baseline response headers (strict CSP, no sniffing, no framing) and Server-Timing.
+func (s *Server) secure(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		start := time.Now()
+		next.ServeHTTP(&timingWriter{ResponseWriter: w, start: start}, r)
+	})
+}
+
+type timingWriter struct {
+	http.ResponseWriter
+	start time.Time
+	done  bool
+}
+
+func (t *timingWriter) WriteHeader(c int) {
+	if !t.done {
+		t.done = true
+		t.Header().Set("Server-Timing", fmt.Sprintf("app;dur=%.1f", float64(time.Since(t.start).Microseconds())/1000))
+	}
+	t.ResponseWriter.WriteHeader(c)
+}
+
+func (t *timingWriter) Write(b []byte) (int, error) {
+	if !t.done {
+		t.WriteHeader(200)
+	}
+	return t.ResponseWriter.Write(b)
+}
+
+// auth resolves the session cookie or bearer token. Cookie-authenticated unsafe requests must
+// carry the X-Requested-With header, which a cross-site form or image cannot set (CSRF guard).
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tok, viaCookie := "", false
+		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+			tok = strings.TrimPrefix(h, "Bearer ")
+		} else if c, err := r.Cookie(cookieName); err == nil {
+			tok, viaCookie = c.Value, true
+		}
+		a, err := s.Svc.Authenticate(r.Context(), tok)
+		if err != nil {
+			s.fail(w, 401, "unauthorized", "sign in required", nil)
+			return
+		}
+		if viaCookie && r.Method != "GET" && r.Method != "HEAD" && r.Header.Get("X-Requested-With") != "tasklane" {
+			s.fail(w, 403, "csrf", "missing X-Requested-With header", nil)
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, a)))
+	}
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Email, Password string }
+	if !s.decode(w, r, &in) {
+		return
+	}
+	tok, u, err := s.Svc.Login(r.Context(), in.Email, in.Password, s.SessionTTL)
+	if err != nil {
+		s.fail(w, 401, "bad_credentials", "wrong email or password", nil)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: tok, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
+	s.json(w, 200, u)
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(cookieName); err == nil {
+		s.Svc.Logout(r.Context(), c.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1})
+	s.json(w, 200, map[string]bool{"ok": true})
+}
+
+func (s *Server) view(w http.ResponseWriter, r *http.Request) {
+	v, err := s.Svc.View(r.Context(), actorOf(r), r.PathValue("key"))
+	if err != nil {
+		s.reply(w, v, err)
+		return
+	}
+	etag := fmt.Sprintf(`"%s-%d-%d-%d-%d"`, v.Issue.Key, v.Issue.Version, v.Issue.SummarySeq, v.Issue.DescSeq, len(v.Comments))
+	if v.Issue.Updated.UnixNano() != 0 {
+		etag = etag[:len(etag)-1] + fmt.Sprintf("-%d\"", v.Issue.Updated.UnixNano())
+	}
+	if len(v.Presence) == 0 {
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	s.json(w, 200, v)
+}
+
+func (s *Server) patchIssue(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		domain.Changes
+		BaseVersion *int64 `json:"base_version"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	base, strict := in.BaseVersion, false
+	if im := r.Header.Get("If-Match"); im != "" {
+		n, err := strconv.ParseInt(strings.Trim(im, `"`), 10, 64)
+		if err != nil {
+			s.fail(w, 400, "bad_request", "If-Match must be the issue version", nil)
+			return
+		}
+		base, strict = &n, true
+	}
+	is, err := s.Svc.UpdateFields(r.Context(), actorOf(r), r.PathValue("key"), base, strict, in.Changes)
+	var vc *domain.VersionConflict
+	if errors.As(err, &vc) && strict {
+		s.fail(w, 412, "precondition_failed", err.Error(), vc)
+		return
+	}
+	s.reply(w, is, err)
+}
+
+func (s *Server) saveText(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Body    string `json:"body"`
+		BaseSeq *int64 `json:"base_seq"`
+		Mode    string `json:"mode"`
+		SaveID  string `json:"save_id"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	if in.BaseSeq == nil {
+		s.fail(w, 400, "bad_request", "base_seq is required; use /replace for a bare overwrite", nil)
+		return
+	}
+	res, err := s.Svc.SaveText(r.Context(), actorOf(r), r.PathValue("key"), domain.SaveIn{Field: r.PathValue("field"), Body: in.Body, BaseSeq: *in.BaseSeq, Mode: in.Mode, SaveID: in.SaveID})
+	s.reply(w, res, err)
+}
+
+func (s *Server) patchText(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Old string `json:"old_text"`
+		New string `json:"new_text"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	res, err := s.Svc.PatchText(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field"), in.Old, in.New)
+	s.reply(w, res, err)
+}
+
+func (s *Server) replaceText(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Body string `json:"body"`
+	}
+	if !s.decode(w, r, &in) {
+		return
+	}
+	var im *int64
+	if h := r.Header.Get("If-Match"); h != "" {
+		n, err := strconv.ParseInt(strings.Trim(h, `"`), 10, 64)
+		if err != nil {
+			s.fail(w, 400, "bad_request", "If-Match must be the field's text_seq", nil)
+			return
+		}
+		im = &n
+	}
+	res, err := s.Svc.ReplaceText(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field"), in.Body, im)
+	s.reply(w, res, err)
+}
+
+func (s *Server) decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	body := http.MaxBytesReader(w, r.Body, 3<<20)
+	dec := json.NewDecoder(body)
+	if err := dec.Decode(v); err != nil && err != io.EOF {
+		s.fail(w, 400, "bad_request", "invalid JSON body: "+err.Error(), nil)
+		return false
+	}
+	return true
+}
+
+func (s *Server) json(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}
+
+func (s *Server) fail(w http.ResponseWriter, code int, kind, msg string, detail any) {
+	s.json(w, code, map[string]any{"error": msg, "code": kind, "detail": detail})
+}
+
+func (s *Server) reply(w http.ResponseWriter, v any, err error) { s.replyStatus(w, 200, v, err) }
+
+// replyStatus maps domain errors to HTTP: 400 invalid, 403 forbidden, 404 not found,
+// 409 stale save or version (with the data the client needs to resolve it), 412 failed precondition.
+func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
+	var (
+		inv *domain.InvalidError
+		tc  *domain.TextConflict
+		vc  *domain.VersionConflict
+		tp  *domain.TextPrecondition
+		pm  *domain.PatchMismatch
+	)
+	switch {
+	case err == nil:
+		s.json(w, ok, v)
+	case errors.As(err, &inv):
+		s.fail(w, 400, "invalid", inv.Msg, nil)
+	case errors.Is(err, domain.ErrForbidden):
+		s.fail(w, 403, "forbidden", "you do not have permission to do this", nil)
+	case errors.Is(err, domain.ErrNotFound):
+		s.fail(w, 404, "not_found", "not found", nil)
+	case errors.As(err, &tc):
+		s.fail(w, 409, "text_conflict", "the text was changed by "+tc.By+" while you were editing", tc)
+	case errors.As(err, &vc):
+		s.fail(w, 409, "version_conflict", err.Error(), vc)
+	case errors.As(err, &tp):
+		s.fail(w, 412, "precondition_failed", err.Error(), tp)
+	case errors.As(err, &pm):
+		s.fail(w, 409, "patch_mismatch", err.Error(), pm)
+	default:
+		s.fail(w, 500, "internal", "internal error", nil)
+	}
+}

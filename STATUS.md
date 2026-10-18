@@ -23,8 +23,8 @@ this file is updated, and the work is committed and pushed.
 | M1a.1 Foundation | Go module, config, PostgreSQL store, migration framework (advisory lock, per-migration tx), three-way merge engine, test harness with per-test schema | done |
 | M1a.2 Tracker core | users, sessions, API tokens, projects and roles, issue types, standard workflow, issues with keys, scalar fields with per-field versions, transitions, history, outbox | done |
 | M1a.3 Text and concurrency | `text_seq` compare-and-set, idempotent saves, anchored patch, conditional and bare replace, versions and restore, drafts, comments, advisory presence, sanitization | done |
-| M1a.4 HTTP API and server | REST + UI bootstrap endpoints, auth middleware, `tasklane serve`, `migrate`, `doctor`, health | next |
-| M1a.5 TQL and search | TQL parser and compiler, PostgreSQL full-text and trigram, issue list read model | planned |
+| M1a.4 HTTP API and server | REST + UI bootstrap endpoints, cookie and bearer auth with CSRF guard, security headers, `Server-Timing`, ETag revalidation, `tasklane serve`, `migrate`, `doctor`, `create-admin`, health and readiness | done |
+| M1a.5 TQL and search | TQL parser and compiler, PostgreSQL full-text and trigram, issue list read model | next |
 | M1a.6 Attachments | blob store interface, local filesystem backend, uploads, hash, size limits | planned |
 | M1a.7 UI | embedded SPA: inbox, thread view, conflict dialog, drafts, presence, dark and light themes | planned |
 | M1a.8 Email and packaging | SMTP outbound, Dockerfile, Compose, tarball, configuration reference, exit gate | planned |
@@ -43,3 +43,4 @@ this file is updated, and the work is committed and pushed.
 | # | Found in | Issue | Resolution |
 |---|---|---|---|
 | 1 | M1a.3 | Link sanitizer let `[x](javascript:alert(1))` leave a stray `)` because a regex stopped at the first closing parenthesis | Replaced with a balanced-parenthesis scanner; `TestLIVE13_Sanitization` is the regression test |
+| 2 | M1a.4 | Test helper decoded every response into a JSON object, so the presence endpoint (a JSON array) looked empty | Test-only fault; assertion replaced by a status check. The endpoint was correct |

@@ -104,3 +104,6 @@ func (e *Env) Issue(summary, desc string) domain.Issue {
 	}
 	return is
 }
+
+// Ctx is a convenience for tests that need a context value.
+func Ctx() context.Context { return context.Background() }

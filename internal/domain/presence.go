@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -87,4 +88,20 @@ func (p *Presence) List(issue, exclude string) []PresenceEntry {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// Heartbeat is the service-level call: it checks read access, honours the user's
+// "appear offline in editors" setting, records presence and returns who else is here.
+func (s *Service) Heartbeat(ctx context.Context, a Actor, key, field string) ([]PresenceEntry, error) {
+	is, role, err := s.access(ctx, a, key)
+	if err != nil {
+		return nil, err
+	}
+	if field != "" && (!canWrite(role) || !textFields[field]) {
+		field = "" // viewers and unknown fields are shown as viewing, never as editing
+	}
+	var offline bool
+	s.DB.QueryRow(ctx, `SELECT appear_offline FROM app_user WHERE id=$1`, a.ID).Scan(&offline)
+	s.Presence.Heartbeat(is.Key, a, field, offline)
+	return s.Presence.List(is.Key, a.ID), nil
 }

@@ -712,6 +712,14 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | CORE-02 | done (domain) | `TestWorkflowTransitions` |
 | CORE-07 | done (domain) | `TestComments` |
 | SEC-01..03 | partial | `TestPermissions` (non-member invisible, viewer read-only, admin-only project creation) |
-| SEC-05 | partial | `TestAuthAndTokens` (hashed sessions and API tokens, logout) |
+| SEC-05 | partial | `TestAuthAndTokens` (hashed sessions and API tokens, logout), `TestHTTP_LoginCookieAndCSRF` (HttpOnly, SameSite, CSRF header guard, security headers) |
+| LIVE-01 (HTTP) | done | `TestHTTP_LIVE01_FiftyUsersOneWinner`: 50 concurrent PUTs through the real server, one 200 and 49 `409` carrying the current text |
+| LIVE-07 (HTTP) | done | `TestHTTP_TextWriteModes`: patch, ambiguous patch (409), stale conditional replace (412 with current text), fresh and bare replace |
+| LIVE-14, LIVE-16 (HTTP) | done | `TestHTTP_ScalarIfMatchAndMerge`: strict `If-Match` gives 412, `base_version` merges different fields and returns 409 for the same field |
+| LIVE-15 | partial | `text_seq` and `version` returned by the view endpoint; MCP and events pending |
+| PERF (server side) | partial | `Server-Timing` on every response and ETag revalidation (`TestHTTP_ViewETagAndPermissions`); no benchmark yet |
+| PRES-01..04 (HTTP) | partial | `TestHTTP_PresenceAndDrafts` |
+| UPG-01 | partial | `TestUPG01_MigrateIsIdempotentAndRecorded`, `TestUPG01_ConcurrentNodesMigrateOnce`, `TestMigrationsAreNumberedWithoutGaps`; upgrade from the previous release pending (no release yet) |
+| CFG-01..04, INST-01 | partial | `TestCFG_DoctorReportsBrokenEnvironmentWithoutPanicking`, `TestCFG_DoctorHealthyInstall`; configuration reference document pending |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.
