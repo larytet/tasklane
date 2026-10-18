@@ -1,0 +1,9 @@
+# Tasklane configuration. Every key can also be set as TASKLANE_<KEY> in the environment or as --key on the command line.
+# Secrets (database_url, smtp_pass, admin_password) are better supplied as TASKLANE_<KEY>_FILE pointing at a root-only file.
+listen = 127.0.0.1:8080
+base_url = https://tasklane.example.com
+blob_dir = /var/lib/tasklane/blobs
+# smtp_host = smtp.example.com
+# smtp_port = 587
+# smtp_tls = starttls
+# smtp_from = Tasklane <tasklane@example.com>

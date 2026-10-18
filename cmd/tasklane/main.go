@@ -30,8 +30,33 @@ func main() {
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
 	}
-	cfg := config.Load()
 	ctx := context.Background()
+	if cmd == "config" { // config print | config docs
+		sub := ""
+		if len(os.Args) > 2 {
+			sub = os.Args[2]
+		}
+		switch sub {
+		case "docs":
+			fmt.Print(config.Docs())
+		case "print":
+			es, err := config.Resolve(config.Options{Args: os.Args[3:]})
+			fmt.Print(config.Print(es)) // secrets are masked
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		default:
+			fmt.Fprintln(os.Stderr, "usage: tasklane config print | tasklane config docs")
+			os.Exit(2)
+		}
+		return
+	}
+	cfg, err := config.Load(config.Options{Args: os.Args[min(2, len(os.Args)):]})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	switch cmd {
 	case "serve":
 		serve(ctx, cfg)
@@ -102,7 +127,7 @@ func main() {
 	case "version":
 		fmt.Println(version)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck create-admin version\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck config create-admin version\n", cmd)
 		os.Exit(2)
 	}
 }

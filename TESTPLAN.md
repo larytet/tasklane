@@ -719,7 +719,7 @@ Flaky tests are quarantined within a day and fixed within a week; a quarantined 
 
 | Milestone | Must pass |
 |---|---|
-| M1a Tracker | LIVE-01..07, LIVE-10..17, DUR-01..06, PRES-01..07, HIST-01..08, PERF-01..13, CHAOS-01..03, CORE-01..03, CORE-07..09, LIFE-01..02, TQL-01..04, TQL-06, TQL-21..27, PERF-16..17, SEC-01..03, SEC-05, UI-01..05, A11Y-01..02, BLOB-01..02, BLOB-04..09, BLOB-12, BLOB-20, BLOB-23, MAIL-01..03, INST-01..03, INST-05, CFG-01..04, UPG-01, LIC-01..02, LIC-05 |
+| M1a Tracker (audit in STATUS.md: not yet passed) | LIVE-01..07, LIVE-10..17, DUR-01..06, PRES-01..07, HIST-01..08, PERF-01..13, CHAOS-01..03, CORE-01..03, CORE-07..09, LIFE-01..02, TQL-01..04, TQL-06, TQL-21..27, PERF-16..17, SEC-01..03, SEC-05, UI-01..05, A11Y-01..02, BLOB-01..02, BLOB-04..09, BLOB-12, BLOB-20, BLOB-23, MAIL-01..03, INST-01..03, INST-05, CFG-01..04, UPG-01, LIC-01..02, LIC-05 |
 | M1b Lifecycle and exchange | LIFE-04..11, LIFE-13..14, LIFE-16..17, LIVE-08, LIVE-18, EXP-01 and basic IMP (generic CSV), PAUSE-01..04, PAUSE-06, PAUSE-10, PAUSE-12 |
 | M1c Agents | MCP-01..03, MCP-05..06, MCP-10..11, MCP-13, MCP-17 |
 | M1 exit | M1a, M1b and M1c each passed their gate above, in that order; M1 is done only when all three have |
@@ -846,5 +846,12 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | DUR-01 | done (ack loss) | the dropped acknowledgements in the mini campaign are exactly "committed, not acknowledged"; the retry with the same `save_id` applies once. A real process kill is not yet scripted |
 | CHAOS-03 | partial | lost acknowledgements only; latency and packet loss at the network level need the `chaos` Compose profile |
 | PERF-01, 03, 07, 10, 11 (server time) | done (single machine) | `TestPERF_ServerSideLatencyAt100k` (`make perf`, in-process handler, 100,000 issues). Measured p95: ticket view 1.1 ms, ETag revalidation 1.0 ms, list page 28 ms (project filter) and 37 ms (empty query), transition 2.0 ms, assign 2.0 ms, comment 1.5 ms, text save 2.3 ms, `409` with merge 15 ms (100 KB) and 66 ms (about 1 MB). Budgets 50 ms and 100 ms. The browser-side halves (300 ms to usable content, PERF-02, 06, 08, 09, and 12, 13 which need the event channel) are not measured |
+| CFG-01 | done | `internal/config` tests: precedence default, file, environment, flag; `_FILE` secrets; secrets masked in `config print` and absent from errors; unknown keys, variables and flags with a suggestion; type and unit errors, all reported at once |
+| CFG-02 | done | `TestCFG02_ReferenceMatchesSchema`: the table in `docs/CONFIGURATION.md` is generated from the schema (`tasklane config docs`) and a test fails on drift |
+| CFG-03, CFG-04 | open, partial | hot reload not built; secrets masked in output and errors, crash dumps and diagnostics bundle not checked |
+| INST-02 | partial | `TestINST02_MissingExtensionsOnAFreshDatabase` (extensions, schema, PostgreSQL version), `TestINST02_SMTPFaultsAreNamedWithAFix` (untrusted certificate, wrong credentials, wrong TLS mode, relay down; probe sends no mail), `TestINST02_UnwritableBlobDirectoryAndHealthyReport`; each fault names its fix |
+| INST-05 | partial | `TestINST05_ReproducibleTarballs` (`make dist` twice, amd64 and arm64, identical hashes), `TestINST01_TarballContents` (normalized mtimes and owners, binary, NOTICE, SBOM, unit file, SHA256SUMS) |
+| LIC-01, LIC-02 | done | `TestLIC01_LinkedModulesAreAllowed` (every linked module classified against allow and deny lists; seven modules, MIT and BSD), `TestLIC02_NoticeIsCurrent` (`make notice`) |
+| LIC-05 | done | `TestLIC05_NoPhoneHome`: no HTTP client, dial, telemetry or licence-key code in production sources apart from the configured SMTP relay; the web assets load nothing from another origin |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

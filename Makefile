@@ -1,7 +1,7 @@
 GO ?= go
 export TASKLANE_TEST_DATABASE_URL ?= postgres://tl:tl@localhost:55432/tasklane
 
-.PHONY: build test vet db
+.PHONY: build test vet db notice dist
 build:
 	$(GO) build -o bin/tasklane ./cmd/tasklane
 vet:
@@ -16,3 +16,11 @@ db:
 perf:
 	TASKLANE_PERF=1 $(GO) test ./internal/search -run 'PERF|TQL21' -count=1 -v -timeout 30m
 	TASKLANE_PERF=1 $(GO) test ./internal/api -run 'TwoGiB|PERF_Server' -count=1 -v -timeout 30m
+
+# regenerate NOTICE (licences of every linked module); a test fails when it is stale
+notice:
+	$(GO) run ./cmd/notice
+
+# reproducible release tarballs for linux/amd64 and linux/arm64, with SHA256SUMS and an SBOM
+dist:
+	GO=$(GO) ./scripts/dist.sh dist

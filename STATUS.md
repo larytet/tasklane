@@ -11,7 +11,7 @@ this file is updated, and the work is committed and pushed.
 
 | Phase | State | Notes |
 |---|---|---|
-| M1a Tracker | in progress | milestones M1a.1 to M1a.8 below |
+| M1a Tracker | **built, exit gate not passed** | milestones M1a.1 to M1a.9 below; see the exit gate audit for what is still open |
 | M1b Lifecycle and exchange | not started | |
 | M1c Agents | not started | |
 | M2 to M5 | not started | |
@@ -28,7 +28,8 @@ this file is updated, and the work is committed and pushed.
 | M1a.6 Attachments | content-addressed `fs` blob store (no user input in paths), single-request and resumable uploads with constant memory, dedup with refcount and GC, type sniffing and spoof flag, class limits, zip-bomb refusal, built-in EICAR scanning, asynchronous thumbnails with failure fallback, range and ETag downloads, short-lived signed links, forced download for risky types, bounded upload capacity, staging janitor, `fsck` | done |
 | M1a.7 UI | embedded dependency-free SPA (about 20 KB gzipped): sign-in, inbox with TQL search and error positions, thread view with presence, in-place subject, transitions, priority, assignee and labels with per-field conflict toast and reapply, description editor with local (2 s) and server (10 s) draft autosave, restored-draft banner, changed-under-you banner, three-column conflict dialog with per-block chooser and the four actions, attachments (paste, drop, resumable upload, thumbnails, signed download), comments, activity lines, dark and light themes, admin user creation endpoint | done, phone layout not yet verified |
 | M1a.8 Email and packaging | SMTP transport (none, STARTTLS, implicit TLS, verification always on, no plaintext credentials), shared in-process SMTP mock with transcript recording and scripted failures, per-issue threaded notifications and account mail from an outbox cursor, queue with lease, exponential backoff, idempotency and send-time permission check, admin delivery log, Dockerfile and Compose built and run for a fresh install, configuration reference | done |
-| M1a.9 Exit gate | Audit of every M1a exit id (TESTPLAN section 7) and closing the gaps that can be closed: server-side latency (PERF), chaos and durability (CHAOS, DUR), configuration precedence (CFG), licence and NOTICE (LIC), tarball, doctor faults (INST-02) | next |
+| M1a.9 Exit gate | Audit of every M1a exit id (TESTPLAN section 7) and closing the gaps that can be closed without a realtime channel or a browser harness: reliability mini-campaign with a reconciler that is itself tested, server-side latency, configuration schema with precedence and generated reference, `doctor` faults, licence scan, NOTICE and no-phone-home guard, systemd unit, reproducible tarballs | done; gaps listed below |
+| M1a.10 Realtime and browser harness | WebSocket gateway for presence and field-change events, rich-text schema and sanitizer, Playwright E2E with axe, throttled phone profile | next, needed to pass the M1a gate |
 
 ## Deviations from the spec (deliberate, to be revisited)
 
@@ -66,3 +67,59 @@ this file is updated, and the work is committed and pushed.
 | 17 | M1a.9 | A campaign client failed to get a save acknowledged in 60 attempts, which looked like a lost save | Not a server fault: with 12 clients retrying instantly, one starved (needed 43 to 47 attempts). The simulated client now backs off with jitter like a real one; the final counts show no E1, E2 or E4. Starvation is also a reminder for the UI: a person saving under heavy contention could see the dialog repeat several times |
 | 18 | M1a.9 | List page p95 was 42 to 48 ms against a 50 ms budget: the capped total ran after the page query | Page and total now run concurrently (DESIGN 11.1 parallel fan-in): 28 and 37 ms |
 | 19 | M1a.9 | Benchmark setup used documents above the 1 MiB text limit and projects the user was not a member of; the server correctly answered 400 and 404 | Test data fixed; both responses were right |
+
+## M1a exit gate audit (TESTPLAN section 7)
+
+The gate lists the ids below. **Done** means an automated test passes in this repository. **Partial** means the core is tested and the listed part is not. **Open** means not built or not tested.
+
+| Ids | State | What is missing |
+|---|---|---|
+| LIVE-01, 05, 07, 14 | done | |
+| LIVE-02, 03, 16 | partial | exercised by hand in Chrome with two users; no automated browser run |
+| LIVE-04 | partial | merge unit tests exist, the triple corpus (lists, tables, marks, RTL, 1 MB) and the browser runner do not |
+| LIVE-06 | open | rich-text round trip needs the ProseMirror schema and the Markdown and ADF converters; text is plain with blank-line blocks (deviation 1) |
+| LIVE-10, 11 | partial | server drafts private and stale-aware, local drafts restored by hand; 30-day expiry and per-user cap, tab kill, offline and eviction not tested |
+| LIVE-12 | partial | the reconciler detects every injected class; injection into a running system and production counters are not built |
+| LIVE-13 | partial | link schemes, control characters and size are sanitized and reported; no node or attribute schema, no fuzzing |
+| LIVE-15, 17 | open | `text_seq` is on every REST read; events and the realtime channel do not exist |
+| DUR-01 | done for lost acknowledgements | real process kill not scripted |
+| DUR-02, 03, 05, 06 | open | restart during editing, Postgres restart or failover, validator change, 3-node profile |
+| DUR-04 | not applicable yet | history is written in the same transaction (deviation 2) |
+| PRES-01..04 | partial | semantics and API tested; no WebSocket, no avatar-stack and field-note checks in a browser |
+| PRES-05, 06, 07 | open | field and issue-security restrictions (no security levels exist yet), connection scaling, cross-node presence |
+| HIST-01, 02, 08 | partial | before and after, restore as a new change; no computed diff, no deduplication of stored versions |
+| HIST-03, 04, 05, 07 | open | mentions, notification batching, per-field tracking flag, GDPR redaction and legal hold |
+| PERF-01, 03, 07, 10, 11 | done (server time) | browser-side budgets not measured |
+| PERF-02, 04, 06, 08, 09 | open | cold data, board (M2), first visit timing, prefetch, editor on the phone profile |
+| PERF-12, 13 | open | need the event channel |
+| PERF-16, 17 | done | single machine; reference `perf` hardware undefined |
+| CHAOS-01 | partial | lost acknowledgements injected; no node kill |
+| CHAOS-02 | open | Redis is not implemented (single node only) |
+| CHAOS-03 | partial | lost acknowledgements only; latency and packet loss need the `chaos` profile |
+| CORE-01, 02 | partial | create, edit, keys, standard workflow templates; move, clone, delete are M1b; no conditions, validators or post-functions; hierarchy rules minimal |
+| CORE-03 | open | custom fields are M3 (the gate text in section 7 says M1a; the spec milestone says M3; needs a decision) |
+| CORE-07, 08 | done / partial | attachment previewers per type are not built (images use thumbnails, others download) |
+| CORE-09 | partial | comments and visibility; reactions, collapse and filters not built |
+| LIFE-01, 02 | partial | transition atomicity and concurrent-transition semantics tested at the field-version level; admin-defined types, per-type workflows and schemes are M3 |
+| TQL-01, 02, 03, 06, 21, 22, 24, 26 | done or partial as listed in section 12 | no real-world JQL corpus |
+| TQL-04, 23, 25, 27 | partial or open | custom fields (M3); English text configuration and online switch; combined-plan matrix; GIN pending-list behaviour under a million updates |
+| SEC-01 | partial | permission checks tested per feature; the generated route-by-role matrix is not built |
+| SEC-02 | not applicable yet | no WebSocket |
+| SEC-03 | partial | comment visibility across REST, search and mail; no issue security levels |
+| SEC-05 | partial | XSS-safe rendering (no HTML sinks, escaped mail, CSP), sanitized links, parameterized TQL; CSV export injection is M1b |
+| UI-01 | partial | structural tests only; no visual regression |
+| UI-02, 03, 04, 05 | open | contrast checker, `system` theme and server-side setting, responsive layout verified, Gmail-style collapse and unread |
+| A11Y-01, 02 | open | no axe run; keyboard flows only partly considered (focus trap, labels) |
+| BLOB-01, 02, 04..07, 09, 12, 20, 23 | done or partial as listed in section 12 | BLOB-08 external scanner; BLOB-20 mixed-load run |
+| MAIL-01..03 | done or partial | see section 12 |
+| INST-01 | partial | Compose install verified by hand; tarball and systemd unit built and checked structurally, not installed on a clean host; Helm is M4 |
+| INST-02 | partial | PostgreSQL version and extensions, SMTP login and TLS, clock, file descriptors, blob directory; Redis, IMAP, proxy WebSocket and egress checks need those features |
+| INST-03 | partial | amd64 and arm64 both build; the suite ran on PostgreSQL 16 only (15 and 17 untested), no Valkey or S3 matrix |
+| INST-05 | partial | reproducible archives proven by building twice; signing and SBOM matching the archive are release-pipeline work |
+| CFG-01, 02 | done | |
+| CFG-03 | open | hot reload of the safe subset |
+| CFG-04 | partial | secrets masked in `config print` and absent from error text; no crash-dump or diagnostics-bundle check |
+| UPG-01 | partial | advisory lock, idempotency, numbering; expand and contract lint, `migrate plan`, checksum mismatch, lock-time measurement |
+| LIC-01, 02, 05 | done | |
+
+**Conclusion.** The tracker core, the editing-safety model, search, attachments, mail, packaging and configuration are built and tested. The M1a gate needs the realtime channel and a browser test harness (accessibility, visual, responsive, presence in a browser), the rich-text schema, and several durability and upgrade drills before it can be declared passed. M1a.10 covers the realtime channel and the harness. M1b and M1c are not started.

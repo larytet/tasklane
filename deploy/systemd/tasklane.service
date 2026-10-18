@@ -1,0 +1,31 @@
+[Unit]
+Description=Tasklane issue tracker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=tasklane
+Group=tasklane
+EnvironmentFile=-/etc/tasklane/tasklane.env
+ExecStartPre=/usr/local/bin/tasklane doctor
+ExecStart=/usr/local/bin/tasklane serve --config /etc/tasklane/tasklane.conf
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+StateDirectory=tasklane
+# hardening: the process needs the network, its own state directory, and nothing else
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/tasklane
+
+[Install]
+WantedBy=multi-user.target

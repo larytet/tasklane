@@ -65,8 +65,8 @@ func (s *SMTP) tlsConfig() *tls.Config {
 	return &tls.Config{ServerName: s.Host, MinVersion: tls.VersionTLS12} // verification is always on
 }
 
-// Send delivers one message. Credentials are never sent over an unencrypted connection to a remote host.
-func (s *SMTP) Send(ctx context.Context, m Message) error {
+// session connects, negotiates TLS and authenticates; Send and Probe share it so a check tests what a send does.
+func (s *SMTP) session(ctx context.Context) (*smtp.Client, error) {
 	if s.Timeout == 0 {
 		s.Timeout = 20 * time.Second
 	}
@@ -79,40 +79,60 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 	case "none", "starttls", "":
 		conn, err = d.DialContext(ctx, "tcp", s.addr())
 	default:
-		return &Permanent{fmt.Errorf("unknown SMTP TLS mode %q (use none, starttls or tls)", s.TLS)}
+		return nil, &Permanent{fmt.Errorf("unknown SMTP TLS mode %q (use none, starttls or tls)", s.TLS)}
 	}
 	if err != nil {
-		return fmt.Errorf("connect to %s: %w", s.addr(), err)
+		return nil, fmt.Errorf("connect to %s: %w", s.addr(), err)
 	}
 	conn.SetDeadline(time.Now().Add(s.Timeout * 3))
 	c, err := smtp.NewClient(conn, s.Host)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("SMTP greeting: %w", err)
+		return nil, fmt.Errorf("SMTP greeting: %w", err)
 	}
-	defer c.Close()
+	fail := func(err error) (*smtp.Client, error) { c.Close(); return nil, err }
 	if s.Hello != "" {
 		if err := c.Hello(s.Hello); err != nil {
-			return err
+			return fail(err)
 		}
 	}
 	if s.TLS == "starttls" || s.TLS == "" {
 		if ok, _ := c.Extension("STARTTLS"); !ok {
-			return &Permanent{errors.New("server does not offer STARTTLS; refusing to continue in plaintext (set TLS mode to none to allow it)")}
+			return fail(&Permanent{errors.New("server does not offer STARTTLS; refusing to continue in plaintext (set TLS mode to none to allow it)")})
 		}
 		if err := c.StartTLS(s.tlsConfig()); err != nil {
-			return fmt.Errorf("STARTTLS: %w", err)
+			return fail(fmt.Errorf("STARTTLS: %w", err))
 		}
 	}
 	if s.User != "" {
 		if err := c.Auth(smtp.PlainAuth("", s.User, s.Pass, s.Host)); err != nil { // PlainAuth itself refuses plaintext to non-local hosts
 			var te *textproto.Error
 			if errors.As(err, &te) && te.Code >= 500 {
-				return &Permanent{fmt.Errorf("authentication rejected: %w", err)}
+				return fail(&Permanent{fmt.Errorf("authentication rejected: %w", err)})
 			}
-			return fmt.Errorf("authentication: %w", err)
+			return fail(fmt.Errorf("authentication: %w", err))
 		}
 	}
+	return c, nil
+}
+
+// Probe checks the whole path to the relay (connect, TLS, login) without sending anything: the admin test and `doctor`.
+func (s *SMTP) Probe(ctx context.Context) error {
+	c, err := s.session(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return c.Quit()
+}
+
+// Send delivers one message. Credentials are never sent over an unencrypted connection to a remote host.
+func (s *SMTP) Send(ctx context.Context, m Message) error {
+	c, err := s.session(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
 	from := s.From
 	if m.From != "" {
 		from = m.From
