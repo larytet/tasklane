@@ -860,5 +860,6 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | PRES-06 | partial | `TestPRES06_TrafficOnlyOnStateChange`: 50 connections, 250 unchanged heartbeats cause 0 messages; two joins cause 2 changes x 50 subscribers |
 | LIVE-17 | partial | `TestLIVE17_EventsAreBestEffort_SavesNeverDependOnThem`: a dead subscriber never blocks 300 writes; saves work with no hub |
 | LIVE-02, LIVE-03, PRES-01 (browser) | manual | the live path was driven by hand in Chrome: Arkady's presence ring, "is editing the description" note, new comment and priority change appeared on Jana's open page with no action; the background-tab refetch was found by this run and fixed |
+| Browser suite | `make e2e` | `e2e/` (Playwright, system Chrome, the real binary on a fresh database, 25 tests, two runs in a row clean): `conflict.spec.js` (LIVE-02, 03, A11Y-02 dialog), `drafts_presence.spec.js` (LIVE-11, PRES-01, PRES-04, live updates, realtime fallback with the socket blocked), `ui.spec.js` (A11Y-01 axe in both themes on six screens, UI-03, UI-04 at three widths, keyboard-only flow, TQL in the UI, UI-01 baselines). Uncaught page errors fail every test. Not yet in CI; the plan's PR stage needs a job for it |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

@@ -72,3 +72,22 @@ h1.subject{font-size:20px;line-height:28px;font-weight:600;margin:8px 0}
 .login{max-width:340px;margin:12vh auto;padding:24px}.login label{display:block;margin:12px 0 4px}.login input{width:100%}
 .tqlerr{color:var(--danger);font-size:12px;margin:4px 0}
 .sr{position:absolute;left:-9999px}
+
+/* phone and small tablets: nothing may force horizontal scroll (DESIGN 4) */
+.row .sum{min-width:0}
+.bar{flex-wrap:wrap}
+.bar input[type=search]{min-width:0}
+.page{padding:12px}
+@media(max-width:600px){
+  .bar{padding:8px 12px;gap:6px}
+  .bar input[type=search]{order:10;flex:1 1 100%}
+  .row{flex-wrap:wrap;min-height:56px;padding:6px 12px;row-gap:2px}
+  .row .sum{flex:1 1 calc(100% - 60px)}
+  .row .key{order:0}
+  .page{padding:8px}
+  .chips select,.chips input[type=text]{max-width:100%}
+  .subject-in,h1.subject{font-size:18px}
+  .btn,select,input[type=text],input[type=search],input[type=email],input[type=password]{min-height:36px}
+  .dialog{padding:12px}
+  #toasts{left:12px;right:12px}
+}

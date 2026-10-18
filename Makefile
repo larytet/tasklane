@@ -24,3 +24,9 @@ notice:
 # reproducible release tarballs for linux/amd64 and linux/arm64, with SHA256SUMS and an SBOM
 dist:
 	GO=$(GO) ./scripts/dist.sh dist
+
+# browser end-to-end suite (system Chrome, real binary, fresh database): conflicts, drafts, presence, axe, responsive, visual
+e2e:
+	cd e2e && npm ci --no-audit --no-fund && PATH=$$PATH:/usr/local/go/bin npx playwright test
+e2e-update:
+	cd e2e && PATH=$$PATH:/usr/local/go/bin npx playwright test --update-snapshots

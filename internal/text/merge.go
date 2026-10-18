@@ -36,7 +36,7 @@ func Join(b []string) string { return strings.Join(b, "\n\n") }
 
 // Merge performs the three-way merge of theirs and mine against base.
 func Merge(base, theirs, mine string) Result {
-	var r Result
+	r := Result{Conflicts: []Conflict{}} // never nil: it serializes as [] and clients map over it
 	bb, tb, mb := Blocks(base), Blocks(theirs), Blocks(mine)
 	r.TheirChanged = countChanges(bb, tb)
 	r.MineChanged = countChanges(bb, mb)
@@ -59,12 +59,26 @@ func Merge(base, theirs, mine string) Result {
 		case ckStable, ckTheirs, ckMine, ckSame:
 			out = append(out, c.out...)
 		case ckConflict:
-			// a block-for-block single replacement may still merge inside the block
-			if len(c.base) == 1 && len(c.a) == 1 && len(c.b) == 1 {
-				if m, ok := mergeTokens(c.base[0], c.a[0], c.b[0]); ok {
-					out = append(out, m)
-					continue
+			// Adjacent edits by different people land in one diff3 span. When all three sides still have the same
+			// number of blocks there, align them position by position and conflict only on blocks both changed.
+			if len(c.base) == len(c.a) && len(c.a) == len(c.b) {
+				for i := range c.base {
+					bs, as, ms := c.base[i], c.a[i], c.b[i]
+					switch {
+					case as == ms || bs == ms:
+						out = append(out, as)
+					case bs == as:
+						out = append(out, ms)
+					default:
+						if m, ok := mergeTokens(bs, as, ms); ok {
+							out = append(out, m)
+							continue
+						}
+						r.Conflicts = append(r.Conflicts, Conflict{Block: len(out), Base: bs, Theirs: as, Mine: ms})
+						out = append(out, ms) // default to mine
+					}
 				}
+				continue
 			}
 			start := len(out)
 			out = append(out, c.b...) // default to mine

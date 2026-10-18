@@ -73,7 +73,13 @@
   // ---------- shell ----------
   function topbar() {
     const q = h('input', { type: 'search', placeholder: 'Search or TQL…  e.g. project = ABC AND status = "To Do"', class: 'grow', 'aria-label': 'Search or TQL', value: S.q });
-    q.addEventListener('keydown', e => { if (e.key === 'Enter') { S.q = q.value; location.hash = '#/?q=' + encodeURIComponent(q.value); } });
+    q.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      S.q = q.value;
+      const target = '#/?q=' + encodeURIComponent(q.value);
+      if (location.hash === target) route(); // the same search again is a refresh: no hashchange fires for an identical hash
+      else location.hash = target;
+    });
     return h('div', { class: 'bar' },
       h('span', { class: 'brand', tabindex: 0, role: 'link', onclick: () => { location.hash = '#/'; }, onkeydown: e => { if (e.key === 'Enter') location.hash = '#/'; } }, 'Tasklane'),
       q,
@@ -352,6 +358,7 @@
     async function conflictDialog(field, c, mine, done) {
       return new Promise(resolve => {
         const title = c.by + ' saved changes to the ' + field + ' while you were editing';
+        c.merge.conflicts = c.merge.conflicts || []; // defensive: a missing list means no conflicts
         const choices = c.merge.conflicts.map(() => 'mine');
         const merged = h('textarea', { 'aria-label': 'Merged result', value: c.merge.merged });
         const recompute = () => { merged.value = L.applyChoices(c.merge.merged, c.merge.conflicts, choices); };
@@ -379,8 +386,8 @@
             h('div', { class: 'col' }, h('h3', {}, 'Your changes'), diffEl(c.base, mine))),
           conflictsEl, err,
           h('div', { class: 'actions' },
-            h('button', { class: 'btn', onclick: async () => { try { await navigator.clipboard.writeText(mine); } catch (e) { /* clipboard blocked */ } close(); resolve(); await reloadAll(); } }, 'Copy mine and reload'),
-            h('button', { class: 'btn', onclick: () => { setLocalDraft(key, field, { body: mine, base_seq: c.base_seq, at: new Date().toISOString() }); close(); resolve(); reloadAll(); } }, 'Keep theirs'),
+            h('button', { class: 'btn', onclick: async () => { try { await navigator.clipboard.writeText(mine); } catch (e) { /* clipboard blocked */ } if (field === 'description') stopEditing(false); close(); resolve(); await reloadAll(); } }, 'Copy mine and reload'),
+            h('button', { class: 'btn', onclick: () => { if (field === 'description') stopEditing(false); setLocalDraft(key, field, { body: mine, base_seq: c.base_seq, at: new Date().toISOString() }); close(); resolve(); reloadAll(); } }, 'Keep theirs'),
             h('button', { class: 'btn', onclick: () => submit(mine, 'keep_mine') }, 'Keep mine'),
             h('button', { class: 'btn primary', onclick: () => submit(merged.value, 'merge') }, 'Save merged result'))));
         close.scrim.dataset.sticky = '1'; // a conflict is never dismissed by accident
