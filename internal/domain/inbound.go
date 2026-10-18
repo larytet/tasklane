@@ -355,6 +355,7 @@ type InboundResult struct {
 type verdict struct {
 	outcome, reason    string
 	issueID, userID    string
+	customerID         string // set when the sender is a customer replying to a request
 	body               string
 	issueKey, userName string
 	userKind           string
@@ -470,6 +471,10 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 			v.issueKey = key
 			s.DB.QueryRow(ctx, `SELECT id FROM issue WHERE key=$1`, key).Scan(&v.issueID)
 		}
+	} else if v.outcome == "accepted" && v.customerID != "" {
+		if err := s.customerCommentFromMail(ctx, v.customerID, v.issueKey, v.body, id); err != nil {
+			v.outcome, v.reason = "quarantined", "the reply was refused: "+err.Error()
+		}
 	} else if v.outcome == "accepted" {
 		act, aerr := s.actorFor(ctx, v.userID)
 		c, err := Comment{}, aerr
@@ -486,12 +491,15 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 			s.DB.Exec(ctx, `UPDATE mail_inbound SET comment_id=$2 WHERE id=$1`, id, c.ID)
 		}
 	}
-	var iss, usr any
+	var iss, usr, cust any
 	if v.issueID != "" {
 		iss = v.issueID
 	}
 	if v.userID != "" {
 		usr = v.userID
+	}
+	if v.customerID != "" {
+		cust = v.customerID
 	}
 	keep := ""
 	if v.outcome == "quarantined" {
@@ -502,7 +510,7 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 		kind = "create"
 		detail, _ = json.Marshal(v.create)
 	}
-	_, err := s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome=$2,reason=$3,issue_id=$4,user_id=$5,body=$6,kind=$7,detail=$8 WHERE id=$1`, id, v.outcome, v.reason, iss, usr, keep, kind, detail)
+	_, err := s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome=$2,reason=$3,issue_id=$4,user_id=$5,body=$6,kind=$7,detail=$8,customer_id=$9 WHERE id=$1`, id, v.outcome, v.reason, iss, usr, keep, kind, detail, cust)
 	return InboundResult{ID: id, Outcome: v.outcome, Reason: v.reason}, err
 }
 
@@ -566,6 +574,9 @@ func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, raw []byt
 	var v verdict
 	err := s.DB.QueryRow(ctx, `SELECT id,name,kind,is_admin FROM app_user WHERE lower(email)=$1 AND active AND kind<>'agent'`, addr).Scan(&v.userID, &v.userName, &v.userKind, &v.userAdmin)
 	if err != nil {
+		if cv, ok := s.classifyCustomerReply(ctx, p, raw, trusted, addr, domain, body, now, lim); ok { // not staff: perhaps a customer answering us
+			return cv
+		}
 		if pk, policy := s.projectAddressed(ctx, h); pk != "" && policy == "reject" {
 			return verdict{outcome: "rejected", reason: "the sender is not a known user and project " + pk + " rejects mail from unknown senders"}
 		}
@@ -754,12 +765,12 @@ func (s *Service) ReleaseInbound(ctx context.Context, a Actor, id int64) (Commen
 	if !a.Admin {
 		return Comment{}, ErrForbidden
 	}
-	var issueID, userID, body, kind string
+	var issueID, userID, customerID, body, kind string
 	var detail []byte
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `UPDATE mail_inbound SET outcome='accepted',reason='released by an administrator',handled_by=$2,handled_at=$3
-			WHERE id=$1 AND outcome='quarantined' AND user_id IS NOT NULL AND ((kind='reply' AND issue_id IS NOT NULL AND body<>'') OR (kind='create' AND detail<>'{}'))
-			RETURNING COALESCE(issue_id::text,''),user_id,body,kind,detail`, id, a.ID, s.Now()).Scan(&issueID, &userID, &body, &kind, &detail)
+			WHERE id=$1 AND outcome='quarantined' AND (user_id IS NOT NULL OR customer_id IS NOT NULL) AND ((kind='reply' AND issue_id IS NOT NULL AND body<>'') OR (kind='create' AND detail<>'{}' AND user_id IS NOT NULL))
+			RETURNING COALESCE(issue_id::text,''),COALESCE(user_id::text,''),COALESCE(customer_id::text,''),body,kind,detail`, id, a.ID, s.Now()).Scan(&issueID, &userID, &customerID, &body, &kind, &detail)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return invalid("only a quarantined message with a known sender, an issue and some text can be released")
 		}
@@ -773,6 +784,18 @@ func (s *Service) ReleaseInbound(ctx context.Context, a Actor, id int64) (Commen
 	}
 	revert := func(reason string) {
 		s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome='quarantined',reason=$2,handled_by=NULL,handled_at=NULL WHERE id=$1`, id, reason)
+	}
+	if customerID != "" && userID == "" { // a customer's reply, released: their comment, if they still see the request
+		var key string
+		if err := s.DB.QueryRow(ctx, `SELECT key FROM issue WHERE id::text=$1`, issueID).Scan(&key); err != nil || !s.customerMayReceive(ctx, customerID, issueID) {
+			revert("the issue no longer exists, or the sender no longer sees it")
+			return Comment{}, invalid("the sender no longer sees that request")
+		}
+		if err := s.customerCommentFromMail(ctx, customerID, key, body, id); err != nil {
+			revert("release failed: " + err.Error())
+			return Comment{}, err
+		}
+		return Comment{Body: body}, nil
 	}
 	act, aerr := s.actorFor(ctx, userID)
 	if aerr != nil {

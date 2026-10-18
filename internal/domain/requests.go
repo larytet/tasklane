@@ -468,6 +468,7 @@ func (s *Service) PortalCreateRequest(ctx context.Context, c Customer, projectKe
 		return PortalRequest{}, err
 	}
 	s.portalNote(ctx, "request", c.ID)
+	s.DB.Exec(ctx, `INSERT INTO outbox(aggregate,type,payload) VALUES($1,'customer.requested',$2)`, "issue:"+is.Key, jsonMarshal(map[string]any{"key": is.Key, "actor": "Tasklane", "actor_id": "", "customer": c.ID}))
 	if !rt.SLA.empty() {
 		if err := s.startClocks(ctx, is.ID, rt.SLA, s.Now()); err != nil {
 			return PortalRequest{}, err
@@ -619,21 +620,7 @@ func (s *Service) PortalComment(ctx context.Context, c Customer, projectKey, key
 		return r, perr
 	}
 	defer end()
-	err = s.tx(ctx, func(tx pgx.Tx) error {
-		var iid string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM issue WHERE key=$1`, r.Key).Scan(&iid); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO customer_comment(issue_id,customer_id,body) VALUES($1,$2,$3)`, iid, c.ID, body); err != nil {
-			return err
-		}
-		who := c.Name
-		if who == "" {
-			who = c.Email
-		}
-		return outbox(ctx, tx, "issue:"+r.Key, "customer.commented", map[string]any{"key": r.Key, "actor": who + " (customer)", "actor_id": "", "text": body})
-	})
-	if err != nil {
+	if err = s.insertCustomerComment(ctx, c, r.Key, body, 0); err != nil {
 		return r, err
 	}
 	s.portalNote(ctx, "comment", c.ID)
@@ -666,4 +653,27 @@ func (s *Service) requestInfo(ctx context.Context, issueID string) *RequestInfo 
 		rows.Close()
 	}
 	return &r
+}
+
+// insertCustomerComment writes a customer's comment into the request's thread and tells the people who watch it. inboundID is the
+// message it came from when it arrived by email (0 for the portal).
+func (s *Service) insertCustomerComment(ctx context.Context, c Customer, key, body string, inboundID int64) error {
+	return s.tx(ctx, func(tx pgx.Tx) error {
+		var iid string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM issue WHERE key=$1`, key).Scan(&iid); err != nil {
+			return err
+		}
+		var mi any
+		if inboundID != 0 {
+			mi = inboundID
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO customer_comment(issue_id,customer_id,body,mail_inbound_id) VALUES($1,$2,$3,$4)`, iid, c.ID, body, mi); err != nil {
+			return err
+		}
+		who := c.Name
+		if who == "" {
+			who = c.Email
+		}
+		return outbox(ctx, tx, "issue:"+key, "customer.commented", map[string]any{"key": key, "actor": who + " (customer)", "actor_id": "", "text": body, "customer": c.ID})
+	})
 }

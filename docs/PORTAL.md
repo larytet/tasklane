@@ -73,6 +73,19 @@ A request is **private to the customer who raised it** until they choose, on the
 
 The people it is shared with see that request and its public conversation and **nothing else of the owner's** (not their other requests, not their details). They can comment; each sees the others by name (and themselves as *You*), and sees who raised it. **Only the owner changes who sees it.** Access follows the facts and is checked on every read: taking the sharing back, removing a person, a person leaving the company, or deleting the company ends access at once. Staff see the company and the other people on the ticket's banner. People shared with are shown each other's address: sharing is the owner's decision.
 
+## Email to and from customers
+
+A customer is emailed (from the server's outbound mail, when it is configured):
+
+- **once when their request is received**, with its key and a link;
+- when **staff reply publicly** (the text of the reply, introduced as "Support", never a staff name; internal notes are never mailed);
+- when the request is **resolved**;
+- when someone they **share a request with** writes on it (told by that person's address, never their own comment back).
+
+Every message carries only what the portal would show them and a link to the request in the portal. Only customers who have **signed in at least once** are written to (so an address someone else typed in is never mailed), and the check that the customer still sees the request, and is not blocked, is made again **when the message is sent**: one queued before the sharing was taken back or the customer was blocked is dropped.
+
+**Replies by email** become the customer's comment (shown to staff labelled *customer*, to the customer as *You*). The message is found by the signed reply address (issued to that customer, so a forwarded message does not carry its power), the threading headers, or the request key in the subject, and it follows the rules of every inbound message: it needs **proof of origin** (a trusted receiver's verdict or a DKIM signature) or waits in quarantine, where an administrator can release it; automatic mail and loops are ignored; limits apply per sender and per request. A customer who does not see the request, or is blocked, is not accepted, and **an email from a customer never opens a request**.
+
 ## Queues and canned responses
 
 A **queue** is a named TQL query held to one project (`#/queues/PROJECT`, or `/api/v1/projects/{key}/queues`), shown with the number of issues in it **for the person looking**: the query is run with that person's permissions and is always combined with `project = PROJECT`, so it can never reach another project even if its text names one. Queues have an order; a query that stops compiling shows its error in its own row and the others still answer. Anyone who can see the project sees its queues; project administrators manage them, and a query that does not compile is refused when it is saved.
@@ -81,4 +94,4 @@ A **canned response** is a saved reply, inserted from a menu in the ticket's rep
 
 ## Not built yet
 
-Still to build: attachments on requests, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,  customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.
+Still to build: attachments on requests, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,   promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.

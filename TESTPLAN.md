@@ -674,7 +674,7 @@ containers) nightly for the Helm chart.
 | PORT-04 | Seats: customers in staff counts and hosted metering | Never counted as staff seats; active customers metered separately where configured |
 | PORT-05 | **M5.6: limits, honeypot, block and allow lists built; CAPTCHA and attachment rules open.** Abuse controls: email verification, rate limits, CAPTCHA, honeypot, block and allow lists, attachment rules | Spam and floods stopped; legitimate use unaffected |
 | PORT-06 | Promotion to staff; customer GDPR export and erase | History kept on promotion; export and erase complete |
-| PORT-07 | Notifications and email replies for customers | Customer-visible content only plus portal link; replies follow MAIL rules |
+| PORT-07 | **M5.11: built (PORT07 domain tests, e2e): confirmation, public reply, resolved, shared-request mail, verified addresses only, send-time recheck, replies by signed address, threading and subject, proof of origin, release from quarantine, no request creation.** Notifications and email replies for customers | Customer-visible content only plus portal link; replies follow MAIL rules |
 | PORT-08 | **M5.9 queues and canned responses built (QUE01..03, e2e). M5.7, M5.8: request types and forms (REQ01..03) and SLA clocks (SLA01..04, the calendar tests in `internal/calendar`, e2e) built; reports and warnings open.** Request types, forms and SLA clocks (start, pause, resume, breach, calendar-aware) with the fake clock | Clocks correct across pauses, calendars and holidays |
 
 ### 5.17 Real Jira verification (occasional, before a major release)

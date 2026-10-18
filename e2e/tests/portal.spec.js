@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHmac } from 'node:crypto';
 import { pageErrors, watch } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
@@ -297,4 +298,74 @@ test('PORT-03: a customer shares a request with their company, a colleague joins
   await c.page.getByRole('region', { name: 'Sharing' }).getByLabel(/Everyone at Acme/).uncheck();
   await expect(c.page.getByRole('region', { name: 'Sharing' }).getByLabel(/Everyone at Acme/)).not.toBeChecked();
   expect((await d.ctx.request.get(`/api/v1/portal/${pk}/requests/${key}`)).status()).toBe(404);
+});
+
+// the newest non-code message to an address in the sink, decoded
+async function mailTo(addr, includes) {
+  for (let i = 0; i < 60; i++) {
+    const dir = process.env.E2E_MAIL_DIR;
+    for (const f of readdirSync(dir).sort().reverse()) {
+      const raw = readFileSync(join(dir, f), 'utf8').replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+      if (raw.toLowerCase().includes('<' + addr.toLowerCase() + '>') && !raw.includes('sign-in code') && raw.includes(includes)) return raw;
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  throw new Error('no mail to ' + addr + ' with ' + includes);
+}
+
+test('PORT-07: the customer is emailed about their request with a portal link, answers by email, and the answer is their comment', async ({ browser }) => {
+  const adm = await browser.newContext();
+  adm.on('page', watch);
+  expect((await adm.request.post('/api/v1/login', { headers: H, data: { email: 'admin@example.com', password: 'adminpass1' } })).status()).toBe(200);
+  const pk = 'M' + uniq().toUpperCase();
+  expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Mail desk' } })).status()).toBe(201);
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true } })).status()).toBe(200);
+  expect((await adm.request.post(`/api/v1/projects/${pk}/request-types`, { headers: H, data: { name: 'Question' } })).status()).toBe(201);
+  const src = await adm.request.post('/api/v1/admin/mail/sources', { headers: H, data: { name: 'e2e ' + uniq(), trusted: true } });
+  expect(src.status()).toBe(201);
+  const source = await src.json();
+
+  const dom = `${uniq()}.example`, addr = `cora@${dom}`;
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  const page = await ctx.newPage();
+  await page.goto('/portal/' + pk);
+  await page.getByLabel('Your email address').fill(addr);
+  await page.getByRole('button', { name: 'Email me a code' }).click();
+  const { code } = await sentTo(addr);
+  await page.getByLabel('The six digit code we sent you').fill(code);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+  await page.getByRole('link', { name: 'New request' }).click();
+  await page.getByLabel('Summary').fill('Mail me about this');
+  await page.getByRole('button', { name: 'Send request' }).click();
+  await expect(page.getByRole('heading', { level: 2 })).toContainText('Mail me about this');
+  const key = (await page.getByRole('heading', { level: 2 }).textContent()).split(' ')[0];
+
+  // the confirmation: the key in the subject, a link to the portal, a reply address, and nothing about staff
+  const conf = await mailTo(addr, 'We received your request');
+  expect(conf).toContain(`[${key}]`);
+  expect(conf).toContain(`/portal/${pk}#/r/${key}`);
+  const replyTo = conf.match(/^Reply-To: (.+)$/mi)[1].trim();
+  expect(replyTo).toMatch(/^reply\+/);
+
+  // staff reply publicly and privately: only the public one is mailed, without the name
+  const sp = await adm.newPage();
+  await sp.goto('/#/issue/' + key);
+  await sp.getByLabel('Reply', { exact: true }).fill('Please send a photo.');
+  await sp.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(sp.getByText('Please send a photo.').first()).toBeVisible();
+  const said = await mailTo(addr, 'Please send a photo.');
+  expect(said).toContain('Support replied to your request');
+  expect(said).not.toContain('Administrator');
+
+  // the customer answers by email (the relay is trusted and says the message is authenticated)
+  const raw = `From: ${addr}\r\nTo: ${replyTo}\r\nSubject: Re: [${key}] Mail me about this\r\nMessage-ID: <${uniq()}@${dom}>\r\nAuthentication-Results: mx.example.net; dkim=pass header.d=${dom}\r\nContent-Type: text/plain\r\n\r\nHere is the photo link.\r\n`;
+  const sig = 'sha256=' + createHmac('sha256', source.secret).update(raw).digest('hex');
+  const res = await adm.request.fetch(`/api/v1/mail/inbound/${source.id}`, { method: 'POST', headers: { 'X-Tasklane-Signature': sig }, data: raw });
+  expect(res.status()).toBe(200);
+  expect((await res.json()).outcome).toBe('accepted');
+  await page.reload();
+  await expect(page.getByText('Here is the photo link.')).toBeVisible();
+  await sp.reload();
+  await expect(sp.getByText('Here is the photo link.')).toBeVisible();
 });

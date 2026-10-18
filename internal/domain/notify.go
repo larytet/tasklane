@@ -51,7 +51,8 @@ type notifyEvent struct {
 		Fields   []string `json:"fields"`
 		Field    string   `json:"field"`
 		TextSeq  int64    `json:"text_seq"`
-		Users    []string `json:"users"` // approval events: exactly who is told
+		Users    []string `json:"users"`    // approval events: exactly who is told
+		Customer string   `json:"customer"` // customer events: the customer the event is about (who wrote the comment)
 		Text     string   `json:"text"`
 	}
 }
@@ -101,6 +102,15 @@ func (s *Service) NotifyOnce(ctx context.Context) (int, error) {
 type recipient struct{ id, name, email string }
 
 func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int, error) {
+	nc, err := s.queueCustomerMail(ctx, tx, e) // what customers are told, from the same events, under their own rules
+	if err != nil {
+		return nc, err
+	}
+	ns, err := s.queueStaffEvent(ctx, tx, e)
+	return nc + ns, err
+}
+
+func (s *Service) queueStaffEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int, error) {
 	switch e.Type {
 	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved", "approval.requested", "approval.decided", "approval.reminder", "customer.commented", "sla.breached":
 	default:
@@ -429,7 +439,7 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 	}
 	type job struct {
 		id                                   int64
-		issueID, userID                      *string
+		issueID, userID, customerID          *string
 		internal                             bool
 		attempts                             int
 		to, subject, mid, irt, refs, replyTo string
@@ -438,14 +448,14 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 	now := s.Now()
 	rows, err := s.DB.Query(ctx, `UPDATE mail_message SET next_attempt_at=$2 WHERE id IN (
 		SELECT id FROM mail_message WHERE status='pending' AND next_attempt_at<=$1 ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED)
-		RETURNING id,issue_id,recipient_id,internal,attempts,recipient,subject,message_id,in_reply_to,refs,body_text,body_html,reply_to`, now, now.Add(leaseFor), mailBatch)
+		RETURNING id,issue_id,recipient_id,internal,attempts,recipient,subject,message_id,in_reply_to,refs,body_text,body_html,reply_to,customer_id::text`, now, now.Add(leaseFor), mailBatch)
 	if err != nil {
 		return 0, err
 	}
 	var jobs []job
 	for rows.Next() {
 		var j job
-		if err := rows.Scan(&j.id, &j.issueID, &j.userID, &j.internal, &j.attempts, &j.to, &j.subject, &j.mid, &j.irt, &j.refs, &j.text, &j.html, &j.replyTo); err != nil {
+		if err := rows.Scan(&j.id, &j.issueID, &j.userID, &j.internal, &j.attempts, &j.to, &j.subject, &j.mid, &j.irt, &j.refs, &j.text, &j.html, &j.replyTo, &j.customerID); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -457,7 +467,10 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 	var nsent int64
 	send := func(j job) {
 		// permission may have changed between the event and now
-		ok := j.issueID == nil // account mail has no issue to check
+		ok := j.issueID == nil                       // account mail has no issue to check
+		if j.customerID != nil && j.issueID != nil { // a customer sees only what they still may: checked again now
+			ok = s.customerMayReceive(ctx, *j.customerID, *j.issueID)
+		}
 		if j.issueID != nil && j.userID != nil {
 			var pid string
 			if s.DB.QueryRow(ctx, `SELECT project_id FROM issue WHERE id=$1 AND deleted_at IS NULL`, *j.issueID).Scan(&pid) == nil {
