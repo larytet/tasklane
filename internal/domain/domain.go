@@ -67,6 +67,8 @@ type Service struct {
 	// Clock is the machine's own clock (time.Now); Now corrects it by the measured offset from the database.
 	Clock       func() time.Time
 	clockOffset atomic.Int64
+	// BackupHook, when set, is called at points of a backup ("snapshot": the snapshot is fixed, nothing is copied yet); for tests.
+	BackupHook func(stage string)
 	// WebAuthnRPID and WebAuthnOrigins override the relying party that passkeys are bound to (default: the host of BaseURL);
 	// WebAuthnRequireUV demands a PIN or biometric on the key as well as its presence.
 	WebAuthnRPID      string

@@ -1,0 +1,1765 @@
+{
+  "format": "tasklane-backup",
+  "version": 1,
+  "created_at": "2026-10-19T09:00:00Z",
+  "tasklane_version": "golden",
+  "schema_version": 55,
+  "marker": {
+    "outbox_id": 21,
+    "lsn": "16/CA6A140",
+    "at": "2026-10-18T22:21:06.27627+03:00",
+    "mode": "snapshot"
+  },
+  "tables": {
+    "agent_switch": {
+      "columns": [
+        "id",
+        "killed",
+        "by_id",
+        "at"
+      ],
+      "rows": 1,
+      "file": "data/agent_switch.copy",
+      "sha256": "a690bf518e68803f9446c6ab493b02c32a4298d645262cc2e564b084484cf1b8",
+      "bytes": 10
+    },
+    "api_token": {
+      "columns": [
+        "token_hash",
+        "user_id",
+        "name",
+        "created_at",
+        "scopes",
+        "expires_at",
+        "revoked_at",
+        "id",
+        "last_used_at",
+        "oauth_grant_id"
+      ],
+      "rows": 0,
+      "file": "data/api_token.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "app_user": {
+      "columns": [
+        "id",
+        "email",
+        "name",
+        "kind",
+        "password_hash",
+        "is_admin",
+        "active",
+        "appear_offline",
+        "created_at",
+        "agent_paused",
+        "calendar",
+        "jira_account_id",
+        "password_changed_at",
+        "external_id",
+        "source",
+        "org_id",
+        "instance_admin"
+      ],
+      "rows": 3,
+      "file": "data/app_user.copy",
+      "sha256": "8ed0c834982de6c5de5d6298dbeed20f687ca9f7a6391dd7fb0166198ac56c04",
+      "bytes": 671
+    },
+    "attachment": {
+      "columns": [
+        "id",
+        "issue_id",
+        "blob_id",
+        "name",
+        "declared_mime",
+        "type_flag",
+        "uploader_id",
+        "thumb_blob_id",
+        "thumb_state",
+        "created_at"
+      ],
+      "rows": 2,
+      "file": "data/attachment.copy",
+      "sha256": "e98e276afca3d245ae62dc7828f64eccd542e51247327e0866fa9cd0ccab807d",
+      "bytes": 417
+    },
+    "audit_event": {
+      "columns": [
+        "id",
+        "actor_id",
+        "actor_label",
+        "action",
+        "target",
+        "detail",
+        "at",
+        "seq",
+        "prev_hash",
+        "hash"
+      ],
+      "rows": 3,
+      "file": "data/audit_event.copy",
+      "sha256": "09fda4970344a95e38c7ca70f42eccc2b72b4b41d749b9288bc47c9a214501a2",
+      "bytes": 748
+    },
+    "automation_rule": {
+      "columns": [
+        "id",
+        "name",
+        "project_id",
+        "enabled",
+        "trigger",
+        "conditions",
+        "actions",
+        "last_tick",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": 0,
+      "file": "data/automation_rule.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "automation_run": {
+      "columns": [
+        "id",
+        "rule_id",
+        "issue_id",
+        "event_id",
+        "state",
+        "detail",
+        "started_at"
+      ],
+      "rows": 0,
+      "file": "data/automation_run.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "behavior_rule": {
+      "columns": [
+        "id",
+        "name",
+        "project_id",
+        "issue_type_id",
+        "position",
+        "enabled",
+        "when_field",
+        "when_op",
+        "when_value",
+        "when_role",
+        "action",
+        "target_field"
+      ],
+      "rows": 0,
+      "file": "data/behavior_rule.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "blob": {
+      "columns": [
+        "id",
+        "sha256",
+        "backend",
+        "size",
+        "mime",
+        "class",
+        "scan_state",
+        "scan_detail",
+        "refcount",
+        "zero_since",
+        "created_at",
+        "tier",
+        "tiered_at"
+      ],
+      "rows": 2,
+      "file": "data/blob.copy",
+      "sha256": "ba6cc8416aac8683a70e146e4d9da7602a0ef0797f4f9ee5c8c0e8c6977acde7",
+      "bytes": 351
+    },
+    "board": {
+      "columns": [
+        "id",
+        "project_id",
+        "name",
+        "kind",
+        "filter",
+        "estimation",
+        "swimlane",
+        "quick_filters",
+        "sprint_weeks",
+        "done_days",
+        "calendar",
+        "created_by",
+        "created_at",
+        "auto_sprints",
+        "rollover",
+        "parallel_sprints",
+        "name_pattern",
+        "auto_rollover"
+      ],
+      "rows": 0,
+      "file": "data/board.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "board_column": {
+      "columns": [
+        "id",
+        "board_id",
+        "name",
+        "position",
+        "min_wip",
+        "max_wip"
+      ],
+      "rows": 0,
+      "file": "data/board_column.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "board_column_status": {
+      "columns": [
+        "column_id",
+        "board_id",
+        "status_id"
+      ],
+      "rows": 0,
+      "file": "data/board_column_status.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "board_rank": {
+      "columns": [
+        "board_id",
+        "issue_id",
+        "rank"
+      ],
+      "rows": 0,
+      "file": "data/board_rank.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "comment": {
+      "columns": [
+        "id",
+        "issue_id",
+        "author_id",
+        "body",
+        "internal",
+        "created_at",
+        "edited_at",
+        "external_id",
+        "import_id",
+        "mail_inbound_id"
+      ],
+      "rows": 2,
+      "file": "data/comment.copy",
+      "sha256": "b4c6407d0f191357d9e3d5cd36551317475ad3144b5db8065beda9d994d3fbf2",
+      "bytes": 344
+    },
+    "comment_search": {
+      "columns": [
+        "comment_id",
+        "issue_id",
+        "project_id",
+        "internal",
+        "tsv",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/comment_search.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "custom_field": {
+      "columns": [
+        "id",
+        "name",
+        "description",
+        "help_text",
+        "type",
+        "unit",
+        "searchable",
+        "show_on_card",
+        "unique_values",
+        "min_value",
+        "max_value",
+        "regex",
+        "copy_on_clone",
+        "track_history",
+        "view_roles",
+        "edit_roles",
+        "trashed_at",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/custom_field.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "custom_field_context": {
+      "columns": [
+        "id",
+        "field_id",
+        "name",
+        "is_global",
+        "required",
+        "default_value",
+        "position"
+      ],
+      "rows": 0,
+      "file": "data/custom_field_context.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "custom_field_context_project": {
+      "columns": [
+        "context_id",
+        "project_id"
+      ],
+      "rows": 0,
+      "file": "data/custom_field_context_project.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "custom_field_context_type": {
+      "columns": [
+        "context_id",
+        "issue_type_id"
+      ],
+      "rows": 0,
+      "file": "data/custom_field_context_type.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "custom_field_option": {
+      "columns": [
+        "id",
+        "context_id",
+        "value",
+        "color",
+        "position",
+        "archived"
+      ],
+      "rows": 0,
+      "file": "data/custom_field_option.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "custom_role": {
+      "columns": [
+        "id",
+        "org_id",
+        "name",
+        "base",
+        "grants",
+        "description",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/custom_role.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "draft": {
+      "columns": [
+        "user_id",
+        "issue_id",
+        "field",
+        "body",
+        "base_seq",
+        "updated_at"
+      ],
+      "rows": 0,
+      "file": "data/draft.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "feature_gate": {
+      "columns": [
+        "name",
+        "min_version",
+        "risky",
+        "state",
+        "activated_at",
+        "confirmed_by"
+      ],
+      "rows": 0,
+      "file": "data/feature_gate.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "field_config": {
+      "columns": [
+        "id",
+        "project_id",
+        "issue_type_id",
+        "field_key",
+        "required",
+        "hidden",
+        "help_text"
+      ],
+      "rows": 0,
+      "file": "data/field_config.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "field_setting": {
+      "columns": [
+        "field",
+        "track_history"
+      ],
+      "rows": 0,
+      "file": "data/field_setting.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_backlink": {
+      "columns": [
+        "object_id",
+        "issue_id",
+        "at"
+      ],
+      "rows": 0,
+      "file": "data/git_backlink.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_connection": {
+      "columns": [
+        "id",
+        "name",
+        "provider",
+        "base_url",
+        "token_enc",
+        "token_fp",
+        "webhook_secret_enc",
+        "webhook_fp",
+        "allow_private",
+        "allowed_cidrs",
+        "backfill_days",
+        "created_by",
+        "created_at",
+        "write_enabled",
+        "disabled",
+        "health",
+        "health_detail",
+        "health_at"
+      ],
+      "rows": 0,
+      "file": "data/git_connection.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_identity": {
+      "columns": [
+        "id",
+        "provider",
+        "login",
+        "user_id",
+        "created_by",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/git_identity.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_inbox": {
+      "columns": [
+        "id",
+        "connection_id",
+        "delivery_id",
+        "event",
+        "payload",
+        "received_at",
+        "processed_at",
+        "attempts",
+        "error"
+      ],
+      "rows": 0,
+      "file": "data/git_inbox.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_link": {
+      "columns": [
+        "issue_id",
+        "object_id",
+        "manual",
+        "auto"
+      ],
+      "rows": 0,
+      "file": "data/git_link.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_object": {
+      "columns": [
+        "id",
+        "repo_id",
+        "kind",
+        "ext_id",
+        "title",
+        "state",
+        "review",
+        "author",
+        "author_user",
+        "url",
+        "sha",
+        "branch",
+        "base",
+        "env",
+        "meta",
+        "provider_at",
+        "updated_at"
+      ],
+      "rows": 0,
+      "file": "data/git_object.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_repo": {
+      "columns": [
+        "id",
+        "connection_id",
+        "full_name",
+        "last_sync_at",
+        "sync_error",
+        "etags",
+        "default_branch",
+        "private",
+        "private_override",
+        "members_synced_at"
+      ],
+      "rows": 0,
+      "file": "data/git_repo.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_repo_member": {
+      "columns": [
+        "repo_id",
+        "login"
+      ],
+      "rows": 0,
+      "file": "data/git_repo_member.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_repo_project": {
+      "columns": [
+        "repo_id",
+        "project_id"
+      ],
+      "rows": 0,
+      "file": "data/git_repo_project.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_rule": {
+      "columns": [
+        "id",
+        "project_id",
+        "name",
+        "trigger",
+        "transition",
+        "comment",
+        "mode",
+        "created_by",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/git_rule.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_rule_run": {
+      "columns": [
+        "id",
+        "rule_id",
+        "object_id",
+        "issue_id",
+        "trigger",
+        "outcome",
+        "detail",
+        "at"
+      ],
+      "rows": 0,
+      "file": "data/git_rule_run.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_smart_run": {
+      "columns": [
+        "id",
+        "object_id",
+        "issue_key",
+        "idx",
+        "command",
+        "outcome",
+        "reason",
+        "user_id",
+        "at"
+      ],
+      "rows": 0,
+      "file": "data/git_smart_run.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "git_write_log": {
+      "columns": [
+        "id",
+        "connection_id",
+        "kind",
+        "issue_key",
+        "ref",
+        "outcome",
+        "detail",
+        "user_id",
+        "at"
+      ],
+      "rows": 0,
+      "file": "data/git_write_log.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "idempotency_key": {
+      "columns": [
+        "user_id",
+        "key",
+        "request_hash",
+        "state",
+        "result",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/idempotency_key.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "import_job": {
+      "columns": [
+        "id",
+        "source",
+        "actor",
+        "state",
+        "summary",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/import_job.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "issue": {
+      "columns": [
+        "id",
+        "project_id",
+        "number",
+        "key",
+        "issue_type_id",
+        "status_id",
+        "priority",
+        "reporter_id",
+        "assignee_id",
+        "labels",
+        "parent_id",
+        "rank",
+        "version",
+        "field_ver",
+        "summary",
+        "summary_seq",
+        "created_at",
+        "updated_at",
+        "resolved_at",
+        "deleted_at",
+        "deleted_by",
+        "purge_after",
+        "delete_batch",
+        "legal_hold",
+        "external_id",
+        "import_id",
+        "input_requested_at",
+        "input_requested_by",
+        "input_question",
+        "estimate",
+        "origin_updated",
+        "origin_key",
+        "origin_parent",
+        "origin_links",
+        "restricted",
+        "archived_at"
+      ],
+      "rows": 8,
+      "file": "data/issue.copy",
+      "sha256": "1eef21099e31c335db1f39e55c71d0c23e3b35b3b10fa3d3b6bf6bc59adcc15e",
+      "bytes": 3038
+    },
+    "issue_field_value": {
+      "columns": [
+        "issue_id",
+        "field_id",
+        "value",
+        "text_value",
+        "num_value",
+        "date_value",
+        "updated_at"
+      ],
+      "rows": 0,
+      "file": "data/issue_field_value.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "issue_history": {
+      "columns": [
+        "id",
+        "issue_id",
+        "field",
+        "before",
+        "after",
+        "actor_id",
+        "actor_label",
+        "at",
+        "external_id",
+        "source"
+      ],
+      "rows": 19,
+      "file": "data/issue_history.copy",
+      "sha256": "4215d738a40b0f47ceba0eac88a94e2d2650470e8e69c30cec8764d45e9b5bb3",
+      "bytes": 2535
+    },
+    "issue_key_alias": {
+      "columns": [
+        "old_key",
+        "issue_id",
+        "created_at"
+      ],
+      "rows": 1,
+      "file": "data/issue_key_alias.copy",
+      "sha256": "f500c2a4214626f928d0175ef8bdf39605776d7ab16f5cc8e8465cbeb0b57bf1",
+      "bytes": 73
+    },
+    "issue_lease": {
+      "columns": [
+        "issue_id",
+        "holder_id",
+        "expires_at",
+        "heartbeat_at",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/issue_lease.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "issue_link": {
+      "columns": [
+        "id",
+        "from_id",
+        "to_id",
+        "type",
+        "created_at"
+      ],
+      "rows": 1,
+      "file": "data/issue_link.copy",
+      "sha256": "0a7414e721ddbf600e63656b6253c0f1917578531d575950f226d6a5faca7097",
+      "bytes": 113
+    },
+    "issue_search": {
+      "columns": [
+        "issue_id",
+        "project_id",
+        "key_text",
+        "summary_norm",
+        "tsv",
+        "text_hash",
+        "updated_at"
+      ],
+      "rows": 0,
+      "file": "data/issue_search.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "issue_text": {
+      "columns": [
+        "issue_id",
+        "field",
+        "body",
+        "text_seq",
+        "updated_by",
+        "updated_at",
+        "last_save_id"
+      ],
+      "rows": 8,
+      "file": "data/issue_text.copy",
+      "sha256": "41dadb9d9a8a396fcced3e8bb8cf8d06bab681387b0470c1f25b02d22ab3459d",
+      "bytes": 1159
+    },
+    "issue_type": {
+      "columns": [
+        "id",
+        "name",
+        "level",
+        "icon"
+      ],
+      "rows": 5,
+      "file": "data/issue_type.copy",
+      "sha256": "9b751f0f435733449e0b4fd98e7074dd6d0da3a210517ed02b5e9593782bf4da",
+      "bytes": 229
+    },
+    "issue_watch": {
+      "columns": [
+        "issue_id",
+        "user_id",
+        "muted",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/issue_watch.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "jira_adf": {
+      "columns": [
+        "issue_id",
+        "field",
+        "adf"
+      ],
+      "rows": 0,
+      "file": "data/jira_adf.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "jira_connection": {
+      "columns": [
+        "id",
+        "name",
+        "site_url",
+        "email",
+        "token_enc",
+        "token_fp",
+        "webhook_secret_enc",
+        "webhook_fp",
+        "allow_private",
+        "created_by",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/jira_connection.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "jira_project": {
+      "columns": [
+        "project_id",
+        "connection_id",
+        "jira_key",
+        "jql",
+        "watermark",
+        "synced_at",
+        "perm_synced_at",
+        "backfilled",
+        "issues_synced",
+        "last_error",
+        "wake"
+      ],
+      "rows": 0,
+      "file": "data/jira_project.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "jira_warning": {
+      "columns": [
+        "project_id",
+        "kind",
+        "detail",
+        "at"
+      ],
+      "rows": 0,
+      "file": "data/jira_warning.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mail_bounce": {
+      "columns": [
+        "id",
+        "mail_message_id",
+        "email",
+        "kind",
+        "status",
+        "source",
+        "at"
+      ],
+      "rows": 0,
+      "file": "data/mail_bounce.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mail_imap": {
+      "columns": [
+        "id",
+        "name",
+        "host",
+        "port",
+        "tls",
+        "username",
+        "password",
+        "mailbox",
+        "trusted",
+        "enabled",
+        "uidvalidity",
+        "last_uid",
+        "resets",
+        "received",
+        "last_poll",
+        "last_ok",
+        "last_error",
+        "leased_until",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/mail_imap.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mail_inbound": {
+      "columns": [
+        "id",
+        "source_id",
+        "message_id",
+        "dupes",
+        "raw_sha256",
+        "sender",
+        "subject",
+        "received_at",
+        "outcome",
+        "reason",
+        "issue_id",
+        "user_id",
+        "body",
+        "comment_id",
+        "handled_by",
+        "handled_at",
+        "kind",
+        "detail",
+        "purged_at"
+      ],
+      "rows": 0,
+      "file": "data/mail_inbound.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mail_message": {
+      "columns": [
+        "id",
+        "idempotency_key",
+        "issue_id",
+        "recipient_id",
+        "recipient",
+        "internal",
+        "subject",
+        "message_id",
+        "in_reply_to",
+        "refs",
+        "body_text",
+        "body_html",
+        "status",
+        "attempts",
+        "next_attempt_at",
+        "last_error",
+        "created_at",
+        "sent_at",
+        "kind",
+        "actor_id",
+        "reply_to"
+      ],
+      "rows": 0,
+      "file": "data/mail_message.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mail_reply_key": {
+      "columns": [
+        "kid",
+        "key",
+        "created_at",
+        "revoked_at"
+      ],
+      "rows": 0,
+      "file": "data/mail_reply_key.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mail_source": {
+      "columns": [
+        "id",
+        "name",
+        "kind",
+        "secret",
+        "trusted",
+        "enabled",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/mail_source.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mail_suppression": {
+      "columns": [
+        "email",
+        "kind",
+        "reason",
+        "since",
+        "cleared_at",
+        "cleared_by"
+      ],
+      "rows": 0,
+      "file": "data/mail_suppression.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "mcp_call_log": {
+      "columns": [
+        "id",
+        "at",
+        "agent_id",
+        "agent_label",
+        "client_name",
+        "client_version",
+        "session_id",
+        "tool",
+        "args",
+        "outcome",
+        "error",
+        "duration_ms"
+      ],
+      "rows": 0,
+      "file": "data/mcp_call_log.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "notification": {
+      "columns": [
+        "id",
+        "user_id",
+        "issue_id",
+        "event_id",
+        "kind",
+        "what",
+        "body",
+        "internal",
+        "actor_label",
+        "state",
+        "created_at",
+        "read_at"
+      ],
+      "rows": 0,
+      "file": "data/notification.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "notification_pref": {
+      "columns": [
+        "user_id",
+        "prefs"
+      ],
+      "rows": 0,
+      "file": "data/notification_pref.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "notification_scheme": {
+      "columns": [
+        "project_id",
+        "event",
+        "recipients"
+      ],
+      "rows": 0,
+      "file": "data/notification_scheme.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "oauth_client": {
+      "columns": [
+        "id",
+        "name",
+        "redirect_uris",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/oauth_client.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "oauth_grant": {
+      "columns": [
+        "id",
+        "client_id",
+        "user_id",
+        "scopes",
+        "refresh_hash",
+        "old_refresh_hashes",
+        "refresh_expires_at",
+        "created_at",
+        "last_used_at",
+        "revoked_at"
+      ],
+      "rows": 0,
+      "file": "data/oauth_grant.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "organization": {
+      "columns": [
+        "id",
+        "name",
+        "created_at",
+        "git_visibility",
+        "require_second_factor",
+        "ip_allowlist",
+        "session_max_hours",
+        "allowed_email_domains"
+      ],
+      "rows": 1,
+      "file": "data/organization.copy",
+      "sha256": "f0c6c60e0bbf7d061a8d4ac227c71ab225adeb112d5d56fcfd3bf395b3359757",
+      "bytes": 93
+    },
+    "outbox": {
+      "columns": [
+        "id",
+        "aggregate",
+        "type",
+        "payload",
+        "created_at",
+        "processed_at"
+      ],
+      "rows": 21,
+      "file": "data/outbox.copy",
+      "sha256": "bdf59070d7a5055bbacaf46b498a4c7e1f89526f17d66f6739bba150ca47158e",
+      "bytes": 3851
+    },
+    "outbox_cursor": {
+      "columns": [
+        "consumer",
+        "last_id"
+      ],
+      "rows": 0,
+      "file": "data/outbox_cursor.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "permission_scheme": {
+      "columns": [
+        "project_id",
+        "rules"
+      ],
+      "rows": 0,
+      "file": "data/permission_scheme.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "project": {
+      "columns": [
+        "id",
+        "key",
+        "name",
+        "type",
+        "lead_id",
+        "workflow_id",
+        "next_number",
+        "archived",
+        "created_at",
+        "mirror_of",
+        "screen_scheme_id",
+        "auto_archive_days",
+        "storage_quota_bytes",
+        "mail_policy",
+        "org_id",
+        "git_smart_commits"
+      ],
+      "rows": 2,
+      "file": "data/project.copy",
+      "sha256": "6666546adc2c03e756666e49ea10aa65d45d994171cb749266be64378183e6a3",
+      "bytes": 455
+    },
+    "project_group_role": {
+      "columns": [
+        "project_id",
+        "group_id",
+        "role",
+        "custom_role_id"
+      ],
+      "rows": 0,
+      "file": "data/project_group_role.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "project_member": {
+      "columns": [
+        "project_id",
+        "user_id",
+        "role",
+        "custom_role_id"
+      ],
+      "rows": 6,
+      "file": "data/project_member.copy",
+      "sha256": "e5d5fc79427533504ae04264bf1e2e39d3bdb8296cc45293f8c23777d423caec",
+      "bytes": 502
+    },
+    "removed_values": {
+      "columns": [
+        "id",
+        "issue_id",
+        "kind",
+        "data",
+        "created_at",
+        "expires_at"
+      ],
+      "rows": 1,
+      "file": "data/removed_values.copy",
+      "sha256": "7473432a5decc7bb888f6b276f1e44de162cc6728361ac267abe6933fbf37151",
+      "bytes": 176
+    },
+    "save_receipt": {
+      "columns": [
+        "save_id",
+        "issue_id",
+        "field",
+        "seq",
+        "at"
+      ],
+      "rows": 0,
+      "file": "data/save_receipt.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "scim_token": {
+      "columns": [
+        "id",
+        "name",
+        "token_hash",
+        "created_at",
+        "revoked_at"
+      ],
+      "rows": 0,
+      "file": "data/scim_token.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "screen": {
+      "columns": [
+        "id",
+        "name",
+        "description"
+      ],
+      "rows": 0,
+      "file": "data/screen.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "screen_field": {
+      "columns": [
+        "id",
+        "tab_id",
+        "field_key",
+        "position"
+      ],
+      "rows": 0,
+      "file": "data/screen_field.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "screen_scheme": {
+      "columns": [
+        "id",
+        "name"
+      ],
+      "rows": 0,
+      "file": "data/screen_scheme.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "screen_scheme_entry": {
+      "columns": [
+        "id",
+        "scheme_id",
+        "operation",
+        "issue_type_id",
+        "screen_id"
+      ],
+      "rows": 0,
+      "file": "data/screen_scheme_entry.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "screen_tab": {
+      "columns": [
+        "id",
+        "screen_id",
+        "name",
+        "position"
+      ],
+      "rows": 0,
+      "file": "data/screen_tab.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "search_os_dead": {
+      "columns": [
+        "id",
+        "event_id",
+        "issue_key",
+        "error",
+        "at",
+        "resolved"
+      ],
+      "rows": 0,
+      "file": "data/search_os_dead.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "search_os_state": {
+      "columns": [
+        "id",
+        "active_index",
+        "building_index",
+        "build_last_id",
+        "build_started",
+        "previous_index",
+        "last_reconcile",
+        "reconciled_at"
+      ],
+      "rows": 1,
+      "file": "data/search_os_state.copy",
+      "sha256": "60518fa0effb6e653d6ac9897e9431eaa918b506d5d2c47dd29ef929cac90b17",
+      "bytes": 15
+    },
+    "setting": {
+      "columns": [
+        "key",
+        "value"
+      ],
+      "rows": 1,
+      "file": "data/setting.copy",
+      "sha256": "abe43d278d8311ca29af845ac724a0dd936f3e3de92fcf0f387ff17141ab3779",
+      "bytes": 77
+    },
+    "sprint": {
+      "columns": [
+        "id",
+        "board_id",
+        "seq",
+        "name",
+        "auto_named",
+        "goal",
+        "state",
+        "starts_at",
+        "ends_at",
+        "calendar",
+        "started_at",
+        "closed_at",
+        "retro",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/sprint.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "sprint_capacity": {
+      "columns": [
+        "sprint_id",
+        "user_id",
+        "off_hours"
+      ],
+      "rows": 0,
+      "file": "data/sprint_capacity.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "sprint_issue": {
+      "columns": [
+        "sprint_id",
+        "issue_id",
+        "added_at",
+        "removed_at",
+        "committed",
+        "outcome"
+      ],
+      "rows": 0,
+      "file": "data/sprint_issue.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "sso_identity": {
+      "columns": [
+        "provider_id",
+        "subject",
+        "user_id",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/sso_identity.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "sso_provider": {
+      "columns": [
+        "id",
+        "name",
+        "label",
+        "issuer",
+        "client_id",
+        "client_secret_enc",
+        "scopes",
+        "allowed_domains",
+        "jit",
+        "enabled",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/sso_provider.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "status": {
+      "columns": [
+        "id",
+        "workflow_id",
+        "name",
+        "category",
+        "position",
+        "retired",
+        "color",
+        "pos_x",
+        "pos_y"
+      ],
+      "rows": 3,
+      "file": "data/status.copy",
+      "sha256": "a957be7e99ee665c37b77ed5b3e8c715d627d46d95e63e1804c3cb3beed7d845",
+      "bytes": 300
+    },
+    "text_version": {
+      "columns": [
+        "issue_id",
+        "field",
+        "seq",
+        "body",
+        "actor_id",
+        "actor_label",
+        "mode",
+        "at"
+      ],
+      "rows": 17,
+      "file": "data/text_version.copy",
+      "sha256": "20efd7018fd34d4246f06d114ad00472d0317f62635a3d01ef5348e308bce516",
+      "bytes": 2621
+    },
+    "tier_rule": {
+      "columns": [
+        "id",
+        "name",
+        "class",
+        "min_age_days",
+        "min_size_bytes",
+        "enabled",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/tier_rule.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "tier_run": {
+      "columns": [
+        "id",
+        "at",
+        "moved",
+        "failed",
+        "bytes",
+        "error"
+      ],
+      "rows": 0,
+      "file": "data/tier_run.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "transition": {
+      "columns": [
+        "id",
+        "workflow_id",
+        "name",
+        "from_status",
+        "to_status",
+        "requires_human",
+        "rules",
+        "system"
+      ],
+      "rows": 5,
+      "file": "data/transition.copy",
+      "sha256": "2d24782a4a246095eec85ece25e725efff74e79c255f19f36f609161804f05fa",
+      "bytes": 824
+    },
+    "user_group": {
+      "columns": [
+        "id",
+        "name",
+        "external_id",
+        "created_at",
+        "org_id"
+      ],
+      "rows": 0,
+      "file": "data/user_group.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "user_group_member": {
+      "columns": [
+        "group_id",
+        "user_id"
+      ],
+      "rows": 0,
+      "file": "data/user_group_member.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "user_mfa": {
+      "columns": [
+        "user_id",
+        "secret_enc",
+        "enabled",
+        "last_step",
+        "recovery_hashes",
+        "created_at"
+      ],
+      "rows": 0,
+      "file": "data/user_mfa.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "webauthn_credential": {
+      "columns": [
+        "id",
+        "user_id",
+        "cred_id",
+        "public_key",
+        "alg",
+        "sign_count",
+        "name",
+        "created_at",
+        "last_used_at"
+      ],
+      "rows": 0,
+      "file": "data/webauthn_credential.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workflow": {
+      "columns": [
+        "id",
+        "name",
+        "version",
+        "published_at"
+      ],
+      "rows": 1,
+      "file": "data/workflow.copy",
+      "sha256": "c8b2a21b3cd087ce91a5c636e9f6ca4eb3da4a751aaa43703f174ffb90a89921",
+      "bytes": 51
+    },
+    "workflow_draft": {
+      "columns": [
+        "workflow_id",
+        "base_version",
+        "definition",
+        "updated_by",
+        "updated_at"
+      ],
+      "rows": 0,
+      "file": "data/workflow_draft.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workflow_job": {
+      "columns": [
+        "id",
+        "kind",
+        "issue_id",
+        "params",
+        "payload",
+        "state",
+        "attempts",
+        "next_at",
+        "last_error",
+        "created_at",
+        "done_at"
+      ],
+      "rows": 0,
+      "file": "data/workflow_job.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workflow_migration": {
+      "columns": [
+        "id",
+        "workflow_id",
+        "version",
+        "status_from",
+        "status_name",
+        "status_to",
+        "total",
+        "done",
+        "state",
+        "error",
+        "created_at",
+        "finished_at"
+      ],
+      "rows": 0,
+      "file": "data/workflow_migration.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "workflow_version": {
+      "columns": [
+        "id",
+        "workflow_id",
+        "version",
+        "definition",
+        "note",
+        "published_by",
+        "published_at"
+      ],
+      "rows": 0,
+      "file": "data/workflow_version.copy",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  },
+  "sequences": {
+    "audit_event_id_seq": {
+      "last_value": 3
+    },
+    "automation_rule_id_seq": {
+      "last_value": null
+    },
+    "automation_run_id_seq": {
+      "last_value": null
+    },
+    "behavior_rule_id_seq": {
+      "last_value": null
+    },
+    "custom_field_context_id_seq": {
+      "last_value": null
+    },
+    "custom_field_id_seq": {
+      "last_value": null
+    },
+    "custom_field_option_id_seq": {
+      "last_value": null
+    },
+    "field_config_id_seq": {
+      "last_value": null
+    },
+    "git_identity_id_seq": {
+      "last_value": null
+    },
+    "git_inbox_id_seq": {
+      "last_value": null
+    },
+    "git_rule_id_seq": {
+      "last_value": null
+    },
+    "git_rule_run_id_seq": {
+      "last_value": null
+    },
+    "git_smart_run_id_seq": {
+      "last_value": null
+    },
+    "git_write_log_id_seq": {
+      "last_value": null
+    },
+    "issue_history_id_seq": {
+      "last_value": 19
+    },
+    "issue_link_id_seq": {
+      "last_value": 1
+    },
+    "login_attempt_id_seq": {
+      "last_value": null
+    },
+    "mail_bounce_id_seq": {
+      "last_value": null
+    },
+    "mail_inbound_id_seq": {
+      "last_value": null
+    },
+    "mail_message_id_seq": {
+      "last_value": null
+    },
+    "mcp_call_log_id_seq": {
+      "last_value": null
+    },
+    "notification_id_seq": {
+      "last_value": null
+    },
+    "oauth_grant_id_seq": {
+      "last_value": null
+    },
+    "outbox_id_seq": {
+      "last_value": 21
+    },
+    "removed_values_id_seq": {
+      "last_value": 1
+    },
+    "scim_token_id_seq": {
+      "last_value": null
+    },
+    "screen_field_id_seq": {
+      "last_value": null
+    },
+    "screen_id_seq": {
+      "last_value": null
+    },
+    "screen_scheme_entry_id_seq": {
+      "last_value": null
+    },
+    "screen_scheme_id_seq": {
+      "last_value": null
+    },
+    "screen_tab_id_seq": {
+      "last_value": null
+    },
+    "search_os_dead_id_seq": {
+      "last_value": null
+    },
+    "session_id_seq": {
+      "last_value": null
+    },
+    "sso_provider_id_seq": {
+      "last_value": null
+    },
+    "tier_rule_id_seq": {
+      "last_value": null
+    },
+    "tier_run_id_seq": {
+      "last_value": null
+    },
+    "webauthn_credential_id_seq": {
+      "last_value": null
+    },
+    "workflow_job_id_seq": {
+      "last_value": null
+    },
+    "workflow_migration_id_seq": {
+      "last_value": null
+    },
+    "workflow_version_id_seq": {
+      "last_value": null
+    }
+  },
+  "blobs": 2,
+  "blob_bytes": 141,
+  "secret_check": "4749129b7fe94c0ed11ab1b2d17ca1e35d2fdf0d742bd51f4a21ba65cb21cae38dc3794277282f9d0a3ba5b2225769d0ce"
+}

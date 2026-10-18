@@ -322,3 +322,108 @@ func TestUPG09_ANewerVersionIsRefusedBeforeAnythingChangesAndDamageIsStillCaught
 		t.Fatalf("a tampered bundle was read: %v", err)
 	}
 }
+
+// ---- backups (UPG-09): the same rule as for bundles. testdata/backups/vN/backup is a backup written by format version N, with the
+// content it must restore as. Every release must still restore every one of them into its own, newer schema (the columns it added take
+// their defaults), and raising BackupVersion without a fixture fails.
+
+const goldenBackups = "testdata/backups"
+
+func TestUPG09_WriteGoldenBackup(t *testing.T) {
+	if os.Getenv("TASKLANE_UPDATE_GOLDEN") == "" {
+		t.Skip("set TASKLANE_UPDATE_GOLDEN=1 to write the backup fixture of the current backup version")
+	}
+	dir := filepath.Join(goldenBackups, fmt.Sprintf("v%d", domain.BackupVersion))
+	if _, err := os.Stat(filepath.Join(dir, "expected.json")); err == nil {
+		t.Fatalf("%s exists: the fixture of a released version is evidence and is not rewritten", dir)
+	}
+	os.MkdirAll(dir, 0o755)
+	src := testutil.New(t)
+	rich(t, src)
+	if _, err := src.Svc.Backup(ctx, filepath.Join(dir, "backup"), domain.BackupOpts{Version: "golden"}); err != nil {
+		t.Fatal(err)
+	}
+	var exp []goldenIssue
+	for _, k := range goldenKeys {
+		exp = append(exp, goldenOf(t, src, src.Admin, k))
+	}
+	b, _ := json.MarshalIndent(exp, "", "  ")
+	os.WriteFile(filepath.Join(dir, "expected.json"), append(b, '\n'), 0o644)
+}
+
+func TestUPG09_EveryBackupVersionHasAFixtureAndStillRestores(t *testing.T) {
+	for v := 1; v <= domain.BackupVersion; v++ {
+		dir := filepath.Join(goldenBackups, fmt.Sprintf("v%d", v))
+		var exp []goldenIssue
+		b, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+		if err != nil || json.Unmarshal(b, &exp) != nil || len(exp) == 0 {
+			t.Fatalf("backup version %d has no fixture (%v): a release that raises BackupVersion must add one", v, err)
+		}
+		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
+			man, err := domain.VerifyBackup(filepath.Join(dir, "backup"))
+			if err != nil || man.Version != v {
+				t.Fatalf("%v %+v", err, man)
+			}
+			dst := freshTarget(t)
+			rep, err := dst.Svc.Restore(ctx, filepath.Join(dir, "backup"))
+			if err != nil {
+				t.Fatalf("%v %+v", err, rep)
+			}
+			if !rep.AuditOK || !rep.FsckClean {
+				t.Fatalf("%+v", rep)
+			}
+			checkImported(t, dst, exp)
+			// and the restored instance works: sign in, create, continue the sequences
+			if _, _, err := dst.Svc.Login(ctx, "alice@example.com", "password123", time.Hour); err != nil {
+				t.Fatalf("%v", err)
+			}
+			if _, err := dst.Svc.CreateIssue(ctx, restoredActor(t, dst, "alice@example.com"), domain.CreateIn{Project: "ABC", Type: "Task", Summary: "after restoring an old backup"}); err != nil {
+				t.Fatalf("%v", err)
+			}
+		})
+	}
+	ents, _ := os.ReadDir(goldenBackups)
+	for _, e := range ents {
+		var v int
+		if _, err := fmt.Sscanf(e.Name(), "v%d", &v); err != nil || v > domain.BackupVersion {
+			t.Errorf("fixture %s is for a version this code does not write", e.Name())
+		}
+	}
+}
+
+// The case a real upgrade makes: a backup from an older release restored into this release's newer schema. A later release adds
+// columns and tables (expand migrations only add); the old backup does not mention them, so they take their defaults and the restore
+// still verifies. Simulated here by adding a column with a default, a column that must be filled by a default expression and a new
+// table to the target, as a later migration would.
+func TestUPG09_ABackupFromAnOlderSchemaRestoresIntoANewerOne(t *testing.T) {
+	dir := filepath.Join(goldenBackups, "v1", "backup")
+	var exp []goldenIssue
+	b, _ := os.ReadFile(filepath.Join(goldenBackups, "v1", "expected.json"))
+	json.Unmarshal(b, &exp)
+	dst := freshTarget(t)
+	for _, q := range []string{
+		`ALTER TABLE issue ADD COLUMN added_later text NOT NULL DEFAULT 'default'`,
+		`ALTER TABLE app_user ADD COLUMN added_later_n int NOT NULL DEFAULT 7`,
+		`CREATE TABLE added_later_table (id bigserial PRIMARY KEY, note text NOT NULL DEFAULT '')`,
+		`INSERT INTO schema_migration(version,name,checksum,phase) VALUES(99990,'99990_added_later','x','expand')`,
+	} {
+		if _, err := dst.Store.Pool.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	rep, err := dst.Svc.Restore(ctx, dir)
+	if err != nil {
+		t.Fatalf("%v %+v", err, rep)
+	}
+	checkImported(t, dst, exp)
+	var def string
+	var n int
+	dst.Store.Pool.QueryRow(ctx, `SELECT added_later FROM issue LIMIT 1`).Scan(&def)
+	dst.Store.Pool.QueryRow(ctx, `SELECT added_later_n FROM app_user LIMIT 1`).Scan(&n)
+	if def != "default" || n != 7 {
+		t.Fatalf("the added columns did not take their defaults: %q %d", def, n)
+	}
+	if _, err := dst.Store.Pool.Exec(ctx, `INSERT INTO added_later_table(note) VALUES('works')`); err != nil {
+		t.Fatalf("the sequence of a table the backup does not know is broken: %v", err)
+	}
+}

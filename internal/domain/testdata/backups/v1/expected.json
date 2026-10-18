@@ -1,0 +1,127 @@
+[
+  {
+    "key": "ABC-1",
+    "type": "Epic",
+    "summary": "the epic",
+    "description": "desc of the epic",
+    "status": "To Do",
+    "priority": "medium",
+    "labels": [],
+    "assignee": "",
+    "reporter": "alice@example.com",
+    "parent": "",
+    "created": "2026-10-19T09:00:00Z",
+    "comments": null,
+    "links": null,
+    "attachments": null
+  },
+  {
+    "key": "ABC-2",
+    "type": "Story",
+    "summary": "a story with everything",
+    "description": "Steps:\n\n1. one\n\n2. two",
+    "status": "In Progress",
+    "priority": "high",
+    "labels": [
+      "payments",
+      "urgent"
+    ],
+    "assignee": "bob@example.com",
+    "reporter": "alice@example.com",
+    "parent": "ABC-1",
+    "created": "2026-10-19T09:00:00Z",
+    "comments": [
+      "bob@example.com|a public comment|false|2026-10-18T19:21:06Z",
+      "alice@example.com|an internal note|true|2026-10-18T19:21:06Z"
+    ],
+    "links": [
+      "blocks|out|ABC-4"
+    ],
+    "attachments": [
+      "notes.txt|ae1c193e3293a9730cf141bed87363ef95f39e93e5b1702d3c565c17cf114ce9|34",
+      "shot.png|96569523a3a8a09cc1fa6e2cd08b2ccb852e7673b8b290bf7b6ec6b65c1de505|107"
+    ]
+  },
+  {
+    "key": "ABC-3",
+    "type": "Subtask",
+    "summary": "its subtask",
+    "description": "desc of its subtask",
+    "status": "To Do",
+    "priority": "medium",
+    "labels": [],
+    "assignee": "",
+    "reporter": "bob@example.com",
+    "parent": "ABC-2",
+    "created": "2026-10-19T09:00:00Z",
+    "comments": null,
+    "links": null,
+    "attachments": null
+  },
+  {
+    "key": "ABC-4",
+    "type": "Bug",
+    "summary": "a bug \u003cb\u003ewith markup\u003c/b\u003e \u0026 ünïcode 日本語",
+    "description": "desc of a bug \u003cb\u003ewith markup\u003c/b\u003e \u0026 ünïcode 日本語",
+    "status": "To Do",
+    "priority": "medium",
+    "labels": [],
+    "assignee": "",
+    "reporter": "bob@example.com",
+    "parent": "",
+    "created": "2026-10-19T09:00:00Z",
+    "comments": null,
+    "links": [
+      "blocks|in|ABC-2"
+    ],
+    "attachments": null
+  },
+  {
+    "key": "ABC-6",
+    "type": "Epic",
+    "summary": "convertible",
+    "description": "desc of convertible",
+    "status": "To Do",
+    "priority": "medium",
+    "labels": [],
+    "assignee": "",
+    "reporter": "alice@example.com",
+    "parent": "",
+    "created": "2026-10-19T09:00:00Z",
+    "comments": null,
+    "links": null,
+    "attachments": null
+  },
+  {
+    "key": "ABC-7",
+    "type": "Subtask",
+    "summary": "child of convertible",
+    "description": "desc of child of convertible",
+    "status": "To Do",
+    "priority": "medium",
+    "labels": [],
+    "assignee": "",
+    "reporter": "alice@example.com",
+    "parent": "",
+    "created": "2026-10-19T09:00:00Z",
+    "comments": null,
+    "links": null,
+    "attachments": null
+  },
+  {
+    "key": "XYZ-1",
+    "type": "Task",
+    "summary": "moved away",
+    "description": "desc of moved away",
+    "status": "To Do",
+    "priority": "medium",
+    "labels": [],
+    "assignee": "",
+    "reporter": "alice@example.com",
+    "parent": "",
+    "created": "2026-10-19T09:00:00Z",
+    "comments": null,
+    "links": null,
+    "attachments": null
+  }
+]

@@ -73,6 +73,10 @@ func main() {
 		}
 		return
 	}
+	if cmd == "verify-backup" { // checks files against a manifest: no configuration, no database
+		verifyBackupCmd()
+		return
+	}
 	if cmd == "verify-release" { // check a downloaded release before installing it; it needs no configuration and no database
 		if len(os.Args) != 4 {
 			fmt.Fprintln(os.Stderr, "usage: tasklane verify-release PUBLIC_KEY_FILE RELEASE_DIR")
@@ -81,7 +85,7 @@ func main() {
 		os.Exit(verifyRelease(os.Args[2], os.Args[3]))
 	}
 	cfgArgs := os.Args[min(2, len(os.Args)):]
-	if cmd == "blobs" || cmd == "migrate" {
+	if cmd == "blobs" || cmd == "migrate" || cmd == "backup" || cmd == "restore" || cmd == "create-admin" {
 		cfgArgs = nil // their words (migrate, verify, rewrap, plan, finalize, --verify) are the command's own; settings come from the environment and the file
 	}
 	cfg, err := config.Load(config.Options{Args: cfgArgs})
@@ -90,6 +94,10 @@ func main() {
 		os.Exit(2)
 	}
 	switch cmd {
+	case "backup":
+		backupCmd(ctx, cfg)
+	case "restore":
+		restoreCmd(ctx, cfg)
 	case "serve":
 		serve(ctx, cfg)
 	case "migrate":
@@ -195,7 +203,7 @@ func main() {
 	case "version":
 		fmt.Println(releaseVersion())
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex fsck blobs config create-admin verify-release version\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate backup restore verify-backup doctor reindex fsck blobs config create-admin verify-release version\n", cmd)
 		os.Exit(2)
 	}
 }

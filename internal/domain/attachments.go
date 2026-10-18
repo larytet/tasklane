@@ -592,6 +592,20 @@ func (s *Service) GC(ctx context.Context) (int, error) {
 	if err := s.blobsReady(); err != nil {
 		return 0, err
 	}
+	// a backup copying files holds this lock: nothing is deleted until it has finished (the pass is skipped, not queued)
+	lc, err := s.DB.Acquire(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer lc.Release()
+	var got bool
+	if err := lc.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, backupLockKey).Scan(&got); err != nil {
+		return 0, err
+	}
+	if !got {
+		return 0, nil
+	}
+	defer lc.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, backupLockKey)
 	cut := s.Now().Add(-s.Blobs.Retention)
 	rows, err := s.DB.Query(ctx, `SELECT id,sha256 FROM blob WHERE refcount<=0 AND zero_since IS NOT NULL AND zero_since<=$1
 		AND id NOT IN (SELECT thumb_blob_id FROM attachment WHERE thumb_blob_id IS NOT NULL)`, cut)

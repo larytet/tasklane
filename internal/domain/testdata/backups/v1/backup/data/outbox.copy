@@ -1,0 +1,21 @@
+1	project:ABC	project.created	{"id": "4f609b4c-54a8-4e88-9cf5-eb4b95fa1498", "key": "ABC", "name": "Alpha", "type": "software", "archived": false}	2026-10-18 19:21:06.147448+00	\N
+2	project:XYZ	project.created	{"id": "ef1ef6ad-ddb5-4e63-b914-d0079ddc0fc5", "key": "XYZ", "name": "Xray", "type": "software", "archived": false}	2026-10-18 19:21:06.152482+00	\N
+3	issue:ABC-1	issue.created	{"key": "ABC-1", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "assignee": ""}	2026-10-18 19:21:06.157601+00	\N
+4	issue:ABC-2	issue.created	{"key": "ABC-2", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "assignee": ""}	2026-10-18 19:21:06.16866+00	\N
+5	issue:ABC-3	issue.created	{"key": "ABC-3", "actor": "Bob R.", "actor_id": "04fbdff5-4aba-4173-ac05-15c0120cd6b5", "assignee": ""}	2026-10-18 19:21:06.175132+00	\N
+6	issue:ABC-4	issue.created	{"key": "ABC-4", "actor": "Bob R.", "actor_id": "04fbdff5-4aba-4173-ac05-15c0120cd6b5", "assignee": ""}	2026-10-18 19:21:06.180597+00	\N
+7	issue:ABC-2	issue.text_saved	{"key": "ABC-2", "mode": "save", "actor": "Alice K.", "field": "description", "version": 1, "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "text_seq": 2}	2026-10-18 19:21:06.187409+00	\N
+8	issue:ABC-2	comment.added	{"key": "ABC-2", "actor": "Bob R.", "comment": "9f04bc2f-82c6-474f-9103-476234538038", "actor_id": "04fbdff5-4aba-4173-ac05-15c0120cd6b5"}	2026-10-18 19:21:06.192187+00	\N
+9	issue:ABC-2	comment.added	{"key": "ABC-2", "actor": "Alice K.", "comment": "934c83fd-11af-4a1b-9e78-4f24f1a31cc1", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85"}	2026-10-18 19:21:06.194513+00	\N
+10	issue:ABC-2	issue.updated	{"key": "ABC-2", "actor": "Alice K.", "fields": ["assignee", "labels", "priority"], "version": 2, "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85"}	2026-10-18 19:21:06.198468+00	\N
+11	issue:ABC-2	issue.transitioned	{"to": "In Progress", "key": "ABC-2", "from": "To Do", "actor": "Alice K.", "version": 3, "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85"}	2026-10-18 19:21:06.206412+00	\N
+12	issue:ABC-2	attachment.added	{"key": "ABC-2", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "attachment": "88f3a397-bafb-4131-9fbf-0fbe21a188ff"}	2026-10-18 19:21:06.208888+00	\N
+13	issue:ABC-2	attachment.added	{"key": "ABC-2", "actor": "Bob R.", "actor_id": "04fbdff5-4aba-4173-ac05-15c0120cd6b5", "attachment": "a4dad611-3602-43cf-88e6-15eb1aa68f60"}	2026-10-18 19:21:06.237515+00	\N
+14	issue:ABC-5	issue.created	{"key": "ABC-5", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "assignee": ""}	2026-10-18 19:21:06.253007+00	\N
+15	issue:XYZ-1	issue.moved	{"to": "XYZ", "key": "XYZ-1", "from": "ABC", "actor": "Alice K.", "old_key": "ABC-5", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85"}	2026-10-18 19:21:06.256586+00	\N
+16	issue:ABC-6	issue.created	{"key": "ABC-6", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "assignee": ""}	2026-10-18 19:21:06.262639+00	\N
+17	issue:ABC-7	issue.created	{"key": "ABC-7", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "assignee": ""}	2026-10-18 19:21:06.265294+00	\N
+18	issue:ABC-7	issue.updated	{"key": "ABC-7", "actor": "Alice K.", "fields": ["parent"], "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85"}	2026-10-18 19:21:06.267676+00	\N
+19	issue:ABC-6	issue.updated	{"key": "ABC-6", "actor": "Alice K.", "fields": ["type"], "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85"}	2026-10-18 19:21:06.267676+00	\N
+20	issue:ABC-8	issue.created	{"key": "ABC-8", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85", "assignee": ""}	2026-10-18 19:21:06.27211+00	\N
+21	issue:ABC-8	issue.deleted	{"key": "ABC-8", "actor": "Alice K.", "actor_id": "dcd3a234-ca2c-474b-adea-3d8175664f85"}	2026-10-18 19:21:06.274027+00	\N

@@ -1,0 +1,19 @@
+1	353445e2-bc81-4775-b08e-30c32387701a	created	\N	ABC-1	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+2	e84bc344-cf47-4a3d-8284-71125d01e8fe	created	\N	ABC-2	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+3	b1017dff-ae65-40f0-8072-e7e54ea594e0	created	\N	ABC-3	04fbdff5-4aba-4173-ac05-15c0120cd6b5	Bob R.	2026-10-19 09:00:00+00	\N	
+4	d5dfbf1b-84a2-4450-8653-8018790f8603	created	\N	ABC-4	04fbdff5-4aba-4173-ac05-15c0120cd6b5	Bob R.	2026-10-19 09:00:00+00	\N	
+5	e84bc344-cf47-4a3d-8284-71125d01e8fe	description	desc of a story with everything	Steps:\n\n1. one\n\n2. two	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+6	e84bc344-cf47-4a3d-8284-71125d01e8fe	priority	medium	high	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+7	e84bc344-cf47-4a3d-8284-71125d01e8fe	labels		payments,urgent	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+8	e84bc344-cf47-4a3d-8284-71125d01e8fe	assignee		Bob R.	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+9	e84bc344-cf47-4a3d-8284-71125d01e8fe	status	To Do	In Progress	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+10	e84bc344-cf47-4a3d-8284-71125d01e8fe	attachment	\N	notes.txt	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+11	e84bc344-cf47-4a3d-8284-71125d01e8fe	attachment	\N	shot.png	04fbdff5-4aba-4173-ac05-15c0120cd6b5	Bob R.	2026-10-19 09:00:00+00	\N	
+12	3dd44ed7-6df1-4123-b70d-2f2e630d82ae	created	\N	ABC-5	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+13	3dd44ed7-6df1-4123-b70d-2f2e630d82ae	key	ABC-5	XYZ-1	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+14	48a0113c-8acd-464c-a32e-428357b063a0	created	\N	ABC-6	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+15	12764bff-21b4-4df6-a272-bcf512e308d8	created	\N	ABC-7	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+16	12764bff-21b4-4df6-a272-bcf512e308d8	parent	ABC-6		dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+17	48a0113c-8acd-464c-a32e-428357b063a0	type	Task	Epic	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+18	1c5af512-bc88-449d-ae6f-4b474bcf6768	created	\N	ABC-8	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
+19	1c5af512-bc88-449d-ae6f-4b474bcf6768	deleted	\N	ABC-8	dcd3a234-ca2c-474b-adea-3d8175664f85	Alice K.	2026-10-19 09:00:00+00	\N	
