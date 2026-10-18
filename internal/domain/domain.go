@@ -28,10 +28,10 @@ func New(db *pgxpool.Pool) *Service {
 
 // Actor is whoever performs an action: a person, an API token, an agent or an automation rule.
 type Actor struct {
-	ID    string
-	Label string // shown in history and presence, e.g. "Jana K.", "API: bot", "Agent: claude"
-	Admin bool
-	Kind  string
+	ID    string `json:"id"`
+	Label string `json:"label"` // shown in history and presence, e.g. "Jana K.", "API: bot", "Agent: claude"
+	Admin bool   `json:"admin"`
+	Kind  string `json:"kind"`
 }
 
 var (

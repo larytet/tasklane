@@ -743,5 +743,9 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | BLOB-12 | partial | `TestBLOB12_23_FsckAndReferenceIntegrity`: bit-rot, deleted object and orphan detected, repair; verify-on-read pending |
 | BLOB-20 | partial | `TestBLOB20_UploadCapacityIsBounded` (bounded upload slots, interactive calls unaffected); the mixed-load latency run needs the load harness |
 | BLOB-23 | done | same test: traversal and key-injection locators rejected, no `bytea` column in any blob table |
+| LIVE-02, LIVE-03 (browser) | manual only | Driven by hand in Chrome with two users: non-overlapping change merged automatically, overlapping lines shown as a conflict block with a chooser, Save merged result stored as a `merge` version, the other user's version kept in history. Not yet automated |
+| LIVE-11 (partial) | manual | Reload with a local draft restores it with a banner; the unsaved-changes guard blocks navigation. Tab kill, eviction and offline are untested |
+| UI-01 (partial) | automated | `internal/web` tests: shell routing for client routes, ETag and 304, gzip, 404 for a missing asset, no `innerHTML`, `outerHTML`, `eval` or `document.write` in the app, bundle budget (SPEC 21: under 200 KB gzipped JavaScript), Node unit tests of the diff, choice application, relative time and link whitelist |
+| UI-02, UI-03, A11Y-01 | open | Dark and light themes checked by eye on the ticket view; phone layout, keyboard-only flow, screen reader and axe runs are not done |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

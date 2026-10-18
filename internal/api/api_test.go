@@ -239,3 +239,27 @@ func TestHTTP_PresenceAndDrafts(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+func TestHTTP_AdminCreatesUsers(t *testing.T) {
+	e, alice, _, _ := setup(t)
+	if c, _, _ := alice.do("POST", "/api/v1/users", map[string]any{"email": "x@example.com", "name": "X", "password": "password123"}); c != 403 {
+		t.Fatalf("non-admin created a user: %d", c)
+	}
+	us, _ := e.Svc.ListUsers(testutil.Ctx())
+	var admin *client
+	for _, u := range us {
+		if u.Email == "admin@example.com" {
+			tok, _ := e.Svc.CreateAPIToken(testutil.Ctx(), u.ID, "adm")
+			admin = &client{t: t, base: alice.base, token: tok}
+		}
+	}
+	if c, out, _ := admin.do("POST", "/api/v1/users", map[string]any{"email": "x@example.com", "name": "X", "password": "password123"}); c != 201 || out["email"] != "x@example.com" {
+		t.Fatalf("%d %v", c, out)
+	}
+	if c, _, _ := admin.do("POST", "/api/v1/users", map[string]any{"email": "x@example.com", "name": "X", "password": "password123"}); c != 400 {
+		t.Fatalf("duplicate: %d", c)
+	}
+	if c, _, _ := admin.do("POST", "/api/v1/users", map[string]any{"email": "y@example.com", "name": "Y", "password": "short"}); c != 400 {
+		t.Fatalf("weak password: %d", c)
+	}
+}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/search"
+	"github.com/larytet/tasklane/internal/web"
 )
 
 type Server struct {
@@ -55,6 +56,21 @@ func (s *Server) Handler() http.Handler {
 		s.reply(w, us, err)
 	}))
 
+	mux.HandleFunc("POST /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		if !actorOf(r).Admin {
+			s.fail(w, 403, "forbidden", "administrators only", nil)
+			return
+		}
+		var in struct {
+			Email, Name, Password string
+			Admin                 bool
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		u, err := s.Svc.CreateUser(r.Context(), in.Email, in.Name, in.Password, in.Admin)
+		s.replyStatus(w, 201, u, err)
+	}))
 	mux.HandleFunc("GET /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		ps, err := s.Svc.ListProjects(r.Context(), actorOf(r))
 		s.reply(w, ps, err)
@@ -181,11 +197,21 @@ func (s *Server) Handler() http.Handler {
 	if s.Search == nil {
 		s.Search = &search.Postgres{DB: s.Svc.DB}
 	}
+	mux.HandleFunc("GET /api/v1/bootstrap", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		ps, err1 := s.Svc.ListProjects(r.Context(), actorOf(r))
+		us, err2 := s.Svc.ListUsers(r.Context())
+		if err1 != nil || err2 != nil {
+			s.fail(w, 500, "internal", "internal error", nil)
+			return
+		}
+		s.json(w, 200, map[string]any{"me": actorOf(r), "projects": ps, "users": us})
+	}))
 	s.registerSearch(mux)
 	s.registerAttachments(mux)
 	if s.Extra != nil {
 		s.Extra(mux, s)
 	}
+	mux.Handle("/", web.Handler()) // the app shell and assets; API paths above take precedence
 	return s.secure(mux)
 }
 
