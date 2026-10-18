@@ -130,6 +130,11 @@ func TestTQL08_Routing(t *testing.T) {
 	if res := r.via(r.router, r.Alice, `inputrequested is EMPTY`); searches() != before || res.Engine == "opensearch" { // a field the index does not carry
 		t.Fatal("a query the index cannot answer was sent to it")
 	}
+	for _, q := range []string{`pullRequest.state = open`, `pullRequest.count > 1`, `branch ~ login`, `build.state = failing`, `deployment.environment = production`} { // development data is not in the index
+		if res := r.via(r.router, r.Alice, q); searches() != before || res.Engine == "opensearch" {
+			t.Fatalf("%s was sent to the index", q)
+		}
+	}
 	f, err := r.Svc.CreateField(ctx, r.Admin, domain.FieldIn{Name: "Severity", Type: "text"})
 	if err != nil {
 		t.Fatal(err)

@@ -294,6 +294,9 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 		}
 		return "", errAt(x.Pos, "operator %s cannot be used with %s", opName(x.Op), x.Field)
 	}
+	if cond, ok, err := c.devClause(x); ok {
+		return cond, err
+	}
 	if f, ok := c.sc.Fields[x.Field]; ok {
 		return c.customClause(x, f)
 	}

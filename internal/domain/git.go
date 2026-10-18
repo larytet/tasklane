@@ -519,6 +519,8 @@ func (s *Service) applyGitEvent(ctx context.Context, r *repoInfo, e git.Event) (
 		for k, v := range e.Extra {
 			meta[k] = v
 		}
+		// minimization: what is stored and shown is the title, never the body; secret-looking strings are removed first
+		e.Title, e.Branch = git.Redact(e.Title), git.Redact(e.Branch)
 		metaJSON, _ := json.Marshal(meta)
 		at := e.At
 		zero := at.IsZero()

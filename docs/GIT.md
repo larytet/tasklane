@@ -132,3 +132,29 @@ Tasklane never creates the webhook at the provider (an administrator does, with 
 ### Still not built
 
 Self-service: an Admin screen for the connection options, health and write log; the full data-minimization checks of GIT-17 (secret-looking strings in messages and erase of a commit author on request); pull-request creation from Tasklane; a "branch created" notice back to the issue's history; and write actions against a real GitHub or GitLab.
+
+
+## Searching by code (TQL) and data minimization
+
+### Development fields in TQL (GIT-19)
+
+| Field | Meaning |
+|---|---|
+| `pullRequest.state` | an issue with a pull or merge request in that state: `draft`, `open`, `merged`, `closed` (`=`, `!=`, `IN`, `NOT IN`, `IS EMPTY`, `IS NOT EMPTY`) |
+| `pullRequest.review` | `approved` or `changes_requested` |
+| `pullRequest.count` | how many are linked: `=`, `!=`, `<`, `>`, `<=`, `>=` with a whole number |
+| `branch` | a linked branch: `branch ~ login` contains the text (any case), `branch = "ABC-1-login"` is the exact name, `IS EMPTY` |
+| `build.state` | the **worst** state across the issue's builds: `failing`, else `running`, else `passing` (a re-run replaces the earlier result) |
+| `deployment.environment` | currently deployed there: of the deployments of the issue's own commits to that environment, the latest succeeded; `IS EMPTY` means never deployed anywhere |
+
+Examples: `project = ABC AND pullRequest.state = open AND build.state = failing`, `pullRequest.count >= 2`, `deployment.environment = production AND statusCategory != Done`. `!=` includes issues with no code at all, as it does for other fields.
+
+Every one is a condition on the issue row, so a query can never return an issue the caller may not see (the search is already limited to the projects they can read, and an issue marked for administrators only or in the trash is excluded as usual). By default anyone who can see an issue sees its development data. These fields are not in the OpenSearch index: a query that uses one is answered by PostgreSQL, whatever engine is configured.
+
+### Data minimization (GIT-17)
+
+Tasklane stores, per code object, only: kind, repository, id, **title** (a commit's subject cut at 300 characters, a pull request's title at 500), state, review state, author's provider account name, address, SHA, branch names, environment, and timestamps. It stores **no source, no diffs, no commit or pull-request bodies** (they are searched for issue keys and commands and then dropped), and the webhook payload is emptied as soon as it has been applied.
+
+Before a title or branch name is stored, **secret-looking strings are replaced by `[redacted]`**: GitHub and GitLab tokens, AWS keys, Slack tokens, API-key and JWT shapes, private-key blocks, credentials inside a URL, `Authorization:` credentials, and `password = …`, `token: …` assignments (the word stays, the value goes). The patterns are specific to credential shapes, so words like "token expiry", commit hashes and issue keys are untouched. This is a safety net, not a scanner: a secret in an unusual shape is stored.
+
+**Erasing a person** (the privacy tools) removes what Git knew about them: the author on code objects (their own and those of any provider account linked to them) becomes "Deleted user", their linked accounts are removed, the commands they ran are detached from them, and with "scrub mentions" their name and address are replaced in stored titles. The personal-data export includes their linked accounts, code activity and commands.

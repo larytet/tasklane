@@ -561,3 +561,113 @@ func TestGIT03_KeysSeparatedByOneSpaceAllLinkAndLongerWordsStillDoNot(t *testing
 		t.Fatal("a key in punctuation did not link")
 	}
 }
+
+// ---------- GIT-17: data minimization ----------
+
+func gitDump(t *testing.T, r *gitRig) string {
+	rows, err := r.e.Store.Pool.Query(ctx, `SELECT row_to_json(x)::text FROM (SELECT * FROM git_object) x UNION ALL SELECT row_to_json(y)::text FROM (SELECT * FROM git_link) y
+		UNION ALL SELECT row_to_json(z)::text FROM (SELECT id,delivery_id,event,encode(payload,'escape') AS payload,error FROM git_inbox) z`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var b strings.Builder
+	for rows.Next() {
+		var s string
+		rows.Scan(&s)
+		b.WriteString(s + "\n")
+	}
+	return b.String()
+}
+
+func TestGIT17_OnlyTheDocumentedFieldsAreStoredAndSecretsNeverAre(t *testing.T) {
+	r := newGit(t, "github")
+	e := r.e
+	is := e.Issue("minimal", "")
+	tok := "ghp_" + strings.Repeat("Q1w2E3", 7)
+	long := is.Key + " " + strings.Repeat("a long subject ", 60)
+	r.push(t, "main", "99999999",
+		gitmock.GHCommitBy("c0c0c0c0", is.Key+" deploy with token "+tok+"\n\nBODYMARKER-1 the body has details, and password = hunter2hunter2", "octo", "octo@example.com", t0),
+		gitmock.GHCommitBy("c1c1c1c1", long+"\n\nBODYMARKER-2", "octo", "octo@example.com", t0))
+	r.pr(t, 7, is.Key+" rotate "+tok+" and password: pa55w0rd-long", "BODYMARKER-3 the pull request description", "open", false, t0)
+	dump := gitDump(t, r)
+	// only the documented fields: no body of a commit or a pull request, no payload, no secret
+	for _, leak := range []string{"BODYMARKER", "hunter2hunter2", "pa55w0rd-long", tok, "the pull request description", "has details"} {
+		if strings.Contains(dump, leak) {
+			t.Fatalf("%q was stored:\n%s", leak, dump)
+		}
+	}
+	var title string
+	e.Store.Pool.QueryRow(ctx, `SELECT title FROM git_object WHERE ext_id='c0c0c0c0'`).Scan(&title)
+	if title != is.Key+" deploy with token [redacted]" {
+		t.Fatalf("%q", title)
+	}
+	e.Store.Pool.QueryRow(ctx, `SELECT title FROM git_object WHERE kind='pr' AND ext_id='7'`).Scan(&title)
+	if !strings.Contains(title, "[redacted]") || strings.Contains(title, "pa55") {
+		t.Fatalf("%q", title)
+	}
+	// the key in a redacted title still links, and a long subject is cut
+	if d := dev(t, e, e.Alice, is.Key); len(d.PRs) != 1 || len(d.Commits) != 2 {
+		t.Fatalf("%+v", d)
+	}
+	var n int
+	e.Store.Pool.QueryRow(ctx, `SELECT max(length(title)) FROM git_object WHERE kind='commit'`).Scan(&n)
+	if n != 300 {
+		t.Fatalf("a commit subject of %d characters was stored", n)
+	}
+	// the delivery's payload (which held the bodies and file lists) is gone once applied
+	var left int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM git_inbox WHERE length(payload)>0`).Scan(&left)
+	if left != 0 {
+		t.Fatalf("%d payloads kept", left)
+	}
+}
+
+func TestGIT17_ErasingAPersonRemovesWhatGitKnewAboutThem(t *testing.T) {
+	r := newCodeRig(t)
+	e := r.e
+	is := e.Issue("who wrote it", "")
+	r.smart(t, "any")
+	r.link(t, "bobby-gh", e.Bob)
+	r.push(t, "main", "ee00ee00", gitmock.GHCommitBy("ee00ee00", is.Key+" #comment Bob R. wrote this", "bobby-gh", "bob@example.com", t0))
+	r.pr(t, 40, is.Key+" a change by Bob R.", "", "open", false, t0)
+	e.Store.Pool.Exec(ctx, `UPDATE git_object SET author='bobby-gh' WHERE kind='pr'`)
+	exp, err := e.Svc.ExportPersonalData(ctx, e.Admin, e.Bob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acc, _ := exp["git_accounts"].([]map[string]any); len(acc) != 1 {
+		t.Fatalf("the export lacks the linked account: %v", exp["git_accounts"])
+	}
+	if act, _ := exp["git_activity"].([]map[string]any); len(act) == 0 {
+		t.Fatalf("the export lacks the code activity: %v", exp["git_activity"])
+	}
+	if cmds, _ := exp["git_commands"].([]map[string]any); len(cmds) == 0 {
+		t.Fatalf("the export lacks the commands they ran: %v", exp["git_commands"])
+	}
+	res, err := e.Svc.ErasePerson(ctx, e.Admin, e.Bob.ID, domain.EraseOpts{ScrubMentions: true})
+	if err != nil || !res.Erased {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res.Counts["git_authors_erased"] == 0 || res.Counts["git_accounts_unlinked"] != 1 || res.Counts["git_commands_detached"] == 0 {
+		t.Fatalf("%v", res.Counts)
+	}
+	dump := gitDump(t, r)
+	for _, trace := range []string{"bobby-gh", "bob@example.com", "Bob R."} {
+		if strings.Contains(dump, trace) {
+			t.Fatalf("%q remains in the Git tables:\n%s", trace, dump)
+		}
+	}
+	var left int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM git_identity WHERE login='bobby-gh'`).Scan(&left)
+	var attributed int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM git_smart_run WHERE user_id IS NOT NULL AND issue_key=$1`, is.Key).Scan(&attributed)
+	if left != 0 || attributed != 0 {
+		t.Fatalf("%d accounts, %d attributed commands", left, attributed)
+	}
+	// the work stays: the pull request and the commit are still on the issue, now by a deleted user
+	d := dev(t, e, e.Alice, is.Key)
+	if len(d.PRs) != 1 || len(d.Commits) != 1 || d.PRs[0].Author != "Deleted user" {
+		t.Fatalf("%+v", d)
+	}
+}

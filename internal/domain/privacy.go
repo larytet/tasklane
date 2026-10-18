@@ -76,6 +76,9 @@ func (s *Service) ExportPersonalData(ctx context.Context, a Actor, userID string
 		{"api_tokens", `SELECT name, created_at, expires_at, revoked_at, last_used_at FROM api_token WHERE user_id::text=$1`},
 		{"connected_apps", `SELECT c.name AS client, g.scopes, g.created_at, g.revoked_at FROM oauth_grant g JOIN oauth_client c ON c.id=g.client_id WHERE g.user_id::text=$1`},
 		{"mail_sent_to_them", `SELECT subject, kind, status, created_at FROM mail_message WHERE recipient_id::text=$1 ORDER BY id`},
+		{"git_accounts", `SELECT provider, login, created_at FROM git_identity WHERE user_id::text=$1 ORDER BY id`},
+		{"git_activity", `SELECT o.kind, r.full_name AS repo, o.title, o.state, o.provider_at FROM git_object o JOIN git_repo r ON r.id=o.repo_id WHERE o.author_user::text=$1 ORDER BY o.provider_at`},
+		{"git_commands", `SELECT issue_key, command, outcome, reason, at FROM git_smart_run WHERE user_id::text=$1 ORDER BY id`},
 		{"audit", `SELECT action, target, detail, at FROM audit_event WHERE actor_id::text=$1 ORDER BY id`},
 	} {
 		if err := list(q.key, q.sql, 0); err != nil {
@@ -208,6 +211,7 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 					{"history_scrubbed", `UPDATE issue_history SET before=regexp_replace(before, $2, '[deleted user]', 'gi'), after=regexp_replace(after, $2, '[deleted user]', 'gi') WHERE position(lower($1) in lower(COALESCE(before,'')||' '||COALESCE(after,'')))>0`},
 					{"notifications_scrubbed", `UPDATE notification SET what=regexp_replace(what, $2, '[deleted user]', 'gi'), body=regexp_replace(body, $2, '[deleted user]', 'gi') WHERE position(lower($1) in lower(what||' '||body))>0`},
 					{"events_scrubbed", `UPDATE outbox SET payload=regexp_replace(payload::text, $2, 'Deleted user', 'gi')::jsonb WHERE position(lower($1) in lower(payload::text))>0`},
+					{"git_titles_scrubbed", `UPDATE git_object SET title=regexp_replace(title, $2, '[deleted user]', 'gi') WHERE position(lower($1) in lower(title))>0`},
 				} {
 					if err := exec(q.count, q.sql, nd.plain, nd.pattern); err != nil {
 						return err
@@ -221,6 +225,21 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 			{"versions_relabelled", `UPDATE text_version SET actor_label=$2 WHERE actor_id::text=$1`},
 		} {
 			if err := exec(q.count, q.sql, userID, erasedName); err != nil {
+				return err
+			}
+		}
+		// what the Git integration kept about them: the author on code objects (by the person, or by an account linked to them), the
+		// linked accounts, and who ran which command
+		if err := exec("git_authors_erased", `UPDATE git_object o SET author=$2, author_user=NULL WHERE o.author_user::text=$1 OR EXISTS (SELECT 1 FROM git_identity g JOIN git_repo r ON r.id=o.repo_id JOIN git_connection c ON c.id=r.connection_id
+			WHERE g.user_id::text=$1 AND g.provider=c.provider AND lower(o.author)=g.login)`, userID, erasedName); err != nil {
+			return err
+		}
+		for _, q := range []struct{ count, sql string }{
+			{"git_accounts_unlinked", `DELETE FROM git_identity WHERE user_id::text=$1`},
+			{"git_commands_detached", `UPDATE git_smart_run SET user_id=NULL WHERE user_id::text=$1`},
+			{"git_writes_detached", `UPDATE git_write_log SET user_id=NULL WHERE user_id::text=$1`},
+		} {
+			if err := exec(q.count, q.sql, userID); err != nil {
 				return err
 			}
 		}
