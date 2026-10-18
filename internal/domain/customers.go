@@ -39,6 +39,7 @@ type Customer struct {
 	Timezone string `json:"timezone,omitempty"`
 	Org      string `json:"organization,omitempty"` // the customer organization (company), when linked
 	HasPass  bool   `json:"has_password"`
+	OrgID    string `json:"-"` // the organization the customer belongs to
 }
 
 type PortalInfo struct {
@@ -257,7 +258,7 @@ func (s *Service) customerRow(ctx context.Context, q querier, where string, args
 	var c Customer
 	var pass *string
 	var blocked bool
-	err := q.QueryRow(ctx, `SELECT c.id::text,c.email,c.name,c.language,c.timezone,COALESCE(o.name,''),c.password_hash,c.blocked FROM customer c LEFT JOIN customer_org o ON o.id=c.customer_org_id WHERE `+where, args...).Scan(&c.ID, &c.Email, &c.Name, &c.Language, &c.Timezone, &c.Org, &pass, &blocked)
+	err := q.QueryRow(ctx, `SELECT c.id::text,c.email,c.name,c.language,c.timezone,COALESCE(o.name,''),c.password_hash,c.blocked,c.org_id::text FROM customer c LEFT JOIN customer_org o ON o.id=c.customer_org_id WHERE `+where, args...).Scan(&c.ID, &c.Email, &c.Name, &c.Language, &c.Timezone, &c.Org, &pass, &blocked, &c.OrgID)
 	if err == pgx.ErrNoRows {
 		return c, false, ErrNotFound
 	}
@@ -416,6 +417,7 @@ func (s *Service) CustomerByToken(ctx context.Context, token string) (Customer, 
 		return Customer{}, "", ErrForbidden
 	}
 	c, _, err := s.customerRow(ctx, s.DB, `c.id::text=$1`, id)
+	c.OrgID = org
 	return c, org, err
 }
 

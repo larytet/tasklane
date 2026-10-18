@@ -1,4 +1,4 @@
-# Customer portal: identity and sign-in
+# Customer portal: sign-in, request types and requests
 
 The portal is a small page at `/portal/PROJECT` for people outside the organization who raise and follow requests. It is its own page with its own few lines of script, none of the staff app. **Customers are not staff**: a separate identity, separate sessions, never a licensed seat.
 
@@ -34,6 +34,22 @@ A customer session is a different table and a different cookie (`tl_portal`) fro
 - A block list and an allow list, and **Block** for one customer (ends their sessions).
 - State-changing requests need the `X-Requested-With` header, so another site cannot start a sign-in in someone's browser.
 
+## Request types
+
+A **request type** is a form the portal offers (project administrators manage them on the *Customer portal settings* page, reached from Releases, or with `/api/v1/projects/{key}/request-types`): a name, a description and help text for the customer, the **issue type** the request becomes (not a subtask), and the **custom fields** it asks for (text, long text, number, choice, link, date, checkbox; each with a label, help and whether it is required). A form can be hidden without deleting it. Deleting a form leaves the requests already raised through it.
+
+## Requests
+
+A customer picks a form, fills it in and sends it. The request is an **ordinary issue** in the project (so staff work it with the board, workflow, automation and search they already have), raised by a hidden per-organization account that never appears in lists of people and cannot sign in; the customer is attached to it. Staff see a banner on the ticket (who raised it, through which form, their address) and, when replying, a line that says **who will read it**: a reply that is not marked *Internal* is shown to the customer in the portal and an internal one is not.
+
+Only the form's own fields can be set, whatever a client sends. At most 10 requests and 60 comments an hour per customer; a hidden field (honeypot) drops a request.
+
+## What a customer sees
+
+Their own requests, and for each: the summary, the description they wrote, the status name, the form's fields with the labels they saw, the comments that were not marked internal (as **Support**, never a staff member's name), and their own comments (as **You**). Not the assignee or reporter, internal comments and fields, work logs, approvals, links, development data, history, or anyone else's requests. A request of another customer, an issue no customer raised, a deleted request and a key that does not exist all answer the same: not found. A customer of another organization cannot use the portal at all.
+
+A customer's comment goes into the issue's thread (labelled *customer*) and tells the people who watch the issue, like any comment.
+
 ## Not built yet
 
-This milestone is the identity only. Still to build: request types and forms, requests and customer-visible comments (and so the visibility rules between customers), queues, canned responses, SLA clocks, customer organizations that share requests, customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.
+Still to build: attachments on requests, queues, canned responses, SLA clocks, customer organizations that share requests, customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.

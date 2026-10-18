@@ -114,6 +114,16 @@ func (f *fixture) approval() string {
 	return ap.ID
 }
 
+func (f *fixture) requestType() string {
+	f.n++
+	n := fmt.Sprint("RT ", f.n)
+	rt, err := f.e.Svc.CreateRequestType(testutil.Ctx(), f.e.Admin, "ABC", domain.RequestTypeIn{Name: &n})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return rt.ID
+}
+
 func (f *fixture) versionName() string {
 	f.n++
 	n := fmt.Sprint("n", f.n)
@@ -625,14 +635,18 @@ func rows() []row {
 			return J("POST", "/api/v1/approvals/"+f.approval()+"/cancel", nil)
 		}},
 		{"GET /api/v1/portal/{key}", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC", nil) }}, // the portal is off until its administrator turns it on
-		{"POST /api/v1/portal/{key}/code", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return withCSRF(J("POST", "/api/v1/portal/ABC/code", map[string]any{"email": "c@example.com"})) }},
+		{"POST /api/v1/portal/{key}/code", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return withCSRF(J("POST", "/api/v1/portal/ABC/code", map[string]any{"email": "c@example.com"}))
+		}},
 		{"POST /api/v1/portal/{key}/verify", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
 			return withCSRF(J("POST", "/api/v1/portal/ABC/verify", map[string]any{"email": "c@example.com", "code": "123456"}))
 		}},
 		{"POST /api/v1/portal/{key}/login", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
 			return withCSRF(J("POST", "/api/v1/portal/ABC/login", map[string]any{"email": "c@example.com", "password": "x"}))
 		}},
-		{"POST /api/v1/portal/link", exp{anon: codes(400), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req { return withCSRF(J("POST", "/api/v1/portal/link", map[string]any{"token": "nope"})) }},
+		{"POST /api/v1/portal/link", exp{anon: codes(400), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req {
+			return withCSRF(J("POST", "/api/v1/portal/link", map[string]any{"token": "nope"}))
+		}},
 		// a staff session or token opens nothing of the portal, whoever holds it
 		{"GET /api/v1/portal/me", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/portal/me", nil) }},
 		{"PUT /api/v1/portal/me", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("PUT", "/api/v1/portal/me", map[string]any{"name": "x"}) }},
@@ -644,6 +658,25 @@ func rows() []row {
 		}},
 		{"POST /api/v1/projects/{key}/portal/block", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
 			return J("POST", "/api/v1/projects/ABC/portal/block", map[string]any{"email": "nobody@example.com", "block": true})
+		}},
+		{"GET /api/v1/projects/{key}/request-types", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/request-types", nil) }},
+		{"POST /api/v1/projects/{key}/request-types", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/projects/ABC/request-types", map[string]any{"name": fmt.Sprint("Form ", f.n)})
+		}},
+		{"PUT /api/v1/request-types/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/request-types/"+f.requestType(), map[string]any{"help_text": "x"})
+		}},
+		{"DELETE /api/v1/request-types/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/request-types/"+f.requestType(), nil)
+		}},
+		// a staff session or token opens nothing of a customer's requests
+		{"GET /api/v1/portal/{key}/request-types", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/request-types", nil) }},
+		{"GET /api/v1/portal/{key}/requests", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/requests", nil) }},
+		{"POST /api/v1/portal/{key}/requests", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("POST", "/api/v1/portal/ABC/requests", map[string]any{"summary": "x"}) }},
+		{"GET /api/v1/portal/{key}/requests/{issue}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/requests/"+f.issue(), nil) }},
+		{"POST /api/v1/portal/{key}/requests/{issue}/comments", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("POST", "/api/v1/portal/ABC/requests/"+f.issue()+"/comments", map[string]any{"body": "x"})
 		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {

@@ -670,12 +670,12 @@ containers) nightly for the Helm chart.
 |---|---|---|
 | PORT-01 | **M5.6, code and link, optional password: built; OIDC and SAML open.** Customer authentication: one-time code and magic link (expiry, reuse, brute force limits), optional password, customer OIDC and SAML | Works as specified; throttled; codes single-use |
 | PORT-02 | **M5.6: built** (domain, the matrix, e2e). Session isolation: customer session against staff UI, REST and MCP; staff session against the portal | Neither crosses; separate cookies and lifetimes |
-| PORT-03 | Visibility: own requests, shared requests, customer organization; internal fields, comments, approvals, worklogs and Git data; key and id guessing | Only customer-visible data; enumeration and direct-object attacks fail |
+| PORT-03 | **M5.7: own requests, hidden fields and comments, key guessing and other-organization: built; shared requests and customer organizations open.** Visibility: own requests, shared requests, customer organization; internal fields, comments, approvals, worklogs and Git data; key and id guessing | Only customer-visible data; enumeration and direct-object attacks fail |
 | PORT-04 | Seats: customers in staff counts and hosted metering | Never counted as staff seats; active customers metered separately where configured |
 | PORT-05 | **M5.6: limits, honeypot, block and allow lists built; CAPTCHA and attachment rules open.** Abuse controls: email verification, rate limits, CAPTCHA, honeypot, block and allow lists, attachment rules | Spam and floods stopped; legitimate use unaffected |
 | PORT-06 | Promotion to staff; customer GDPR export and erase | History kept on promotion; export and erase complete |
 | PORT-07 | Notifications and email replies for customers | Customer-visible content only plus portal link; replies follow MAIL rules |
-| PORT-08 | Request types, forms and SLA clocks (start, pause, resume, breach, calendar-aware) with the fake clock | Clocks correct across pauses, calendars and holidays |
+| PORT-08 | **M5.7: request types and forms built (REQ01..03); SLA clocks open.** Request types, forms and SLA clocks (start, pause, resume, breach, calendar-aware) with the fake clock | Clocks correct across pauses, calendars and holidays |
 
 ### 5.17 Real Jira verification (occasional, before a major release)
 

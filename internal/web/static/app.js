@@ -425,6 +425,7 @@
         root.append(h('div', { class: 'banner info', role: 'status' }, 'Archived ' + L.relTime(is.archived) + ' and read-only. ',
           h('button', { class: 'btn', onclick: async () => { const r = await api('DELETE', '/api/v1/issues/' + key + '/archive'); if (r.status === 200) { toast('Restored from the archive.'); await reloadAll(); } else toast((r.data && r.data.error) || 'Could not restore'); } }, 'Unarchive')));
       }
+      if (v.request) root.append(h('div', { class: 'banner info', role: 'status' }, 'Raised through the portal by ' + (v.request.customer || v.request.email) + ' (' + v.request.email + ')' + (v.request.request_type ? ' · ' + v.request.request_type : '') + '. A comment that is not internal is visible to the customer.'));
       root.append(subjectEl(is));
       root.append(chipLine(is));
       root.append(descriptionEl(is));
@@ -922,7 +923,11 @@
       const ld = localDraft(key, 'comment'); if (ld) ta.value = ld.body;
       let t; ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => setLocalDraft(key, 'comment', ta.value ? { body: ta.value, base_seq: 0, at: new Date().toISOString() } : null), 2000); });
       const internal = h('input', { type: 'checkbox', id: 'int' });
-      return h('div', { class: 'reply' }, ta, h('div', { class: 'chips' }, h('label', {}, internal, ' Internal'), h('span', { class: 'grow' }),
+      // on a request raised through the portal, say who will read the reply before it is sent
+      const audience = h('span', { class: 'muted', role: 'status', id: 'reply-audience' });
+      const say = () => { audience.textContent = v.request ? (internal.checked ? 'Internal note: only staff see it.' : 'The customer (' + v.request.email + ') will see this reply in the portal.') : ''; };
+      internal.addEventListener('change', say); say();
+      return h('div', { class: 'reply' }, ta, h('div', { class: 'chips' }, h('label', {}, internal, ' Internal'), audience, h('span', { class: 'grow' }),
         h('button', { class: 'btn primary', onclick: async () => {
           if (!ta.value.trim()) return;
           const r = await api('POST', '/api/v1/issues/' + key + '/comments', { body: ta.value, internal: internal.checked });

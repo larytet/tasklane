@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"github.com/jackc/pgx/v5"
+	"sort"
 	"strings"
 	"time"
 )
@@ -30,7 +31,29 @@ func (s *Service) listComments(ctx context.Context, issueID string, internalToo 
 		rows.Scan(&c.ID, &c.Author.ID, &c.Author.Name, &c.Author.Email, &c.Body, &c.Internal, &c.Created, &c.Edited, &c.ViaEmail)
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// a customer's own comments on a request they raised through the portal, in the same thread
+	cr, err := s.DB.Query(ctx, `SELECT cc.id::text,cc.customer_id::text,COALESCE(NULLIF(c.name,''),c.email),c.email,cc.body,cc.created_at FROM customer_comment cc JOIN customer c ON c.id=cc.customer_id WHERE cc.issue_id=$1 ORDER BY cc.created_at`, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer cr.Close()
+	added := false
+	for cr.Next() {
+		var c Comment
+		cr.Scan(&c.ID, &c.Author.ID, &c.Author.Name, &c.Author.Email, &c.Body, &c.Created)
+		c.Author.Name += " (customer)"
+		c.Author.ID = "customer:" + c.Author.ID
+		out = append(out, c)
+		added = true
+	}
+	if added {
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
+	}
+	return out, cr.Err()
 }
 
 // AddComment never conflicts with other comments (SPEC 4.5).

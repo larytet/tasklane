@@ -144,7 +144,7 @@ func (s *Service) CreateAPIToken(ctx context.Context, userID, name string) (stri
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.DB.Query(ctx, `SELECT id,email,name,kind,is_admin FROM app_user WHERE active ORDER BY name`)
+	rows, err := s.DB.Query(ctx, `SELECT id,email,name,kind,is_admin FROM app_user WHERE active AND kind<>'portal' ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *Service) ListUsersFor(ctx context.Context, a Actor) ([]User, error) {
 	if a.Admin {
 		return s.ListUsers(ctx)
 	}
-	rows, err := s.DB.Query(ctx, `SELECT id,email,name,kind,is_admin FROM app_user WHERE active AND org_id::text=$1 ORDER BY name`, a.OrgID())
+	rows, err := s.DB.Query(ctx, `SELECT id,email,name,kind,is_admin FROM app_user WHERE active AND kind<>'portal' AND org_id::text=$1 ORDER BY name`, a.OrgID())
 	if err != nil {
 		return nil, err
 	}

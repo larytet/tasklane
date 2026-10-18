@@ -177,4 +177,67 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 			s.reply(w, ok, s.Svc.BlockCustomer(r.Context(), actorOf(r), r.PathValue("key"), in.Email, in.Block))
 		}
 	}))
+	// request types: staff manage the forms
+	s.handle(mux, "GET /api/v1/projects/{key}/request-types", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListRequestTypes(r.Context(), actorOf(r), r.PathValue("key"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/projects/{key}/request-types", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.RequestTypeIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.CreateRequestType(r.Context(), actorOf(r), r.PathValue("key"), in)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "PUT /api/v1/request-types/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.RequestTypeIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.UpdateRequestType(r.Context(), actorOf(r), r.PathValue("id"), in)
+			s.reply(w, v, err)
+		}
+	}))
+	s.handle(mux, "DELETE /api/v1/request-types/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, ok, s.Svc.DeleteRequestType(r.Context(), actorOf(r), r.PathValue("id")))
+	}))
+	// requests: a customer's own
+	s.handle(mux, "GET /api/v1/portal/{key}/request-types", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.PortalRequestTypes(r.Context(), customerOf(r), r.PathValue("key"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/portal/{key}/requests", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.PortalMyRequests(r.Context(), customerOf(r), r.PathValue("key"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/portal/{key}/requests", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.PortalRequestIn
+		if !s.decode(w, r, &in) {
+			return
+		}
+		v, err := s.Svc.PortalCreateRequest(r.Context(), customerOf(r), r.PathValue("key"), in, s.clientMeta(r))
+		var locked *domain.LockedError
+		if errors.As(err, &locked) {
+			s.portalFailed(w, err)
+			return
+		}
+		s.replyStatus(w, 201, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/portal/{key}/requests/{issue}", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.PortalGetRequest(r.Context(), customerOf(r), r.PathValue("key"), r.PathValue("issue"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/portal/{key}/requests/{issue}/comments", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Body string `json:"body"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		v, err := s.Svc.PortalComment(r.Context(), customerOf(r), r.PathValue("key"), r.PathValue("issue"), in.Body)
+		var locked *domain.LockedError
+		if errors.As(err, &locked) {
+			s.portalFailed(w, err)
+			return
+		}
+		s.replyStatus(w, 201, v, err)
+	}))
 }

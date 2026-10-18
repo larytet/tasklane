@@ -102,7 +102,7 @@ type recipient struct{ id, name, email string }
 
 func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int, error) {
 	switch e.Type {
-	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved", "approval.requested", "approval.decided", "approval.reminder":
+	case "issue.created", "issue.transitioned", "comment.added", "issue.updated", "issue.text_saved", "approval.requested", "approval.decided", "approval.reminder", "customer.commented":
 	default:
 		return 0, nil
 	}
@@ -170,6 +170,10 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		for _, m := range s.mentions(ctx, tx, c) {
 			mentioned[m.id] = m
 		}
+	case "customer.commented":
+		evName, baseKind = "comment.added", "comment"
+		what = e.Payload.Actor + " commented"
+		body = e.Payload.Text
 	case "approval.requested", "approval.decided", "approval.reminder":
 		evName, baseKind = e.Type, "approval"
 		switch e.Type {
