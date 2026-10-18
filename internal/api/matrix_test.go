@@ -540,6 +540,14 @@ func rows() []row {
 		{"PUT /api/v1/admin/security-policy", adminer, func(f *fixture) req {
 			return J("PUT", "/api/v1/admin/security-policy", map[string]any{"require_second_factor": false, "ip_allowlist": []string{}, "session_max_hours": 0})
 		}},
+		{"GET /api/v1/roles", exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/roles", nil) }},
+		{"POST /api/v1/roles", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/roles", map[string]any{"name": "Matrix role", "base": "viewer", "grants": []string{"comment"}})
+		}},
+		{"PUT /api/v1/roles/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/roles/00000000-0000-0000-0000-000000000001", map[string]any{"name": "x", "base": "viewer"})
+		}},
+		{"DELETE /api/v1/roles/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/roles/00000000-0000-0000-0000-000000000001", nil) }},
 		{"POST /api/v1/login/passkey", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
 			return J("POST", "/api/v1/login/passkey", map[string]any{"mfa_token": "nope", "id": "AA", "client_data_json": "AA", "authenticator_data": "AA", "signature": "AA"})
 		}},

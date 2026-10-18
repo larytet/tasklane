@@ -540,7 +540,7 @@ func (s *Service) syncJiraPermissions(ctx context.Context, cl *jira.Client, pid,
 		for id := range ids {
 			list = append(list, id)
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM project_member WHERE project_id::text=$1 AND role='viewer' AND NOT (user_id::text = ANY($2))`, pid, list); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM project_member WHERE project_id::text=$1 AND role='viewer' AND custom_role_id IS NULL AND NOT (user_id::text = ANY($2))`, pid, list); err != nil {
 			return err
 		}
 		if len(unmapped) > 0 {

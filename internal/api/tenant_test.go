@@ -90,6 +90,8 @@ func snapshot(t *testing.T, e *testutil.Env) map[string]string {
 		switch n { // the tables that hold organization B's own rows are compared on organization A's part only
 		case "project":
 			q = `SELECT coalesce(string_agg(to_jsonb(x)::text,'|' ORDER BY to_jsonb(x)::text),'') FROM project x WHERE org_id::text='` + domain.DefaultOrg + `'`
+		case "custom_role": // each organization has its own roles
+			q = `SELECT coalesce(string_agg(to_jsonb(x)::text,'|' ORDER BY to_jsonb(x)::text),'') FROM custom_role x WHERE org_id::text='` + domain.DefaultOrg + `'`
 		case "app_user":
 			q = `SELECT coalesce(string_agg(to_jsonb(x)::text,'|' ORDER BY to_jsonb(x)::text),'') FROM app_user x WHERE org_id::text='` + domain.DefaultOrg + `'`
 		case "project_member":

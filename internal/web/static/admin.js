@@ -15,6 +15,7 @@
       h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
       h('a', { href: '#/admin/email', class: 'tab', 'aria-current': active === 'email' ? 'page' : null }, 'Email'),
       h('a', { href: '#/admin/git', class: 'tab', 'aria-current': active === 'git' ? 'page' : null }, 'Git'),
+      h('a', { href: '#/admin/roles', class: 'tab', 'aria-current': active === 'roles' ? 'page' : null }, 'Roles'),
       h('a', { href: '#/admin/security', class: 'tab', 'aria-current': active === 'security' ? 'page' : null }, 'Security'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
   }
@@ -617,6 +618,42 @@
       } }, 'Save policy')), msg));
   }
 
+
+  // Roles: custom project roles (a base, plus extra permissions it grants).
+  async function rolesView() {
+    const app = document.getElementById('app'); clear(app);
+    const PERMS = [['create', 'Create issues'], ['comment', 'Comment'], ['transition', 'Move issues through the workflow'], ['assign', 'Assign issues'], ['manage_sprints', 'Manage sprints']];
+    const list = h('div', { class: 'list', role: 'list', 'aria-label': 'Roles' });
+    const msg = h('div', { class: 'err', role: 'alert' });
+    const form = (init, onSave, label) => {
+      const name = h('input', { type: 'text', 'aria-label': 'Role name', placeholder: 'Reporter', value: init.name || '', maxlength: 60 });
+      const base = h('select', { 'aria-label': 'Base role' }, h('option', { value: 'viewer' }, 'Viewer: reads'), h('option', { value: 'member' }, 'Member: reads and works'));
+      base.value = init.base || 'viewer';
+      const boxes = PERMS.map(([k, t]) => { const c = h('input', { type: 'checkbox', 'aria-label': 'Grants: ' + t, checked: (init.grants || []).includes(k) }); return [k, c, h('label', { style: 'margin-right:12px' }, c, ' ' + t)]; });
+      const out = h('div', { class: 'chips', style: 'margin:8px 0' }, name, base, ...boxes.map(b => b[2]),
+        h('button', { class: 'btn' + (init.id ? '' : ' primary'), onclick: async () => { msg.textContent = ''; const err = await onSave({ name: name.value, base: base.value, grants: boxes.filter(b => b[1].checked).map(b => b[0]), description: '' }); if (err) msg.textContent = err; } }, label));
+      return out;
+    };
+    async function load() {
+      clear(list);
+      const r = await api('GET', '/api/v1/roles');
+      if (r.status !== 200) { list.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      if (!r.data.length) list.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No custom role yet.')));
+      for (const x of r.data) {
+        const gl = x.grants.length ? x.grants.join(', ') : 'nothing beyond its base';
+        const row = h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, x.name), ' ', h('span', { class: 'muted' }, 'a ' + x.base + ' who may also: ' + gl + ' · given to ' + x.in_use)),
+          h('button', { class: 'btn ghost', 'aria-label': 'Edit ' + x.name, onclick: () => { row.replaceWith(h('div', { class: 'row', role: 'listitem' }, form(x, async v => { const d = await api('PUT', '/api/v1/roles/' + x.id, v); if (d.status === 200) { load(); return ''; } return errText(d); }, 'Save'))); } }, 'Edit'),
+          h('button', { class: 'btn ghost', 'aria-label': 'Delete ' + x.name, onclick: async () => { const d = await api('DELETE', '/api/v1/roles/' + x.id); if (d.status === 200) load(); else msg.textContent = errText(d); } }, 'Delete'));
+        list.append(row);
+      }
+    }
+    app.append(topbar(), adminTabs('roles'), h('div', { class: 'page' }, h('h2', {}, 'Roles'),
+      h('p', { class: 'muted' }, 'A role is a base (a viewer reads; a member also works) plus the extra things it may do. Give it to a person or a group in a project by its name. People with several roles have all their permissions, and a change here applies to everyone who has the role at once. A role that is still given to someone cannot be deleted.'),
+      list, h('h3', { style: 'margin-top:16px' }, 'New role'), form({}, async v => { const d = await api('POST', '/api/v1/roles', v); if (d.status === 201) { load(); return ''; } return errText(d); }, 'Add role'), msg));
+    await load();
+  }
+
+  A.EXT.routes.push({ re: /^#\/admin\/roles\/?$/, run: () => rolesView() });
   A.EXT.routes.push({ re: /^#\/admin\/security\/?$/, run: () => securityView() });
   A.EXT.routes.push({ re: /^#\/admin\/git\/?$/, run: () => gitView() });
   A.EXT.routes.push({ re: /^#\/admin\/email\/?$/, run: () => emailView() });

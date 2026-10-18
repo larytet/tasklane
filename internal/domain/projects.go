@@ -95,9 +95,6 @@ func (s *Service) AddMember(ctx context.Context, a Actor, projectKey, userID, ro
 		return perr
 	}
 	defer endWrite()
-	if role != "viewer" && role != "member" && role != "admin" {
-		return invalid("role must be viewer, member or admin")
-	}
 	pid, err := s.projectID(ctx, projectKey)
 	if err != nil {
 		return err
@@ -114,7 +111,11 @@ func (s *Service) AddMember(ctx context.Context, a Actor, projectKey, userID, ro
 	if s.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM app_user u JOIN project p ON p.org_id=u.org_id WHERE u.id::text=$1 AND p.id::text=$2)`, userID, pid).Scan(&ok); !ok {
 		return invalid("no such user in this organization")
 	}
-	_, err = s.DB.Exec(ctx, `INSERT INTO project_member(project_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT (project_id,user_id) DO UPDATE SET role=$3`, pid, userID, role)
+	base, custom, err := s.resolveRole(ctx, s.DB, pid, role)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(ctx, `INSERT INTO project_member(project_id,user_id,role,custom_role_id) VALUES($1,$2,$3,$4) ON CONFLICT (project_id,user_id) DO UPDATE SET role=$3, custom_role_id=$4`, pid, userID, base, nilIfEmpty(custom))
 	return err
 }
 
@@ -146,7 +147,7 @@ func (s *Service) role(ctx context.Context, a Actor, projectID string) string {
 func canWrite(role string) bool { return role == "member" || role == "admin" }
 
 // canIn is can for a project named by key.
-func (s *Service) canIn(ctx context.Context, projectKey, role, perm string) bool {
+func (s *Service) canIn(ctx context.Context, a Actor, projectKey, role, perm string) bool {
 	if role == "admin" {
 		return true
 	}
@@ -154,7 +155,7 @@ func (s *Service) canIn(ctx context.Context, projectKey, role, perm string) bool
 	if err != nil {
 		return false
 	}
-	return s.can(ctx, pid, role, perm)
+	return s.can(ctx, a, pid, role, perm)
 }
 
 func (s *Service) ListProjects(ctx context.Context, a Actor) ([]Project, error) {

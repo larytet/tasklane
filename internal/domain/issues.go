@@ -119,7 +119,7 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 	switch r := s.role(ctx, a, pid); {
 	case r == "":
 		return Issue{}, ErrNotFound // a project one cannot see answers like one that does not exist
-	case !s.can(ctx, pid, r, "create"):
+	case !s.can(ctx, a, pid, r, "create"):
 		return Issue{}, ErrForbidden
 	}
 	summary, _ := Sanitize(strings.TrimSpace(in.Summary))
@@ -411,7 +411,10 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	if err != nil {
 		return is, err
 	}
-	if !canWrite(role) {
+	// editing needs write access; the one exception is a person who has the assign permission (a custom role grants it) and is only
+	// changing who the issue is assigned to
+	onlyAssign := ch.Assignee != nil && ch.Priority == nil && ch.Labels == nil && ch.Estimate == nil && !ch.ClearEstimate && len(ch.Custom) == 0
+	if !canWrite(role) && !(onlyAssign && s.canIn(ctx, a, is.Project, role, "assign")) {
 		return is, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, is.Project)
@@ -423,7 +426,7 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	if err != nil {
 		return is, err
 	}
-	if ch.Assignee != nil && !s.canIn(ctx, is.Project, role, "assign") {
+	if ch.Assignee != nil && !s.canIn(ctx, a, is.Project, role, "assign") {
 		return is, ErrForbidden
 	}
 	changed := map[string]string{}
@@ -644,7 +647,7 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 	if err != nil {
 		return is, err
 	}
-	if is.Archived != nil || !s.canIn(ctx, is.Project, role, "transition") {
+	if is.Archived != nil || !s.canIn(ctx, a, is.Project, role, "transition") {
 		return is, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, is.Project)

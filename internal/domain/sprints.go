@@ -173,7 +173,7 @@ func (s *Service) CreateSprint(ctx context.Context, a Actor, boardID string, in 
 	if err != nil {
 		return Sprint{}, err
 	}
-	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
+	if !s.canIn(ctx, a, b.Project, role, "manage_sprints") {
 		return Sprint{}, ErrForbidden
 	}
 	if b.Kind != "scrum" {
@@ -285,7 +285,7 @@ func (s *Service) RecomputeSprint(ctx context.Context, a Actor, sprintID string)
 	if err != nil {
 		return sp, err
 	}
-	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
+	if !s.canIn(ctx, a, b.Project, role, "manage_sprints") {
 		return sp, ErrForbidden
 	}
 	if sp.State == "closed" {
@@ -307,7 +307,7 @@ func (s *Service) UpdateSprint(ctx context.Context, a Actor, sprintID string, na
 	if err != nil {
 		return sp, err
 	}
-	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
+	if !s.canIn(ctx, a, b.Project, role, "manage_sprints") {
 		return sp, ErrForbidden
 	}
 	if sp.State == "closed" {
@@ -339,7 +339,7 @@ func (s *Service) StartSprint(ctx context.Context, a Actor, sprintID string) (Sp
 	if err != nil {
 		return sp, err
 	}
-	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
+	if !s.canIn(ctx, a, b.Project, role, "manage_sprints") {
 		return sp, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, b.Project)
@@ -398,7 +398,7 @@ func (s *Service) CompleteSprint(ctx context.Context, a Actor, sprintID, dest st
 	if err != nil {
 		return res, err
 	}
-	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
+	if !s.canIn(ctx, a, b.Project, role, "manage_sprints") {
 		return res, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, b.Project)

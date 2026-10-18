@@ -167,10 +167,14 @@ func (s *Service) SetProjectGroup(ctx context.Context, a Actor, projectKey, grou
 		}
 		return ErrForbidden
 	}
-	if role != "" && role != "viewer" && role != "member" && role != "admin" {
-		return invalid("a role is viewer, member or admin")
-	}
 	return s.tx(ctx, func(tx pgx.Tx) error {
+		base, custom := role, ""
+		if role != "" {
+			var rerr error
+			if base, custom, rerr = s.resolveRole(ctx, tx, pid, role); rerr != nil {
+				return rerr
+			}
+		}
 		var one int
 		if err := tx.QueryRow(ctx, `SELECT 1 FROM user_group WHERE id::text=$1`, groupID).Scan(&one); err != nil {
 			return invalid("unknown group")
@@ -179,7 +183,7 @@ func (s *Service) SetProjectGroup(ctx context.Context, a Actor, projectKey, grou
 			if _, err := tx.Exec(ctx, `DELETE FROM project_group_role WHERE project_id::text=$1 AND group_id::text=$2`, pid, groupID); err != nil {
 				return err
 			}
-		} else if _, err := tx.Exec(ctx, `INSERT INTO project_group_role(project_id,group_id,role) VALUES($1::uuid,$2::uuid,$3) ON CONFLICT (project_id,group_id) DO UPDATE SET role=EXCLUDED.role`, pid, groupID, role); err != nil {
+		} else if _, err := tx.Exec(ctx, `INSERT INTO project_group_role(project_id,group_id,role,custom_role_id) VALUES($1::uuid,$2::uuid,$3,$4) ON CONFLICT (project_id,group_id) DO UPDATE SET role=EXCLUDED.role, custom_role_id=EXCLUDED.custom_role_id`, pid, groupID, base, nilIfEmpty(custom)); err != nil {
 			return err
 		}
 		return s.audit(ctx, tx, a, "project.group_role", strings.ToUpper(projectKey), map[string]any{"group": groupID, "role": role})
@@ -232,7 +236,7 @@ func rankOfRole(r string) int {
 
 // can reports whether a role may do something in a project: the project's scheme, or the default. An administrator can
 // always do everything, so a scheme can never lock a project out of its own administration.
-func (s *Service) can(ctx context.Context, projectID, role, perm string) bool {
+func (s *Service) can(ctx context.Context, a Actor, projectID, role, perm string) bool {
 	if role == "admin" {
 		return true
 	}
@@ -247,7 +251,16 @@ func (s *Service) can(ctx context.Context, projectID, role, perm string) bool {
 			min = rules[perm]
 		}
 	}
-	return rankOfRole(role) >= rankOfRole(min)
+	if rankOfRole(role) >= rankOfRole(min) {
+		return true
+	}
+	// a custom role may grant what the rank does not
+	for _, g := range s.extraGrants(ctx, a.ID, projectID) {
+		if g == perm {
+			return true
+		}
+	}
+	return false
 }
 
 type PermissionTable struct {

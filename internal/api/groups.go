@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/larytet/tasklane/internal/domain"
+)
 
 func (s *Server) registerGroups(mux *http.ServeMux) {
 	adm := func(next http.HandlerFunc) http.HandlerFunc {
@@ -47,6 +51,26 @@ func (s *Server) registerGroups(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/v1/projects/{key}/groups", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Svc.ProjectGroups(r.Context(), actorOf(r), r.PathValue("key"))
 		s.reply(w, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/roles", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListCustomRoles(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/roles", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.CustomRoleIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.CreateCustomRole(r.Context(), actorOf(r), in)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "PUT /api/v1/roles/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.CustomRoleIn
+		if s.decode(w, r, &in) {
+			s.reply(w, ok, s.Svc.UpdateCustomRole(r.Context(), actorOf(r), r.PathValue("id"), in))
+		}
+	}))
+	s.handle(mux, "DELETE /api/v1/roles/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, ok, s.Svc.DeleteCustomRole(r.Context(), actorOf(r), r.PathValue("id")))
 	}))
 	s.handle(mux, "PUT /api/v1/projects/{key}/groups/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
