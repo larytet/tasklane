@@ -764,6 +764,11 @@ func rows() []row {
 		{"POST /api/v1/admin/customers/{id}/promote", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
 			return J("POST", "/api/v1/admin/customers/"+f.customer()+"/promote", map[string]any{"password": "a long enough one"})
 		}},
+		{"GET /api/v1/import/tools", authed, func(f *fixture) req { return J("GET", "/api/v1/import/tools", nil) }},
+		{"POST /api/v1/import/{tool}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/import/asana", map[string]any{"project": "ABC", "dry_run": true, "data": "Task ID,Name\n" + fmt.Sprint(f.n) + ",A task\n"})
+		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {
 			return J("POST", "/api/v1/dashboards", map[string]any{"name": "Matrix dashboard"})

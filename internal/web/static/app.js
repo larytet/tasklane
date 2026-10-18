@@ -119,7 +119,7 @@
     const go = (label, hash) => h('a', { href: hash, class: 'topmore-item', onclick: () => d.removeAttribute('open') }, label);
     const first = S.projects[0] ? S.projects[0].key : '';
     d.append(h('summary', { class: 'btn ghost' }, 'More'),
-      h('div', { class: 'topmore-list' }, go('Dashboards', '#/dashboards'), go('Releases', '#/releases'), go('Approvals', '#/approvals'), go('Queues', '#/queues'), go('Trash', '#/trash/' + first)));
+      h('div', { class: 'topmore-list' }, go('Dashboards', '#/dashboards'), go('Releases', '#/releases'), go('Approvals', '#/approvals'), go('Queues', '#/queues'), go('Import', '#/import'), go('Trash', '#/trash/' + first)));
     d.addEventListener('keydown', e => { if (e.key === 'Escape') { d.removeAttribute('open'); d.querySelector('summary').focus(); } });
     return d;
   }

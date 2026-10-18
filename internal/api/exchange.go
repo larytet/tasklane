@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -95,6 +96,22 @@ func (s *Server) registerExchange(mux *http.ServeMux) {
 			return
 		}
 		rep, err := s.Svc.ImportCSV(r.Context(), actorOf(r), []byte(in.CSV), in.CSVImportIn)
+		s.reply(w, rep, err)
+	}))
+	// the third-party importers: the tool's own export goes in as the "data" of the request (up to 64 MB); the answer is the usual report
+	s.handle(mux, "GET /api/v1/import/tools", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.json(w, 200, domain.ImportTools())
+	}))
+	s.handle(mux, "POST /api/v1/import/{tool}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			domain.ToolImportIn
+			Data string `json:"data"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<20)).Decode(&in); err != nil {
+			s.fail(w, 400, "bad_request", "invalid JSON body: "+err.Error(), nil)
+			return
+		}
+		rep, err := s.Svc.ImportTool(r.Context(), actorOf(r), r.PathValue("tool"), []byte(in.Data), in.ToolImportIn)
 		s.reply(w, rep, err)
 	}))
 	s.handle(mux, "PUT /api/v1/import/csv/templates/{name}", s.auth(func(w http.ResponseWriter, r *http.Request) {
