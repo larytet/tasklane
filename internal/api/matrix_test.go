@@ -144,6 +144,15 @@ func (f *fixture) canned() string {
 	return v.ID
 }
 
+func (f *fixture) customerOrg() string {
+	f.n++
+	o, err := f.e.Svc.CreateCustomerOrg(testutil.Ctx(), f.e.Admin, "ABC", fmt.Sprint("Org ", f.n))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return o.ID
+}
+
 func (f *fixture) versionName() string {
 	f.n++
 	n := fmt.Sprint("n", f.n)
@@ -718,6 +727,20 @@ func rows() []row {
 		}},
 		{"DELETE /api/v1/canned-responses/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
 			return J("DELETE", "/api/v1/canned-responses/"+f.canned(), nil)
+		}},
+		{"POST /api/v1/portal/{key}/requests/{issue}/share", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("POST", "/api/v1/portal/ABC/requests/"+f.issue()+"/share", map[string]any{"organization": true})
+		}},
+		{"GET /api/v1/projects/{key}/portal/customer-orgs", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/portal/customer-orgs", nil) }},
+		{"POST /api/v1/projects/{key}/portal/customer-orgs", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/projects/ABC/portal/customer-orgs", map[string]any{"name": fmt.Sprint("Company ", f.n)})
+		}},
+		{"DELETE /api/v1/projects/{key}/portal/customer-orgs/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/projects/ABC/portal/customer-orgs/"+f.customerOrg(), nil)
+		}},
+		{"PUT /api/v1/projects/{key}/portal/customer-orgs/{id}/members", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/portal/customer-orgs/"+f.customerOrg()+"/members", map[string]any{"add": []string{"member@company.example"}})
 		}},
 		{"GET /api/v1/dashboards", authed, func(f *fixture) req { return J("GET", "/api/v1/dashboards", nil) }},
 		{"POST /api/v1/dashboards", exp{anon: codes(401), outsider: codes(201), viewer: codes(201), member: codes(201), admin: codes(201)}, func(f *fixture) req {

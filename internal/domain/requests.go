@@ -371,6 +371,11 @@ type PortalRequestIn struct {
 }
 
 // PortalRequest is a request as its customer sees it.
+// customerSees is the condition under which customer $1 sees a request (pr is portal_request): they raised it, they were added to it, or
+// the person who raised it shared it with their customer organization and $1 belongs to that organization.
+const customerSees = `(pr.customer_id::text=$1 OR EXISTS (SELECT 1 FROM request_participant rp WHERE rp.issue_id=pr.issue_id AND rp.customer_id::text=$1)
+	OR (pr.shared_with_org AND EXISTS (SELECT 1 FROM customer r JOIN customer m ON m.customer_org_id=r.customer_org_id WHERE r.id=pr.customer_id AND m.id::text=$1)))`
+
 type PortalRequest struct {
 	Key         string          `json:"key"`
 	Summary     string          `json:"summary"`
@@ -382,6 +387,9 @@ type PortalRequest struct {
 	Updated     time.Time       `json:"updated"`
 	Fields      []PortalField   `json:"fields,omitempty"`
 	Comments    []PortalComment `json:"comments,omitempty"`
+	RaisedBy    string          `json:"raised_by,omitempty"` // the colleague who raised it, when it is not the viewer's own
+	Mine        bool            `json:"mine"`
+	Sharing     *PortalSharing  `json:"sharing,omitempty"` // for the person who raised it
 }
 
 type PortalField struct {
@@ -491,7 +499,7 @@ func (s *Service) PortalMyRequests(ctx context.Context, c Customer, projectKey s
 	}
 	rows, err := s.DB.Query(ctx, `SELECT i.key,i.summary,st.name,st.category='done',COALESCE(rt.name,''),i.created_at,i.updated_at
 		FROM portal_request pr JOIN issue i ON i.id=pr.issue_id AND i.deleted_at IS NULL AND i.project_id=$2 JOIN status st ON st.id=i.status_id LEFT JOIN request_type rt ON rt.id=pr.request_type_id
-		WHERE pr.customer_id::text=$1 ORDER BY i.updated_at DESC LIMIT 200`, c.ID, pid)
+		WHERE `+customerSees+` ORDER BY i.updated_at DESC LIMIT 200`, c.ID, pid)
 	if err != nil {
 		return nil, err
 	}
@@ -516,14 +524,24 @@ func (s *Service) PortalGetRequest(ctx context.Context, c Customer, projectKey, 
 	var r PortalRequest
 	var id, rtID string
 	pidIssue := ""
-	err = s.DB.QueryRow(ctx, `SELECT i.id::text,i.key,i.summary,st.name,st.category='done',COALESCE(rt.name,''),COALESCE(rt.id::text,''),i.created_at,i.updated_at,COALESCE(t.body,'')
+	var raisedName, raisedEmail string
+	var sharedOrg bool
+	err = s.DB.QueryRow(ctx, `SELECT i.id::text,i.key,i.summary,st.name,st.category='done',COALESCE(rt.name,''),COALESCE(rt.id::text,''),i.created_at,i.updated_at,COALESCE(t.body,''),pr.customer_id::text=$1,rq.name,rq.email,pr.shared_with_org
 		FROM portal_request pr JOIN issue i ON i.id=pr.issue_id AND i.deleted_at IS NULL AND i.project_id=$3 JOIN status st ON st.id=i.status_id LEFT JOIN request_type rt ON rt.id=pr.request_type_id
-		LEFT JOIN issue_text t ON t.issue_id=i.id AND t.field='description'
-		WHERE pr.customer_id::text=$1 AND i.key=$2`, c.ID, strings.ToUpper(key), pid).Scan(&id, &r.Key, &r.Summary, &r.Status, &r.Resolved, &r.Type, &rtID, &r.Created, &r.Updated, &r.Description)
+		JOIN customer rq ON rq.id=pr.customer_id LEFT JOIN issue_text t ON t.issue_id=i.id AND t.field='description'
+		WHERE `+customerSees+` AND i.key=$2`, c.ID, strings.ToUpper(key), pid).Scan(&id, &r.Key, &r.Summary, &r.Status, &r.Resolved, &r.Type, &rtID, &r.Created, &r.Updated, &r.Description, &r.Mine, &raisedName, &raisedEmail, &sharedOrg)
 	if err != nil {
 		return PortalRequest{}, ErrNotFound
 	}
 	pidIssue = id
+	if !r.Mine {
+		r.RaisedBy = raisedName
+		if r.RaisedBy == "" {
+			r.RaisedBy = raisedEmail
+		}
+	} else {
+		r.Sharing = s.sharingOf(ctx, id, c, sharedOrg)
+	}
 	if rtID != "" { // the form's fields, with the labels the customer saw
 		if rt, e := s.requestTypeByID(ctx, rtID); e == nil {
 			for _, f := range rt.Fields {
@@ -538,9 +556,11 @@ func (s *Service) PortalGetRequest(ctx context.Context, c Customer, projectKey, 
 			}
 		}
 	}
-	// comments: staff comments that were not marked internal (as "Support"), and the customer's own
+	// comments: staff comments that were not marked internal (as "Support"), the viewer's own (as "You") and those of the colleagues the
+	// request is shared with (by name)
 	rows, err := s.DB.Query(ctx, `SELECT 'Support', c.body, c.created_at, false FROM comment c WHERE c.issue_id::text=$1 AND NOT c.internal
-		UNION ALL SELECT 'You', cc.body, cc.created_at, true FROM customer_comment cc WHERE cc.issue_id::text=$1 AND cc.customer_id::text=$2 ORDER BY 3`, id, c.ID)
+		UNION ALL SELECT CASE WHEN cc.customer_id::text=$2 THEN 'You' ELSE COALESCE(NULLIF(cu.name,''), cu.email) END, cc.body, cc.created_at, true
+		FROM customer_comment cc JOIN customer cu ON cu.id=cc.customer_id WHERE cc.issue_id::text=$1 ORDER BY 3`, id, c.ID)
 	if err != nil {
 		return r, err
 	}
@@ -623,16 +643,27 @@ func (s *Service) PortalComment(ctx context.Context, c Customer, projectKey, key
 
 // RequestInfo is what staff see on a request: who raised it and through which form.
 type RequestInfo struct {
-	Customer string `json:"customer"`
-	Email    string `json:"email"`
-	Type     string `json:"request_type,omitempty"`
+	Customer          string   `json:"customer"`
+	Email             string   `json:"email"`
+	Type              string   `json:"request_type,omitempty"`
+	Company           string   `json:"company,omitempty"` // the customer organization
+	SharedWithCompany bool     `json:"shared_with_company,omitempty"`
+	With              []string `json:"shared_with,omitempty"` // other customers who were added to it
 }
 
 func (s *Service) requestInfo(ctx context.Context, issueID string) *RequestInfo {
 	var r RequestInfo
-	err := s.DB.QueryRow(ctx, `SELECT c.name,c.email,COALESCE(rt.name,'') FROM portal_request pr JOIN customer c ON c.id=pr.customer_id LEFT JOIN request_type rt ON rt.id=pr.request_type_id WHERE pr.issue_id::text=$1`, issueID).Scan(&r.Customer, &r.Email, &r.Type)
+	err := s.DB.QueryRow(ctx, `SELECT c.name,c.email,COALESCE(rt.name,''),COALESCE(o.name,''),pr.shared_with_org FROM portal_request pr JOIN customer c ON c.id=pr.customer_id LEFT JOIN customer_org o ON o.id=c.customer_org_id LEFT JOIN request_type rt ON rt.id=pr.request_type_id WHERE pr.issue_id::text=$1`, issueID).Scan(&r.Customer, &r.Email, &r.Type, &r.Company, &r.SharedWithCompany)
 	if err != nil {
 		return nil
+	}
+	if rows, err := s.DB.Query(ctx, `SELECT cu.email FROM request_participant rp JOIN customer cu ON cu.id=rp.customer_id WHERE rp.issue_id::text=$1 ORDER BY cu.email`, issueID); err == nil {
+		for rows.Next() {
+			var e string
+			rows.Scan(&e)
+			r.With = append(r.With, e)
+		}
+		rows.Close()
 	}
 	return &r
 }

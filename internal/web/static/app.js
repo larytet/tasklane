@@ -433,7 +433,7 @@
         root.append(h('div', { class: 'banner info', role: 'status' }, 'Archived ' + L.relTime(is.archived) + ' and read-only. ',
           h('button', { class: 'btn', onclick: async () => { const r = await api('DELETE', '/api/v1/issues/' + key + '/archive'); if (r.status === 200) { toast('Restored from the archive.'); await reloadAll(); } else toast((r.data && r.data.error) || 'Could not restore'); } }, 'Unarchive')));
       }
-      if (v.request) root.append(h('div', { class: 'banner info', role: 'status' }, 'Raised through the portal by ' + (v.request.customer || v.request.email) + ' (' + v.request.email + ')' + (v.request.request_type ? ' · ' + v.request.request_type : '') + '. A comment that is not internal is visible to the customer.'));
+      if (v.request) root.append(h('div', { class: 'banner info', role: 'status' }, 'Raised through the portal by ' + (v.request.customer || v.request.email) + ' (' + v.request.email + ')' + (v.request.request_type ? ' · ' + v.request.request_type : '') + (v.request.company ? ' · ' + v.request.company : '') + (v.request.shared_with_company ? ' (shared with the whole company)' : '') + (v.request.shared_with && v.request.shared_with.length ? ' · also seen by ' + v.request.shared_with.join(', ') : '') + '. A comment that is not internal is visible to the customer' + ((v.request.shared_with && v.request.shared_with.length) || v.request.shared_with_company ? 's it is shared with' : '') + '.'));
       if (v.sla && v.sla.length) root.append(slaEl(v.sla));
       root.append(subjectEl(is));
       root.append(chipLine(is));

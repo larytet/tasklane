@@ -33,6 +33,29 @@
         const x = await api('PUT', '/api/v1/projects/' + key + '/portal', { enabled: enabled.checked, welcome: welcome.value, privacy_notice: privacy.value, consent_text: consent.value, allow: lines(allow.value), block: lines(block.value) });
         msg.className = x.status === 200 ? 'muted' : 'err'; msg.textContent = x.status === 200 ? 'Saved.' : errText(x);
       } }, 'Save settings')));
+    // customer organizations: the companies whose people can share requests
+    const orgs = h('div', { class: 'list', role: 'list', 'aria-label': 'Customer organizations' });
+    const oname = h('input', { type: 'text', 'aria-label': 'Customer organization name', placeholder: 'Acme Ltd', maxlength: 100 });
+    const oerr = h('div', { role: 'alert', class: 'err' });
+    body.append(h('h3', { style: 'margin-top:16px' }, 'Customer organizations'), orgs, h('div', { class: 'chips' }, oname, h('button', { class: 'btn primary', onclick: async () => {
+      oerr.textContent = '';
+      const x = await api('POST', '/api/v1/projects/' + key + '/portal/customer-orgs', { name: oname.value });
+      if (x.status === 201) { oname.value = ''; loadOrgs(); } else oerr.textContent = errText(x);
+    } }, 'Add customer organization')), oerr);
+    async function loadOrgs() {
+      clear(orgs);
+      const t = await api('GET', '/api/v1/projects/' + key + '/portal/customer-orgs');
+      if (t.status !== 200) { orgs.append(h('div', { class: 'row', role: 'listitem' }, errText(t))); return; }
+      if (!t.data.length) orgs.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'None yet. Customers can share a request with named people without one.')));
+      for (const o of t.data) {
+        const add = h('input', { type: 'text', 'aria-label': 'Add members to ' + o.name, placeholder: 'ana@acme.example, bo@acme.example', style: 'min-width:260px' });
+        orgs.append(h('div', { class: 'row', role: 'listitem', style: 'flex-direction:column;align-items:stretch;gap:4px' },
+          h('div', {}, h('strong', {}, o.name), ' ', h('span', { class: 'muted' }, o.members.length + ' member(s)'), h('button', { class: 'btn ghost', 'aria-label': 'Delete ' + o.name, onclick: async () => { const x = await api('DELETE', '/api/v1/projects/' + key + '/portal/customer-orgs/' + o.id); if (x.status === 200) loadOrgs(); else toast(errText(x)); } }, 'Delete')),
+          h('ul', { style: 'margin:0;padding-left:18px' }, o.members.map(m => h('li', {}, m, ' ', h('button', { class: 'btn ghost', 'aria-label': 'Remove ' + m + ' from ' + o.name, onclick: async () => { const x = await api('PUT', '/api/v1/projects/' + key + '/portal/customer-orgs/' + o.id + '/members', { remove: [m] }); if (x.status === 200) loadOrgs(); else toast(errText(x)); } }, 'Remove')))),
+          h('div', { class: 'chips' }, add, h('button', { class: 'btn', onclick: async () => { const x = await api('PUT', '/api/v1/projects/' + key + '/portal/customer-orgs/' + o.id + '/members', { add: lines(add.value) }); if (x.status === 200) loadOrgs(); else toast(errText(x)); } }, 'Add members'))));
+      }
+    }
+    loadOrgs();
     // request types
     const list = h('div', { class: 'list', role: 'list', 'aria-label': 'Request types' });
     body.append(h('h3', { style: 'margin-top:16px' }, 'Request types'), list);

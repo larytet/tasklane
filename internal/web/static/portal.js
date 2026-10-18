@@ -151,7 +151,7 @@
       const thread = h('ul', { class: 'list', 'aria-label': 'Conversation' }, (q.comments || []).map(c => h('li', { class: 'row' }, h('strong', {}, c.author), h('span', { class: 'muted' }, ' ' + new Date(c.created).toLocaleString()), h('div', { style: 'white-space:pre-wrap' }, c.body))));
       const text = h('textarea', { id: 'cb', rows: 3, maxlength: 10000 });
       const msg = h('p', { role: 'alert', class: 'err' });
-      add(body, h('h2', {}, q.key + ' ' + q.summary), h('p', {}, h('strong', {}, q.status), q.request_type ? ' · ' + q.request_type : '', ' · opened ' + new Date(q.created).toLocaleDateString()),
+      add(body, h('h2', {}, q.key + ' ' + q.summary), h('p', {}, h('strong', {}, q.status), q.request_type ? ' · ' + q.request_type : '', ' · opened ' + new Date(q.created).toLocaleDateString(), q.raised_by ? ' · raised by ' + q.raised_by : ''),
         q.description ? h('p', { style: 'white-space:pre-wrap' }, q.description) : null,
         q.fields && q.fields.length ? h('dl', {}, q.fields.map(f => [h('dt', {}, f.label), h('dd', {}, f.value)]).flat()) : null,
         h('h3', {}, 'Conversation'), (q.comments || []).length ? thread : h('p', { class: 'muted' }, 'No replies yet.'),
@@ -160,7 +160,21 @@
           const x = await api('POST', '/api/v1/portal/' + key + '/requests/' + encodeURIComponent(k) + '/comments', { body: text.value });
           if (x.status === 201) detail(k); else msg.textContent = x.status === 429 ? 'Please wait a while before writing more.' : errText(x);
         } }, h('label', { for: 'cb' }, 'Add a reply'), text, h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Send')), msg),
+        shareEl(q, k),
         h('p', {}, h('a', { href: '#/' }, 'Back to my requests')));
+    }
+
+    // who else sees this request: only the person who raised it can change that
+    function shareEl(q, k) {
+      if (!q.mine || !q.sharing) return null;
+      const sh = q.sharing, msg = h('p', { role: 'alert', class: 'err' });
+      const send = async body => { msg.textContent = ''; const x = await api('POST', '/api/v1/portal/' + key + '/requests/' + encodeURIComponent(k) + '/share', body); if (x.status === 200) detail(k); else msg.textContent = errText(x); };
+      const org = sh.can_share_with_organization ? h('label', {}, h('input', { type: 'checkbox', id: 'sh-org', checked: sh.shared_with_organization, onchange: e => send({ organization: e.target.checked }) }), ' Everyone at ' + sh.organization + ' can see this request') : null;
+      const who = h('input', { type: 'email', id: 'sh-add', maxlength: 254, autocomplete: 'off' });
+      const people = h('ul', { class: 'list', 'aria-label': 'People who can also see this request' }, (sh.people || []).map(p => h('li', { class: 'row' }, (p.name ? p.name + ' · ' : '') + p.email, h('button', { class: 'btn ghost', type: 'button', 'aria-label': 'Stop sharing with ' + p.email, onclick: () => send({ remove: [p.email] }) }, 'Remove'))));
+      return h('section', { 'aria-label': 'Sharing' }, h('h3', {}, 'Who can see this'), h('p', { class: 'muted' }, 'Only you, unless you share it. People you share it with see this request and its conversation, nothing else of yours.'), org,
+        (sh.people || []).length ? people : null,
+        h('form', { onsubmit: e => { e.preventDefault(); if (who.value.trim()) send({ add: [who.value.trim()] }); } }, h('label', { for: 'sh-add' }, 'Share with someone by email address'), who, h('button', { class: 'btn', type: 'submit' }, 'Share')), msg);
     }
 
     function details() {

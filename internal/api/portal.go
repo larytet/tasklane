@@ -240,4 +240,38 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 		}
 		s.replyStatus(w, 201, v, err)
 	}))
+	s.handle(mux, "POST /api/v1/portal/{key}/requests/{issue}/share", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.PortalShareIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.PortalShare(r.Context(), customerOf(r), r.PathValue("key"), r.PathValue("issue"), in)
+			s.reply(w, v, err)
+		}
+	}))
+	// staff: the portal's customer organizations
+	s.handle(mux, "GET /api/v1/projects/{key}/portal/customer-orgs", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListCustomerOrgs(r.Context(), actorOf(r), r.PathValue("key"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/projects/{key}/portal/customer-orgs", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.CreateCustomerOrg(r.Context(), actorOf(r), r.PathValue("key"), in.Name)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "DELETE /api/v1/projects/{key}/portal/customer-orgs/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, ok, s.Svc.DeleteCustomerOrg(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("id")))
+	}))
+	s.handle(mux, "PUT /api/v1/projects/{key}/portal/customer-orgs/{id}/members", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Add    []string `json:"add"`
+			Remove []string `json:"remove"`
+		}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.SetCustomerOrgMembers(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("id"), in.Add, in.Remove)
+			s.reply(w, v, err)
+		}
+	}))
 }

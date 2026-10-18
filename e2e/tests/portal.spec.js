@@ -236,3 +236,65 @@ test('PORT-08: a request carries service level clocks that staff see running, an
   await expect(clocks).toContainText('First response: met');
   await expect(clocks).not.toContainText('First response: met late');
 });
+
+test('PORT-03: a customer shares a request with their company, a colleague joins the conversation, and taking it back is immediate', async ({ browser }) => {
+  const adm = await browser.newContext();
+  adm.on('page', watch);
+  expect((await adm.request.post('/api/v1/login', { headers: H, data: { email: 'admin@example.com', password: 'adminpass1' } })).status()).toBe(200);
+  const pk = 'C' + uniq().toUpperCase();
+  expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Companies' } })).status()).toBe(201);
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true } })).status()).toBe(200);
+  expect((await adm.request.post(`/api/v1/projects/${pk}/request-types`, { headers: H, data: { name: 'Question' } })).status()).toBe(201);
+  const dom = `${uniq()}.example`;
+  const cora = `cora@${dom}`, dave = `dave@${dom}`;
+  const org = await adm.request.post(`/api/v1/projects/${pk}/portal/customer-orgs`, { headers: H, data: { name: 'Acme ' + uniq() } });
+  expect(org.status()).toBe(201);
+  const oid = (await org.json()).id;
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal/customer-orgs/${oid}/members`, { headers: H, data: { add: [cora, dave] } })).status()).toBe(200);
+
+  async function signIn(addr) {
+    const ctx = await browser.newContext();
+    ctx.on('page', watch);
+    const page = await ctx.newPage();
+    await page.goto('/portal/' + pk);
+    await page.getByLabel('Your email address').fill(addr);
+    await page.getByRole('button', { name: 'Email me a code' }).click();
+    const { code } = await sentTo(addr);
+    await page.getByLabel('The six digit code we sent you').fill(code);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+    await expect(page.getByText('Signed in as')).toContainText(addr);
+    return { ctx, page };
+  }
+  const c = await signIn(cora);
+  await c.page.getByRole('link', { name: 'New request' }).click();
+  await c.page.getByLabel('Summary').fill('Our invoice is wrong');
+  await c.page.getByRole('button', { name: 'Send request' }).click();
+  await expect(c.page.getByRole('heading', { level: 2 })).toContainText('Our invoice is wrong');
+  const key = (await c.page.getByRole('heading', { level: 2 }).textContent()).split(' ')[0];
+  const sharing = c.page.getByRole('region', { name: 'Sharing' });
+  await expect(sharing).toContainText('Only you, unless you share it');
+  const axe = await new AxeBuilder({ page: c.page }).analyze();
+  expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+
+  // a colleague sees nothing yet
+  const d = await signIn(dave);
+  await expect(d.page.getByText('You have no requests yet')).toBeVisible();
+  expect((await d.ctx.request.get(`/api/v1/portal/${pk}/requests/${key}`)).status()).toBe(404);
+  // shared with the company: the colleague sees it, by the owner's name, and joins in
+  await sharing.getByLabel(/Everyone at Acme/).check();
+  await expect(c.page.getByRole('region', { name: 'Sharing' }).getByLabel(/Everyone at Acme/)).toBeChecked();
+  await d.page.reload();
+  await expect(d.page.getByRole('link', { name: key + ' Our invoice is wrong' })).toBeVisible();
+  await d.page.getByRole('link', { name: key + ' Our invoice is wrong' }).click();
+  await expect(d.page.getByText('raised by ' + cora)).toBeVisible();
+  await expect(d.page.getByRole('region', { name: 'Sharing' })).toHaveCount(0); // only the owner changes it
+  await d.page.getByLabel('Add a reply').fill('We saw the same');
+  await d.page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(d.page.getByText('We saw the same')).toBeVisible();
+  await c.page.reload();
+  await expect(c.page.getByRole('list', { name: 'Conversation' })).toContainText(dave);
+  // taking it back
+  await c.page.getByRole('region', { name: 'Sharing' }).getByLabel(/Everyone at Acme/).uncheck();
+  await expect(c.page.getByRole('region', { name: 'Sharing' }).getByLabel(/Everyone at Acme/)).not.toBeChecked();
+  expect((await d.ctx.request.get(`/api/v1/portal/${pk}/requests/${key}`)).status()).toBe(404);
+});

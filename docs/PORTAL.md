@@ -62,6 +62,17 @@ A clock is **running**, **paused**, **met** or **breached**; one that was met af
 
 Staff see the clocks on the request's ticket; **customers never see them**. In search: `sla.state = breached`, `sla.firstResponse.state in (running, paused)`, `sla.resolution.state = met`.
 
+## Customer organizations and sharing
+
+A **customer organization** is a company: a name and the customers who belong to it. A portal's administrators manage them on the *Customer portal settings* page or with `/api/v1/projects/{key}/portal/customer-orgs` (create, delete, add and remove members by address; the portal's allow and block lists apply). A person who has never signed in gets their record made when they are added; deleting an organization leaves its people as customers with no company.
+
+A request is **private to the customer who raised it** until they choose, on the request, to share it:
+
+- with **everyone in their customer organization** (one checkbox), or
+- with **named people** (by address, up to 20 at a time; the lists apply; they need not belong to the company).
+
+The people it is shared with see that request and its public conversation and **nothing else of the owner's** (not their other requests, not their details). They can comment; each sees the others by name (and themselves as *You*), and sees who raised it. **Only the owner changes who sees it.** Access follows the facts and is checked on every read: taking the sharing back, removing a person, a person leaving the company, or deleting the company ends access at once. Staff see the company and the other people on the ticket's banner. People shared with are shown each other's address: sharing is the owner's decision.
+
 ## Queues and canned responses
 
 A **queue** is a named TQL query held to one project (`#/queues/PROJECT`, or `/api/v1/projects/{key}/queues`), shown with the number of issues in it **for the person looking**: the query is run with that person's permissions and is always combined with `project = PROJECT`, so it can never reach another project even if its text names one. Queues have an order; a query that stops compiling shows its error in its own row and the others still answer. Anyone who can see the project sees its queues; project administrators manage them, and a query that does not compile is refused when it is saved.
@@ -70,4 +81,4 @@ A **canned response** is a saved reply, inserted from a menu in the ticket's rep
 
 ## Not built yet
 
-Still to build: attachments on requests, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,  customer organizations that share requests, customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.
+Still to build: attachments on requests, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,  customer emails and replies by email, promotion to staff, export and erase of a customer's data, sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.
