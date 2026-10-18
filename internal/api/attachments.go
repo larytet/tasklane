@@ -57,6 +57,38 @@ func (s *Server) registerAttachments(mux *http.ServeMux) {
 		us, err := s.Svc.StartUpload(r.Context(), actorOf(r), r.PathValue("key"), in.Name, in.Type, in.Size)
 		s.replyStatus(w, 201, us, err)
 	}))
+	// direct uploads: the browser sends bytes straight to the object store with presigned URLs, then asks us to verify
+	s.handle(mux, "POST /api/v1/issues/{key}/uploads/direct", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name   string `json:"name"`
+			Size   int64  `json:"size"`
+			Type   string `json:"type"`
+			SHA256 string `json:"sha256"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		du, err := s.Svc.StartDirectUpload(r.Context(), actorOf(r), r.PathValue("key"), in.Name, in.Type, in.Size, in.SHA256)
+		s.replyStatus(w, 201, du, err)
+	}))
+	s.handle(mux, "POST /api/v1/uploads/direct/{id}/complete", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Parts []domain.DirectPartDone `json:"parts"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		att, err := s.Svc.CompleteDirectUpload(r.Context(), actorOf(r), r.PathValue("id"), in.Parts)
+		s.replyStatus(w, 201, att, err)
+	}))
+	s.handle(mux, "DELETE /api/v1/uploads/direct/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		err := s.Svc.AbortDirectUpload(r.Context(), actorOf(r), r.PathValue("id"))
+		if err != nil {
+			s.replyStatus(w, 200, nil, err)
+			return
+		}
+		w.WriteHeader(204)
+	}))
 	s.handle(mux, "HEAD /api/v1/uploads/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		us, err := s.Svc.UploadStatus(r.Context(), actorOf(r), r.PathValue("id"))
 		if err != nil {

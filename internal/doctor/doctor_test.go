@@ -13,6 +13,7 @@ import (
 	"github.com/larytet/tasklane/internal/config"
 	"github.com/larytet/tasklane/internal/doctor"
 	"github.com/larytet/tasklane/internal/testutil"
+	"github.com/larytet/tasklane/internal/testutil/s3mock"
 	"github.com/larytet/tasklane/internal/testutil/smtpmock"
 )
 
@@ -151,5 +152,31 @@ func TestINST02_UnwritableBlobDirectoryAndHealthyReport(t *testing.T) {
 		if c := find(cs, name); !c.OK {
 			t.Fatalf("healthy system reports %s: %+v", name, c)
 		}
+	}
+}
+
+// BLOB-11: the doctor reads the S3 backend's health from a real write, and says which part is wrong.
+func TestCFG_DoctorChecksTheS3Backend(t *testing.T) {
+	m := s3mock.New()
+	defer m.Close()
+	base := config.Config{DatabaseURL: "postgres://tl:tl@127.0.0.1:1/none", BlobDir: t.TempDir(), BlobBackend: "s3", S3Endpoint: m.URL, S3Region: s3mock.Region,
+		S3Bucket: s3mock.Bucket, S3AccessKey: s3mock.AccessKey, S3SecretKey: s3mock.SecretKey, S3PartSizeMB: 16}
+	if c := find(doctor.Run(context.Background(), base), "blob store"); !c.OK || !strings.Contains(c.Detail, "accepts writes") {
+		t.Fatalf("%+v", c)
+	}
+	bad := base
+	bad.S3SecretKey = "wrong"
+	if c := find(doctor.Run(context.Background(), bad), "blob store"); c.OK || !strings.Contains(c.Detail, "not usable") {
+		t.Fatalf("a wrong secret passed: %+v", c)
+	}
+	noBucket := base
+	noBucket.S3Bucket = ""
+	if c := find(doctor.Run(context.Background(), noBucket), "blob store"); c.OK || !strings.Contains(c.Detail, "s3_bucket") {
+		t.Fatalf("%+v", c)
+	}
+	missing := base
+	missing.S3Bucket = "no-such-bucket"
+	if c := find(doctor.Run(context.Background(), missing), "blob store"); c.OK {
+		t.Fatalf("a missing bucket passed: %+v", c)
 	}
 }

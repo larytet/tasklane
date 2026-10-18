@@ -501,9 +501,49 @@
           const fd = new FormData(); fd.append('file', f, f.name || 'pasted.png');
           const r = await fetch('/api/v1/issues/' + key + '/attachments', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane' } });
           ok = r.status === 201; if (!ok) toast((await r.json().catch(() => ({}))).error || 'Upload failed');
-        } else ok = await resumable(f);
+        } else {
+          const d = await direct(f); // straight to the object store when the installation has one; null means use the server
+          ok = d === null ? await resumable(f) : d;
+        }
         if (ok) await reloadAll();
       }
+    }
+    // Direct upload (S3 backend): presigned PUTs, three parts at a time, each retried; the server verifies at completion.
+    async function direct(f) {
+      const s = await api('POST', '/api/v1/issues/' + key + '/uploads/direct', { name: f.name, size: f.size, type: f.type });
+      if (s.status === 400 && /ordinary upload/.test((s.data && s.data.error) || '')) return null;
+      if (s.status !== 201) { toast((s.data && s.data.error) || 'Upload failed'); return false; }
+      const du = s.data;
+      const put = async (url, body) => {
+        for (let i = 0; i < 3; i++) {
+          try { const r = await fetch(url, { method: 'PUT', body }); if (r.ok) return r; } catch (e) { /* retry */ }
+          await new Promise(r => setTimeout(r, 500 * (i + 1)));
+        }
+        throw new Error('the store did not accept the upload');
+      };
+      let parts = [];
+      try {
+        if (du.mode === 'single') await put(du.url, f);
+        else {
+          const queue = du.parts.slice(); parts = [];
+          const worker = async () => {
+            for (let p = queue.shift(); p; p = queue.shift()) {
+              const r = await put(p.url, f.slice((p.n - 1) * du.part_size, p.n * du.part_size));
+              const etag = r.headers.get('ETag');
+              if (!etag) throw new Error('the bucket must expose the ETag header to browsers (CORS)');
+              parts.push({ n: p.n, etag });
+            }
+          };
+          await Promise.all([worker(), worker(), worker()]);
+        }
+      } catch (e) {
+        await api('DELETE', '/api/v1/uploads/direct/' + du.id);
+        toast('Upload interrupted: ' + e.message);
+        return false;
+      }
+      const c = await api('POST', '/api/v1/uploads/direct/' + du.id + '/complete', { parts });
+      if (c.status !== 201) { toast((c.data && c.data.error) || 'Upload failed'); return false; }
+      return true;
     }
     async function resumable(f) {
       const s = await api('POST', '/api/v1/issues/' + key + '/uploads', { name: f.name, size: f.size, type: f.type });

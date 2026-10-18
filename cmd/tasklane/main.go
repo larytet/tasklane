@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -183,7 +184,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	if err := svc.EnsureDefaults(ctx); err != nil {
 		log.Fatalf("defaults: %v", err)
 	}
-	fs, err := blob.NewFS(cfg.BlobDir)
+	fs, err := blob.NewFromConfig(cfg)
 	if err != nil {
 		log.Fatalf("blob store: %v", err)
 	}
@@ -217,7 +218,12 @@ func serve(ctx context.Context, cfg config.Config) {
 	hub := rt.New(svc)
 	go hub.SweepLoop(ctx)
 	srv := &api.Server{Hub: hub, Svc: svc, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
-		Ready: func(ctx context.Context) error { return st.Pool.Ping(ctx) }}
+		Ready: func(ctx context.Context) error {
+			if err := st.Pool.Ping(ctx); err != nil {
+				return err
+			}
+			return blobReady(fs)
+		}}
 	hs := &http.Server{Addr: cfg.Listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		log.Printf("tasklane %s listening on %s", version, cfg.Listen)
@@ -249,4 +255,24 @@ func sprintJobs(ctx context.Context, svc *domain.Service) {
 		case <-t.C:
 		}
 	}
+}
+
+// blobReady reports the blob store's health for /readyz. An S3 check is a network round trip, so the answer is kept
+// for fifteen seconds; the filesystem check is cheap and always fresh.
+var blobHealth struct {
+	sync.Mutex
+	at  time.Time
+	err error
+}
+
+func blobReady(st blob.Store) error {
+	if _, ok := st.(*blob.S3); !ok {
+		return st.WriteCheck()
+	}
+	blobHealth.Lock()
+	defer blobHealth.Unlock()
+	if time.Since(blobHealth.at) > 15*time.Second {
+		blobHealth.err, blobHealth.at = st.WriteCheck(), time.Now()
+	}
+	return blobHealth.err
 }

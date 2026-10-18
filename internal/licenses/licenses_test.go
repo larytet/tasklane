@@ -94,6 +94,10 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 				if strings.HasSuffix(p, "internal/mail/mail.go") && (strings.Contains(m, "net.Dial") || strings.Contains(m, "tls.Dial")) {
 					continue
 				}
+				// the S3 backend talks to the bucket the operator configured and nothing else
+				if strings.HasSuffix(p, "internal/blob/s3.go") {
+					continue
+				}
 				// the stdio proxy talks only to the Tasklane endpoint the operator names on its command line
 				if strings.HasSuffix(p, "internal/mcp/stdio.go") && (strings.Contains(m, "http.Client{") || strings.Contains(m, "http.NewRequest")) {
 					continue

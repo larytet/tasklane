@@ -382,18 +382,27 @@ func (s *Service) commitStaged(ctx context.Context, a Actor, is Issue, issueID, 
 		scanState, detail = "blocked", sig
 	}
 	flag := blob.TypeFlag(declaredMIME, mime)
+	return s.registerAttachment(ctx, a, is, issueID, name, declaredMIME, sha, size, mime, class, scanState, detail, flag,
+		func() error { _, err := s.Blobs.Store.Commit(stagingID, sha); return err }, func() { os.Remove(path) })
+}
+
+// registerAttachment records a verified blob and its attachment in one transaction. commit makes the bytes durable under
+// their hash (only called when the blob is new); discard drops the staged copy when the bytes already exist or the
+// transaction fails.
+func (s *Service) registerAttachment(ctx context.Context, a Actor, is Issue, issueID, name, declaredMIME, sha string, size int64, mime string, class blob.Class,
+	scanState, detail, flag string, commit func() error, discard func()) (Attachment, error) {
 	var att Attachment
-	err = s.tx(ctx, func(tx pgx.Tx) error {
+	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var blobID string
 		err := tx.QueryRow(ctx, `SELECT id FROM blob WHERE sha256=$1 FOR UPDATE`, sha).Scan(&blobID)
 		if err == pgx.ErrNoRows {
-			if _, err := s.Blobs.Store.Commit(stagingID, sha); err != nil {
+			if err := commit(); err != nil {
 				return err
 			}
 			err = tx.QueryRow(ctx, `INSERT INTO blob(sha256,size,mime,class,scan_state,scan_detail) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
 				sha, size, mime, string(class), scanState, detail).Scan(&blobID)
 		} else if err == nil {
-			os.Remove(path) // deduplicated: the bytes are already stored
+			discard() // deduplicated: the bytes are already stored
 			// a hit on an existing blob never weakens its scan state
 		}
 		if err != nil {
@@ -418,7 +427,7 @@ func (s *Service) commitStaged(ctx context.Context, a Actor, is Issue, issueID, 
 		return outbox(ctx, tx, "issue:"+is.Key, "attachment.added", map[string]any{"key": is.Key, "attachment": att.ID, "actor": a.Label, "actor_id": a.ID})
 	})
 	if err != nil {
-		os.Remove(path)
+		discard()
 		return Attachment{}, err
 	}
 	var scanned string
@@ -564,7 +573,7 @@ func (s *Service) VerifyLink(ctx context.Context, attID, expStr, sig, variant st
 }
 
 // OpenBlob opens the stored bytes by hash.
-func (s *Service) OpenBlob(sha string) (*os.File, error) { return s.Blobs.Store.Open(sha) }
+func (s *Service) OpenBlob(sha string) (blob.Object, error) { return s.Blobs.Store.Open(sha) }
 
 // ---- operations: GC, janitor, fsck ----
 
@@ -609,6 +618,9 @@ func (s *Service) Janitor(ctx context.Context, maxAge time.Duration) (int, error
 	}
 	cut := s.Now().Add(-maxAge)
 	s.DB.Exec(ctx, `DELETE FROM upload_session WHERE updated_at<=$1`, cut)
+	if _, err := s.CleanDirectUploads(ctx); err != nil {
+		return 0, err
+	}
 	return s.Blobs.Store.CleanStaging(cut)
 }
 

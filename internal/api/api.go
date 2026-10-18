@@ -334,9 +334,17 @@ func (s *Server) Handler() http.Handler {
 
 // secure adds the baseline response headers (strict CSP, no sniffing, no framing) and Server-Timing.
 func (s *Server) secure(next http.Handler) http.Handler {
+	// direct uploads send bytes from the browser to the object store, so the page may connect to that origin and no other
+	connect := "'self'"
+	if s.Svc != nil && s.Svc.Blobs != nil {
+		if o, ok := s.Svc.Blobs.Store.(interface{ Origin() string }); ok {
+			connect += " " + o.Origin()
+		}
+	}
+	csp := "default-src 'self'; connect-src " + connect + "; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		h.Set("Content-Security-Policy", csp)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")

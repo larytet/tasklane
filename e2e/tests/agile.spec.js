@@ -168,3 +168,51 @@ for (const theme of ['dark', 'light']) {
     }
   });
 }
+
+// BLOB-03 in the browser: with an S3 backend a large file goes straight to the store in parts. The e2e server uses the
+// filesystem backend, so the store and the two control calls are played by route handlers; what is checked is the
+// client's protocol: parts of the announced size, their ETags returned in order, completion last, and a fall back to the
+// ordinary upload when the server says it has no direct uploads.
+test('BLOB-03 client: large files use presigned parts and fall back to the server upload when direct is unavailable', async ({ browser }) => {
+  const adm = await admin(browser);
+  const key = (await adm.call('POST', '/api/v1/issues', { project: 'ABC', type: 'Task', summary: 'direct ' + uniq() })).body.key;
+  const jana = await newUser(browser, 'jana@example.com');
+  const p = jana.page;
+  const log = [];
+  // an S3 installation sends the page a CSP that allows its bucket origin (unit-tested); give the page the same here
+  await p.route(u => u.pathname === '/', async route => {
+    const resp = await route.fetch();
+    const headers = resp.headers();
+    headers['content-security-policy'] = headers['content-security-policy'].replace("connect-src 'self'", "connect-src 'self' https://store.test");
+    await route.fulfill({ response: resp, headers });
+  });
+  await p.route('**/api/v1/issues/*/uploads/direct', async route => {
+    log.push('start');
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'u1', mode: 'multipart', part_size: 8 << 20, parts: [1, 2, 3].map(n => ({ n, url: `https://store.test/part/${n}` })), expires_at: new Date(Date.now() + 3600e3).toISOString() }) });
+  });
+  await p.route('https://store.test/part/*', async route => {
+    const n = route.request().url().split('/').pop();
+    log.push('part' + n + ':' + route.request().postDataBuffer().length);
+    await route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'ETag', ETag: `"etag${n}"` }, body: '' });
+  });
+  await p.route('**/api/v1/uploads/direct/u1/complete', async route => {
+    const body = route.request().postDataJSON();
+    log.push('complete:' + body.parts.sort((a, b) => a.n - b.n).map(x => x.n + x.etag).join(','));
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'a1', name: 'big.bin' }) });
+  });
+  await p.goto(`/#/issue/${key}`);
+  await p.reload(); // a hash change keeps the old document, and with it the old CSP: load the page again under the new one
+  await expect(p.getByRole('heading', { level: 1 })).toBeVisible();
+  const size = 17 << 20; // 8 + 8 + 1 MiB
+  await p.locator('#file').setInputFiles({ name: 'big.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(size, 7) });
+  await expect.poll(() => log.some(l => l.startsWith('complete:'))).toBe(true);
+  expect(log[0]).toBe('start');
+  expect(log.filter(l => l.startsWith('part')).map(l => l.replace(/^part\d:/, '')).sort()).toEqual([String(1 << 20), String(8 << 20), String(8 << 20)]);
+  expect(log[log.length - 1]).toBe('complete:1"etag1",2"etag2",3"etag3"'); // completion is last, with every part's ETag
+  // the server has no direct uploads: the client falls back to the resumable upload without bothering the person
+  await p.unroute('**/api/v1/issues/*/uploads/direct');
+  await p.reload();
+  await expect(p.getByRole('heading', { level: 1 })).toBeVisible();
+  await p.locator('#file').setInputFiles({ name: 'ten.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(10 << 20, 3) });
+  await expect(p.getByText('ten.bin')).toBeVisible();
+});

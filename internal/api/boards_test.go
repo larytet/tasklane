@@ -1,7 +1,12 @@
 package api_test
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/larytet/tasklane/internal/api"
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/testutil"
@@ -173,5 +178,28 @@ func TestHTTP_ReportsFollowTheBoardFilter(t *testing.T) {
 	// velocity needs a scrum board
 	if code, _, _ := alice.do("GET", "/api/v1/boards/"+id+"/reports/velocity", nil); code != 400 {
 		t.Fatalf("velocity on kanban: %d", code)
+	}
+}
+
+// With the S3 backend the page may connect to the bucket (direct uploads) and nowhere else; with files on disk it may not.
+func TestHTTP_CSPAllowsOnlyTheBucketOrigin(t *testing.T) {
+	e := testutil.New(t)
+	e.Project()
+	_, m := e.WithS3Blobs()
+	ts := httptest.NewServer((&api.Server{Svc: e.Svc, SessionTTL: 3600e9}).Handler())
+	defer ts.Close()
+	resp, _ := http.Get(ts.URL + "/healthz")
+	csp := resp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "connect-src 'self' "+m.URL+";") || strings.Contains(csp, "*") {
+		t.Fatalf("%s", csp)
+	}
+	e2 := testutil.New(t)
+	e2.Project()
+	e2.WithBlobs()
+	ts2 := httptest.NewServer((&api.Server{Svc: e2.Svc, SessionTTL: 3600e9}).Handler())
+	defer ts2.Close()
+	resp, _ = http.Get(ts2.URL + "/healthz")
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self';") {
+		t.Fatalf("%s", csp)
 	}
 }

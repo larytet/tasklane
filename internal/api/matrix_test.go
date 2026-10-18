@@ -16,6 +16,7 @@ import (
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/testutil"
+	"github.com/larytet/tasklane/internal/testutil/s3mock"
 )
 
 // SEC-01: every API route against every role, from one table. A route cannot be added without a row here: the meta-test
@@ -61,6 +62,7 @@ type fixture struct {
 	e     *testutil.Env
 	n     int
 	spare domain.User
+	mock  *s3mock.Server
 }
 
 func (f *fixture) issue() string {
@@ -106,6 +108,21 @@ func (f *fixture) activeSprint() string {
 		f.t.Fatal(err)
 	}
 	return id
+}
+
+// direct starts a direct upload as Alice and puts the bytes at its URL, so completing it is the next step.
+func (f *fixture) direct() string {
+	du, err := f.e.Svc.StartDirectUpload(testutil.Ctx(), f.e.Alice, f.issue(), "d.txt", "text/plain", 6, "")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	req, _ := http.NewRequest("PUT", du.URL, strings.NewReader("direct"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		f.t.Fatalf("%v %v", err, resp)
+	}
+	resp.Body.Close()
+	return du.ID
 }
 
 func (f *fixture) attachment(key string) string {
@@ -209,6 +226,13 @@ func rows() []row {
 			return J("GET", "/api/v1/boards/"+f.board()+"/reports/epic/"+ep.Key, nil)
 		}},
 		{"GET /api/v1/sprints/{id}/report", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/sprints/"+f.activeSprint()+"/report", nil) }},
+		{"POST /api/v1/issues/{key}/uploads/direct", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(201), admin: codes(201)}, func(f *fixture) req {
+			return J("POST", "/api/v1/issues/"+f.issue()+"/uploads/direct", map[string]any{"name": "d.txt", "size": 6, "type": "text/plain"})
+		}},
+		{"POST /api/v1/uploads/direct/{id}/complete", owner(201), func(f *fixture) req {
+			return J("POST", "/api/v1/uploads/direct/"+f.direct()+"/complete", map[string]any{})
+		}},
+		{"DELETE /api/v1/uploads/direct/{id}", owner(204), func(f *fixture) req { return J("DELETE", "/api/v1/uploads/direct/"+f.direct(), nil) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++
@@ -343,7 +367,7 @@ func rows() []row {
 func matrixEnv(t *testing.T) (*fixture, map[role]string, *httptest.Server, *api.Server) {
 	e := testutil.New(t)
 	e.Project()
-	e.WithBlobs()
+	_, mock := e.WithS3Blobs() // the matrix runs on the S3 backend, which has every route the filesystem one has and more
 	srv := &api.Server{Svc: e.Svc, Hub: rt.New(e.Svc), SessionTTL: time.Hour}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -358,7 +382,7 @@ func matrixEnv(t *testing.T) (*fixture, map[role]string, *httptest.Server, *api.
 	mk(viewer, domain.Actor{ID: vu.ID, Label: "Vera"})
 	mk(member, e.Alice)
 	mk(admin, e.Admin)
-	return &fixture{t: t, e: e, spare: spare}, tok, ts, srv
+	return &fixture{t: t, e: e, spare: spare, mock: mock}, tok, ts, srv
 }
 
 func do(t *testing.T, ts *httptest.Server, tok string, r req) (int, string) {

@@ -23,7 +23,7 @@ var shaRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // ValidSHA reports whether s is a lowercase hex SHA-256; the only way to name an object.
 func ValidSHA(s string) bool { return shaRe.MatchString(s) }
 
-// Store is the backend interface. Only the filesystem backend exists in M1a.
+// Store is the backend interface: the filesystem backend (FS) and the S3 backend (S3).
 type Store interface {
 	// NewStaging creates an empty staging file and returns its id and path.
 	NewStaging() (id string, f *os.File, err error)
@@ -31,7 +31,7 @@ type Store interface {
 	// Commit moves a verified staging file into the store under its hash. If the object exists the
 	// staging file is discarded (deduplication). The caller supplies the hash it computed.
 	Commit(stagingID, sha string) (existed bool, err error)
-	Open(sha string) (*os.File, error)
+	Open(sha string) (Object, error)
 	Remove(sha string) error
 	Walk(fn func(sha string, size int64) error) error
 	// CleanStaging removes staging files not touched since the cutoff and returns how many.
@@ -111,7 +111,7 @@ func (s *FS) Commit(stagingID, sha string) (bool, error) {
 	return false, nil
 }
 
-func (s *FS) Open(sha string) (*os.File, error) {
+func (s *FS) Open(sha string) (Object, error) {
 	p, err := s.objPath(sha)
 	if err != nil {
 		return nil, err
@@ -120,7 +120,10 @@ func (s *FS) Open(sha string) (*os.File, error) {
 	if os.IsNotExist(err) {
 		return nil, ErrNotFound
 	}
-	return f, err
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 func (s *FS) Remove(sha string) error {

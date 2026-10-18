@@ -11,6 +11,17 @@ Precedence, lowest to highest: built-in default, config file (`--config PATH`, `
 | `database_url` | `TASKLANE_DATABASE_URL`, `TASKLANE_DATABASE_URL_FILE` | `--database-url` | (secret) | PostgreSQL connection string. The role must be able to create the `pg_trgm` and `unaccent` extensions (trusted extensions on PostgreSQL 13 and later, so the database owner can) |
 | `base_url` | `TASKLANE_BASE_URL` | `--base-url` | `http://localhost:8080` | Public URL. An `https://` value turns on the `Secure` flag of the session cookie and is used in links in mail |
 | `blob_dir` | `TASKLANE_BLOB_DIR` | `--blob-dir` | `./data/blobs` | Directory of the local filesystem blob store (attachments). Must be writable |
+| `blob_backend` | `TASKLANE_BLOB_BACKEND` | `--blob-backend` | `fs` | Where attachments are kept: `fs` (a directory, `blob_dir`) or `s3` (any S3-compatible service; `blob_dir` then holds only upload staging) |
+| `s3_endpoint` | `TASKLANE_S3_ENDPOINT` | `--s3-endpoint` | unset | S3 endpoint URL for MinIO and other compatible services, such as `http://minio:9000`. Empty means AWS S3. A custom endpoint implies path-style addressing |
+| `s3_region` | `TASKLANE_S3_REGION` | `--s3-region` | `us-east-1` | S3 region used for request signing |
+| `s3_bucket` | `TASKLANE_S3_BUCKET` | `--s3-bucket` | unset | S3 bucket (required with `blob_backend=s3`; it must already exist) |
+| `s3_prefix` | `TASKLANE_S3_PREFIX` | `--s3-prefix` | unset | Optional key prefix, so a bucket can be shared, for example `tasklane/` |
+| `s3_access_key` | `TASKLANE_S3_ACCESS_KEY`, `TASKLANE_S3_ACCESS_KEY_FILE` | `--s3-access-key` | unset | S3 access key id |
+| `s3_secret_key` | `TASKLANE_S3_SECRET_KEY`, `TASKLANE_S3_SECRET_KEY_FILE` | `--s3-secret-key` | unset | S3 secret access key |
+| `s3_path_style` | `TASKLANE_S3_PATH_STYLE` | `--s3-path-style` | `false` | Address the bucket in the URL path instead of the host name (always on with a custom endpoint) |
+| `s3_sse` | `TASKLANE_S3_SSE` | `--s3-sse` | unset | Server-side encryption requested on every write |
+| `s3_kms_key_id` | `TASKLANE_S3_KMS_KEY_ID` | `--s3-kms-key-id` | unset | KMS key for `s3_sse=aws:kms`; empty uses the bucket default key |
+| `s3_part_size_mb` | `TASKLANE_S3_PART_SIZE_MB` | `--s3-part-size-mb` | `16` | Multipart part size in MiB (at least 5); larger files are uploaded in parts |
 | `max_upload_mb` | `TASKLANE_MAX_UPLOAD_MB` | `--max-upload-mb` | `100` | Largest accepted attachment, in MiB |
 | `session_ttl` | `TASKLANE_SESSION_TTL` | `--session-ttl` | `336h` | How long a sign-in lasts |
 | `presence_ttl` | `TASKLANE_PRESENCE_TTL` | `--presence-ttl` | `30s` | How long an editing indicator lives without a heartbeat |

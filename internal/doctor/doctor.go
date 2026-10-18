@@ -4,6 +4,7 @@ package doctor
 import (
 	"context"
 	"fmt"
+	"github.com/larytet/tasklane/internal/blob"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,7 +107,16 @@ func Run(ctx context.Context, cfg config.Config) []Check {
 			add("file descriptors", true, fmt.Sprintf("limit %d", rl.Cur))
 		}
 	}
-	if err := os.MkdirAll(cfg.BlobDir, 0o750); err != nil {
+	if cfg.BlobBackend == "s3" {
+		st, err := blob.NewFromConfig(cfg)
+		if err != nil {
+			add("blob store", false, err.Error())
+		} else if err := st.WriteCheck(); err != nil {
+			add("blob store", false, "the S3 bucket "+cfg.S3Bucket+" is not usable (credentials, endpoint, bucket and permissions are checked): "+err.Error())
+		} else {
+			add("blob store", true, "S3 bucket "+cfg.S3Bucket+" accepts writes; staging in "+cfg.BlobDir)
+		}
+	} else if err := os.MkdirAll(cfg.BlobDir, 0o750); err != nil {
 		add("blob store", false, "cannot create "+cfg.BlobDir+": "+err.Error())
 	} else {
 		f := filepath.Join(cfg.BlobDir, ".doctor")

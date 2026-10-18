@@ -16,6 +16,17 @@ type Config struct {
 	Listen        string
 	DatabaseURL   string
 	BlobDir       string
+	BlobBackend   string
+	S3Endpoint    string
+	S3Region      string
+	S3Bucket      string
+	S3Prefix      string
+	S3AccessKey   string
+	S3SecretKey   string
+	S3PathStyle   bool
+	S3SSE         string
+	S3KMSKeyID    string
+	S3PartSizeMB  int64
 	MaxUploadMB   int64
 	SessionTTL    time.Duration
 	BaseURL       string
@@ -47,6 +58,17 @@ var Schema = []Key{
 	{Name: "database_url", Default: "postgres://tl:tl@localhost:55432/tasklane", Kind: "string", Secret: true, Doc: "PostgreSQL connection string. The role must be able to create the `pg_trgm` and `unaccent` extensions (trusted extensions on PostgreSQL 13 and later, so the database owner can)"},
 	{Name: "base_url", Default: "http://localhost:8080", Kind: "string", Doc: "Public URL. An `https://` value turns on the `Secure` flag of the session cookie and is used in links in mail"},
 	{Name: "blob_dir", Default: "./data/blobs", Kind: "string", Doc: "Directory of the local filesystem blob store (attachments). Must be writable"},
+	{Name: "blob_backend", Default: "fs", Kind: "enum", Enum: []string{"fs", "s3"}, Doc: "Where attachments are kept: `fs` (a directory, `blob_dir`) or `s3` (any S3-compatible service; `blob_dir` then holds only upload staging)"},
+	{Name: "s3_endpoint", Default: "", Kind: "string", Doc: "S3 endpoint URL for MinIO and other compatible services, such as `http://minio:9000`. Empty means AWS S3. A custom endpoint implies path-style addressing"},
+	{Name: "s3_region", Default: "us-east-1", Kind: "string", Doc: "S3 region used for request signing"},
+	{Name: "s3_bucket", Default: "", Kind: "string", Doc: "S3 bucket (required with `blob_backend=s3`; it must already exist)"},
+	{Name: "s3_prefix", Default: "", Kind: "string", Doc: "Optional key prefix, so a bucket can be shared, for example `tasklane/`"},
+	{Name: "s3_access_key", Default: "", Kind: "string", Secret: true, Doc: "S3 access key id"},
+	{Name: "s3_secret_key", Default: "", Kind: "string", Secret: true, Doc: "S3 secret access key"},
+	{Name: "s3_path_style", Default: "false", Kind: "enum", Enum: []string{"true", "false"}, Doc: "Address the bucket in the URL path instead of the host name (always on with a custom endpoint)"},
+	{Name: "s3_sse", Default: "", Kind: "enum", Enum: []string{"", "AES256", "aws:kms"}, Doc: "Server-side encryption requested on every write"},
+	{Name: "s3_kms_key_id", Default: "", Kind: "string", Doc: "KMS key for `s3_sse=aws:kms`; empty uses the bucket default key"},
+	{Name: "s3_part_size_mb", Default: "16", Kind: "int", Doc: "Multipart part size in MiB (at least 5); larger files are uploaded in parts"},
 	{Name: "max_upload_mb", Default: "100", Kind: "int", Doc: "Largest accepted attachment, in MiB"},
 	{Name: "session_ttl", Default: "336h", Kind: "duration", Doc: "How long a sign-in lasts"},
 	{Name: "presence_ttl", Default: "30s", Kind: "duration", Doc: "How long an editing indicator lives without a heartbeat"},
@@ -327,6 +349,8 @@ func Load(o Options) (Config, error) {
 	n := func(k string) int64 { v, _ := strconv.ParseInt(m[k], 10, 64); return v }
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
 	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], MaxUploadMB: n("max_upload_mb"),
+		BlobBackend: m["blob_backend"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
+		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],
 		SMTPTLS: m["smtp_tls"], SMTPUser: m["smtp_user"], SMTPPass: m["smtp_pass"], AdminEmail: m["admin_email"], AdminPassword: m["admin_password"],
 		PresenceTTL: d("presence_ttl")}, nil

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"github.com/larytet/tasklane/internal/testutil/s3mock"
 	"os"
 	"testing"
 	"time"
@@ -119,4 +120,24 @@ func (e *Env) WithBlobs() *blob.FS {
 		e.T.Fatal(err)
 	}
 	return fs
+}
+
+// WithS3Blobs backs the service with the in-process S3 double and returns both, with 5 MiB parts so multipart is
+// exercised by modest files and zero GC retention.
+func (e *Env) WithS3Blobs() (*blob.S3, *s3mock.Server) {
+	m := s3mock.New()
+	e.T.Cleanup(m.Close)
+	c, err := blob.NewS3Client(blob.S3Config{Endpoint: m.URL, Region: s3mock.Region, Bucket: s3mock.Bucket, AccessKey: s3mock.AccessKey, SecretKey: s3mock.SecretKey,
+		PartSize: 5 << 20, Sleep: func(time.Duration) {}})
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	st, err := blob.NewS3(c, e.T.TempDir())
+	if err != nil {
+		e.T.Fatal(err)
+	}
+	if err := e.Svc.ConfigureBlobs(context.Background(), &domain.Blobs{Store: st}); err != nil {
+		e.T.Fatal(err)
+	}
+	return st, m
 }
