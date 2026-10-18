@@ -688,3 +688,30 @@ Every severity 1 or 2 defect gets a regression test (a document triple added to 
 - Choose the concrete tools per level (section 2) at the start of M1; keep the gates, not the products.
 - Decide the reference `perf` hardware profile and the reference mid-range phone profile.
 - External penetration test (SEC-11) is postponed; decide when to schedule it, and revisit before any public or multi-tenant hosted offering.
+
+## 12. Implementation status
+
+Which planned tests exist as automated tests in the repository. Updated at the end of each milestone (see STATUS.md).
+"Partial" means the case is covered at the domain level but not yet end to end through the HTTP API or the browser.
+
+| Plan id | State | Test |
+|---|---|---|
+| LIVE-01 | partial (domain) | `TestLIVE01_CompareAndSetExactlyOneWinner` (50 users, one winner), `TestLIVE01_SequenceHasNoGapsUnderRetriesToFreshSeq` (no lost acknowledged save, gapless `text_seq`) |
+| LIVE-02 | partial (domain) | `TestScalarFieldsMergeAcrossFields` |
+| LIVE-03 | partial (domain) | `TestConflictFlow_KeepMineIsRestorableAndRecheckedAgainstLatest` (dialog payload, repeat on a third save, keep mine restorable) |
+| LIVE-04 | partial | `internal/text` merge tests (block and word level, identity, disjoint inserts); corpus file not yet built |
+| LIVE-05 | partial (domain) | `TestLIVE05_IdempotentRetry` |
+| LIVE-07 | done (domain) | `TestLIVE07_APIWrites` |
+| LIVE-10 | partial | `TestLIVE10_Drafts` (private, stale detection, removed on save); 10 s client cadence, expiry and cap pending |
+| LIVE-13 | partial | `TestLIVE13_Sanitization` (text format only; no rich-text schema yet) |
+| LIVE-14 | done (domain) | `TestLIVE14_TextSavesNeverBumpVersion` |
+| LIVE-16 | partial (domain) | `TestScalarFieldsMergeAcrossFields` |
+| HIST-01, HIST-02, HIST-08 | partial | `TestHIST_RecordsAndRestore` |
+| PRES-01..04 | partial (domain) | `TestPRES_AdvisoryPresence` (heartbeat, expiry on an injected clock, appear offline, never blocks) |
+| CORE-01 | done (domain) | `TestCreateAndKeys`, `TestKeysAreUniqueUnderConcurrency` |
+| CORE-02 | done (domain) | `TestWorkflowTransitions` |
+| CORE-07 | done (domain) | `TestComments` |
+| SEC-01..03 | partial | `TestPermissions` (non-member invisible, viewer read-only, admin-only project creation) |
+| SEC-05 | partial | `TestAuthAndTokens` (hashed sessions and API tokens, logout) |
+
+Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.
