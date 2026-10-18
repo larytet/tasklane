@@ -1,4 +1,4 @@
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;
 
 CREATE TABLE app_user (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

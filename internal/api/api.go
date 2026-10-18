@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/larytet/tasklane/internal/domain"
+	"github.com/larytet/tasklane/internal/search"
 )
 
 type Server struct {
@@ -21,6 +22,7 @@ type Server struct {
 	Secure     bool // set the Secure flag on the session cookie
 	Extra      func(mux *http.ServeMux, s *Server)
 	Ready      func(ctx context.Context) error
+	Search     *search.Postgres
 }
 
 type ctxKey struct{}
@@ -175,6 +177,10 @@ func (s *Server) Handler() http.Handler {
 		s.Svc.Presence.Leave(strings.ToUpper(r.PathValue("key")), actorOf(r).ID)
 		s.json(w, 200, map[string]bool{"ok": true})
 	}))
+	if s.Search == nil {
+		s.Search = &search.Postgres{DB: s.Svc.DB}
+	}
+	s.registerSearch(mux)
 	if s.Extra != nil {
 		s.Extra(mux, s)
 	}

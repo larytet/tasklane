@@ -80,5 +80,6 @@ func (s *Service) EditComment(ctx context.Context, a Actor, key, commentID, body
 	if tag.RowsAffected() == 0 {
 		return ErrForbidden
 	}
-	return nil
+	_, err = s.DB.Exec(ctx, `INSERT INTO outbox(aggregate,type,payload) VALUES($1,'comment.edited',$2)`, "issue:"+is.Key, `{"key":"`+is.Key+`"}`)
+	return err
 }

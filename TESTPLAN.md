@@ -721,5 +721,16 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | PRES-01..04 (HTTP) | partial | `TestHTTP_PresenceAndDrafts` |
 | UPG-01 | partial | `TestUPG01_MigrateIsIdempotentAndRecorded`, `TestUPG01_ConcurrentNodesMigrateOnce`, `TestMigrationsAreNumberedWithoutGaps`; upgrade from the previous release pending (no release yet) |
 | CFG-01..04, INST-01 | partial | `TestCFG_DoctorReportsBrokenEnvironmentWithoutPanicking`, `TestCFG_DoctorHealthyInstall`; configuration reference document pending |
+| TQL-01 | done | `TestTQL01_GoldenQueries`: about 60 queries over a fixed dataset (fields, operators, `currentUser()`, dates and functions, `ORDER BY`, text, `WAS`, `CHANGED`); `internal/search/tql` grammar tests |
+| TQL-02 | done | `TestFuzzRandomInput` (2 s of random and mutated input, hang detection per input), `FuzzParse` (native fuzzer), `TestLimits` (nesting, clause count, length) |
+| TQL-03 | partial | `TestParseErrorsArePositionedAndClear`, `TestTQL03_SemanticErrorsAreClear` (clear positioned errors, SQL injection attempts are values); a real-world JQL corpus is not yet collected |
+| TQL-04 | partial | `was` and `changed` work for status, priority and assignee; custom fields arrive with M3 |
+| TQL-06 | done | `TestTQL06_PermissionFiltering`: scope injected into every compiled query, internal comments hidden from viewers (also through `!~`), revoked access effective at once, typeahead scoped |
+| TQL-07, TQL-10, TQL-27 | partial | `TestTQL07_IndexFollowsEditsAndTrash`, `TestTQL10_27_IndexerIsIdempotentAndSkipsUnchangedText` (replay of all events changes nothing; unchanged text is not rewritten); GIN bloat and 1 million update runs pending |
+| TQL-21 | done | `TestTQL21_PlanShapes` (`make perf`): GIN, trigram and btree plans on the 100,000-issue dataset |
+| TQL-22 | done | `TestTQL22_TokenizationContract` (keys, UTF-8, error codes, paths, emails, versions, CamelCase, accents, CJK, emoji) with documented limitations pinned |
+| TQL-24 | partial | `TestTQL24_RankingAndPaging`: summary above description, frequency, explicit order wins, deterministic paging; rank window and snapshot tokens pending |
+| TQL-26 | partial | internal and public comment matching in `TestTQL06_PermissionFiltering`; thousands of comments per issue pending |
+| PERF-16, PERF-17 | done (single machine) | `TestPERF16_17_SearchLatencyAt100kIssues` (`make perf`). Measured p95: text 62 to 137 ms, key lookup 2 ms, filter list 46 ms, comment match 74 ms, typeahead 66 ms; budgets 400 ms and 150 ms. Reference `perf` hardware not yet defined (TESTPLAN section 11) |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

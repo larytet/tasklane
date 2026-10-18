@@ -1,0 +1,6 @@
+# Test overlay: throwaway PostgreSQL on a published port for `make test`.
+services:
+  postgres:
+    ports:
+      - "55432:5432"
+    command: ["postgres", "-c", "fsync=off"]

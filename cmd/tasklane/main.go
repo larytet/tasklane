@@ -16,6 +16,7 @@ import (
 	"github.com/larytet/tasklane/internal/config"
 	"github.com/larytet/tasklane/internal/doctor"
 	"github.com/larytet/tasklane/internal/domain"
+	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/store"
 )
 
@@ -55,6 +56,13 @@ func main() {
 		if doctor.Failed(cs) {
 			os.Exit(1)
 		}
+	case "reindex":
+		st := mustOpen(ctx, cfg)
+		defer st.Close()
+		if err := search.ReindexAll(ctx, st.Pool); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("search index rebuilt")
 	case "create-admin":
 		if len(os.Args) < 4 {
 			log.Fatal("usage: tasklane create-admin EMAIL NAME   (password from TASKLANE_ADMIN_PASSWORD)")
@@ -72,7 +80,7 @@ func main() {
 	case "version":
 		fmt.Println(version)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor create-admin version\n", cmd)
+		fmt.Fprintf(os.Stderr, "unknown command %q; commands: serve migrate doctor reindex create-admin version\n", cmd)
 		os.Exit(2)
 	}
 }
@@ -105,6 +113,9 @@ func serve(ctx context.Context, cfg config.Config) {
 			log.Printf("created administrator %s", cfg.AdminEmail)
 		}
 	}
+	ixCtx, stopIx := context.WithCancel(ctx)
+	defer stopIx()
+	go (&search.Indexer{DB: st.Pool}).Run(ixCtx)
 	srv := &api.Server{Svc: svc, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
 		Ready: func(ctx context.Context) error { return st.Pool.Ping(ctx) }}
 	hs := &http.Server{Addr: cfg.Listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}

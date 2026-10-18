@@ -1,0 +1,32 @@
+# Single-node profile: one Tasklane container and PostgreSQL. The same file, plus overlays, is the test environment.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: tasklane
+      POSTGRES_PASSWORD: ${TASKLANE_DB_PASSWORD:?set TASKLANE_DB_PASSWORD}
+      POSTGRES_DB: tasklane
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tasklane"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  tasklane:
+    build: ../..
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TASKLANE_DATABASE_URL: postgres://tasklane:${TASKLANE_DB_PASSWORD}@postgres:5432/tasklane
+      TASKLANE_BASE_URL: ${TASKLANE_BASE_URL:-http://localhost:8080}
+      TASKLANE_ADMIN_EMAIL: ${TASKLANE_ADMIN_EMAIL:-}
+      TASKLANE_ADMIN_PASSWORD: ${TASKLANE_ADMIN_PASSWORD:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - blobs:/data/blobs
+volumes:
+  pgdata:
+  blobs:

@@ -144,3 +144,24 @@ func (s *Service) ListProjects(ctx context.Context, a Actor) ([]Project, error) 
 	}
 	return out, rows.Err()
 }
+
+// SearchScope returns the project ids the actor may read, and those where internal comments are visible.
+func (s *Service) SearchScope(ctx context.Context, a Actor) (all bool, readable, writable []string, err error) {
+	if a.Admin {
+		return true, nil, nil, nil
+	}
+	rows, err := s.DB.Query(ctx, `SELECT project_id, role FROM project_member WHERE user_id=$1`, a.ID)
+	if err != nil {
+		return false, nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, role string
+		rows.Scan(&id, &role)
+		readable = append(readable, id)
+		if canWrite(role) {
+			writable = append(writable, id)
+		}
+	}
+	return false, readable, writable, rows.Err()
+}
