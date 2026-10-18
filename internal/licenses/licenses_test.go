@@ -107,7 +107,7 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 		t.Fatalf("possible outbound call or licence enforcement in production code:\n%s", strings.Join(offenders, "\n"))
 	}
 	// the front end loads nothing from other origins
-	for _, f := range []string{"index.html", "app.js", "app.css", "lib.js"} {
+	for _, f := range []string{"index.html", "app.js", "app.css", "lib.js", "agile.js"} {
 		b, _ := os.ReadFile(filepath.Join(root, "internal/web/static", f))
 		if regexp.MustCompile(`(src|href)="https?://|url\(https?://|fetch\("https?://|@import`).Match(b) {
 			t.Errorf("%s references another origin", f)

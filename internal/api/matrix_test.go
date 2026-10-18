@@ -170,6 +170,7 @@ func rows() []row {
 			return J("POST", "/api/v1/boards/"+f.board()+"/move", map[string]any{"key": f.issue(), "column": "In Progress"})
 		}},
 		{"GET /api/v1/boards/{id}/backlog", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.sprintBoard()+"/backlog", nil) }},
+		{"GET /api/v1/boards/{id}/sprints", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/boards/"+f.sprintBoard()+"/sprints", nil) }},
 		{"POST /api/v1/boards/{id}/sprints", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
 			return J("POST", "/api/v1/boards/"+f.sprintBoard()+"/sprints", map[string]any{"goal": "g"})
 		}},

@@ -74,6 +74,10 @@ func (s *Server) registerSprints(mux *http.ServeMux) {
 		v, err := s.Svc.Backlog(r.Context(), actorOf(r), r.PathValue("id"))
 		s.reply(w, v, err)
 	}))
+	s.handle(mux, "GET /api/v1/boards/{id}/sprints", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListSprints(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
+	}))
 	s.handle(mux, "POST /api/v1/boards/{id}/sprints", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in domain.SprintIn
 		if !s.decode(w, r, &in) {

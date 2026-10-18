@@ -1,7 +1,7 @@
 GO ?= go
 export TASKLANE_TEST_DATABASE_URL ?= postgres://tl:tl@localhost:55432/tasklane
 
-.PHONY: build test vet db notice dist
+.PHONY: build test vet db notice dist perf e2e e2e-update
 build:
 	$(GO) build -o bin/tasklane ./cmd/tasklane
 vet:

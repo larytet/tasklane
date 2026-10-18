@@ -84,6 +84,7 @@
       h('span', { class: 'brand', tabindex: 0, role: 'link', onclick: () => { location.hash = '#/'; }, onkeydown: e => { if (e.key === 'Enter') location.hash = '#/'; } }, 'Tasklane'),
       q,
       h('button', { class: 'btn primary', onclick: createDialog }, '+ Create'),
+      h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
       h('span', { class: 'muted' }, S.me ? S.me.label : ''),
@@ -633,6 +634,7 @@
     let m;
     if ((m = hash.match(/^#\/trash\/([A-Za-z0-9]*)/))) return trashView(m[1].toUpperCase() || (S.projects[0] && S.projects[0].key) || '');
     if ((m = hash.match(/^#\/issue\/([A-Za-z0-9-]+)/))) return issueView(m[1].toUpperCase());
+    for (const x of EXT.routes) { const mm = hash.match(x.re); if (mm) { stopTimers(); return x.run(mm); } }
     const q = hash.startsWith('#/?q=') ? decodeURIComponent(hash.slice(5)) : '';
     return listView(q);
   }
@@ -641,6 +643,9 @@
     if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect(); } else S.me = null;
     route();
   }
+  // the agile views (agile.js) plug in here
+  const EXT = { routes: [] };
+  window.TLApp = { h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route };
   window.addEventListener('hashchange', route);
   boot();
 })();

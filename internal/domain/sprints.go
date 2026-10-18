@@ -655,6 +655,28 @@ func (s *Service) sprintView(ctx context.Context, b Board, pid string, sp Sprint
 	return v, nil
 }
 
+// ListSprints lists every sprint of a board, newest first, closed ones included (for the reports picker).
+func (s *Service) ListSprints(ctx context.Context, a Actor, boardID string) ([]Sprint, error) {
+	b, _, _, err := s.boardAccess(ctx, a, boardID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.Query(ctx, `SELECT `+sprintCols+` FROM sprint WHERE board_id::text=$1 ORDER BY starts_at DESC`, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Sprint{}
+	for rows.Next() {
+		sp, err := scanSprint(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
 // GetSprint returns one sprint with its issues, totals, capacity and scope changes.
 func (s *Service) GetSprint(ctx context.Context, a Actor, sprintID string) (SprintView, error) {
 	sp, b, _, err := s.sprintAccess(ctx, a, sprintID)
