@@ -43,6 +43,8 @@ type DevPanel struct {
 	// Automation is what rules and smart commands did to this issue, or why they did not: the record people look for when an
 	// issue moved, or a command in a commit seemed to be ignored.
 	Automation []DevAuto `json:"automation,omitempty"`
+	// Hidden counts the linked pull requests, branches and commits in repositories whose details this person may not see (GIT-11).
+	Hidden int `json:"hidden,omitempty"`
 }
 
 type DevAuto struct {
@@ -81,27 +83,29 @@ func (s *Service) Development(ctx context.Context, a Actor, key string) (DevPane
 		return DevPanel{}, err
 	}
 	d := DevPanel{}
-	linked := `FROM git_link l JOIN git_object o ON o.id=l.object_id JOIN git_repo r ON r.id=o.repo_id WHERE l.issue_id::text=$1`
-	if d.PRs, err = s.devItems(ctx, `SELECT `+devCols+`,l.manual,o.provider_at `+linked+` AND o.kind='pr' ORDER BY o.provider_at DESC`, is.ID); err != nil {
+	// $1 the issue, $2 a limit, $3 the person (null: sees everything) and $4 now, for git_repo_visible: restricted repositories are left out
+	usr, now := s.visArgs(a)
+	linked := `FROM git_link l JOIN git_object o ON o.id=l.object_id JOIN git_repo r ON r.id=o.repo_id WHERE l.issue_id::text=$1 AND $2::int>=0 AND git_repo_visible(o.repo_id,$3::uuid,$4::timestamptz)`
+	if d.PRs, err = s.devItems(ctx, `SELECT `+devCols+`,l.manual,o.provider_at `+linked+` AND o.kind='pr' ORDER BY o.provider_at DESC`, is.ID, 0, usr, now); err != nil {
 		return d, err
 	}
-	if d.Branches, err = s.devItems(ctx, `SELECT `+devCols+`,l.manual,o.provider_at `+linked+` AND o.kind='branch' ORDER BY o.provider_at DESC, o.title`, is.ID); err != nil {
+	if d.Branches, err = s.devItems(ctx, `SELECT `+devCols+`,l.manual,o.provider_at `+linked+` AND o.kind='branch' ORDER BY o.provider_at DESC, o.title`, is.ID, 0, usr, now); err != nil {
 		return d, err
 	}
-	if d.Commits, err = s.devItems(ctx, `SELECT `+devCols+`,l.manual,o.provider_at `+linked+` AND o.kind='commit' ORDER BY o.provider_at DESC LIMIT $2`, is.ID, devCommitCap); err != nil {
+	if d.Commits, err = s.devItems(ctx, `SELECT `+devCols+`,l.manual,o.provider_at `+linked+` AND o.kind='commit' ORDER BY o.provider_at DESC LIMIT $2`, is.ID, devCommitCap, usr, now); err != nil {
 		return d, err
 	}
 	// builds belong to the pull requests and branches by head commit; deployments by any linked commit
 	if d.Builds, err = s.devItems(ctx, `SELECT DISTINCT ON (b.repo_id,b.title,b.sha) b.id::text,b.kind,r.full_name,b.title,b.state,b.review,b.author,b.sha,b.branch,b.env,b.url,false,b.provider_at
 		FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind IN ('pr','branch') AND o.sha<>''
 		JOIN git_object b ON b.repo_id=o.repo_id AND b.kind='build' AND b.sha=o.sha JOIN git_repo r ON r.id=b.repo_id
-		WHERE l.issue_id::text=$1 ORDER BY b.repo_id,b.title,b.sha,b.provider_at DESC`, is.ID); err != nil {
+		WHERE l.issue_id::text=$1 AND $2::int>=0 AND git_repo_visible(b.repo_id,$3::uuid,$4::timestamptz) ORDER BY b.repo_id,b.title,b.sha,b.provider_at DESC`, is.ID, 0, usr, now); err != nil {
 		return d, err
 	}
 	if d.Deployments, err = s.devItems(ctx, `SELECT DISTINCT ON (x.repo_id,x.env) x.id::text,x.kind,r.full_name,x.title,x.state,x.review,x.author,x.sha,x.branch,x.env,x.url,false,x.provider_at
 		FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.sha<>'' AND o.kind IN ('pr','branch','commit')
 		JOIN git_object x ON x.repo_id=o.repo_id AND x.kind='deployment' AND x.sha=o.sha JOIN git_repo r ON r.id=x.repo_id
-		WHERE l.issue_id::text=$1 ORDER BY x.repo_id,x.env,x.provider_at DESC`, is.ID); err != nil {
+		WHERE l.issue_id::text=$1 AND $2::int>=0 AND git_repo_visible(x.repo_id,$3::uuid,$4::timestamptz) ORDER BY x.repo_id,x.env,x.provider_at DESC`, is.ID, 0, usr, now); err != nil {
 		return d, err
 	}
 	d.Build = ""
@@ -116,9 +120,21 @@ func (s *Service) Development(ctx context.Context, a Actor, key string) (DevPane
 		}
 	}
 	d.Summary = devSummary(d)
-	// the last few things code events did here (their reasons name no one's private details: a person is never named)
-	rows, err := s.DB.Query(ctx, `SELECT 'rule',r.outcome,g.name||': '||r.detail,r.at FROM git_rule_run r JOIN git_rule g ON g.id=r.rule_id WHERE r.issue_id::text=$1 AND r.detail<>'claimed'
-		UNION ALL SELECT 'smart_commit',m.outcome,m.command||': '||m.reason,m.at FROM git_smart_run m WHERE m.issue_key=$2 AND m.reason<>'claimed' ORDER BY 4 DESC LIMIT 10`, is.ID, is.Key)
+	s.DB.QueryRow(ctx, `SELECT count(*) FROM git_link l JOIN git_object o ON o.id=l.object_id WHERE l.issue_id::text=$1 AND o.kind IN ('pr','branch','commit') AND NOT git_repo_visible(o.repo_id,$2::uuid,$3::timestamptz)`, is.ID, usr, now).Scan(&d.Hidden)
+	if d.Hidden > 0 {
+		hid := fmt.Sprintf("%d in a private repository you cannot access", d.Hidden)
+		if d.Summary == "" {
+			d.Summary = hid
+		} else {
+			d.Summary += ", " + hid
+		}
+	}
+	// the last few things code events did here (their reasons name no one's private details: a person is never named), and only
+	// those about code the caller may see: a rule's "GitHub, branch X" names a branch
+	rows, err := s.DB.Query(ctx, `SELECT 'rule',r.outcome,g.name||': '||r.detail,r.at FROM git_rule_run r JOIN git_rule g ON g.id=r.rule_id JOIN git_object ob ON ob.id=r.object_id
+		WHERE r.issue_id::text=$1 AND r.detail<>'claimed' AND git_repo_visible(ob.repo_id,$3::uuid,$4::timestamptz)
+		UNION ALL SELECT 'smart_commit',m.outcome,m.command||': '||m.reason,m.at FROM git_smart_run m JOIN git_object ob ON ob.id=m.object_id
+		WHERE m.issue_key=$2 AND m.reason<>'claimed' AND git_repo_visible(ob.repo_id,$3::uuid,$4::timestamptz) ORDER BY 4 DESC LIMIT 10`, is.ID, is.Key, usr, now)
 	if err == nil {
 		for rows.Next() {
 			var x DevAuto
@@ -321,8 +337,12 @@ func (s *Service) syncGitRepo(ctx context.Context, repoID string) (int, error) {
 		s.DB.Exec(ctx, `UPDATE git_repo SET sync_error=$2 WHERE id::text=$1`, repoID, trimErr(err))
 		return 0, err
 	}
+	access := ""
+	if s.restrictedAnywhere(ctx) {
+		access = s.syncGitAccess(ctx, cl, repoID, full, connID)
+	}
 	et, _ := json.Marshal(cl.ETags)
-	s.DB.Exec(ctx, `UPDATE git_repo SET last_sync_at=$2,sync_error='',etags=$3 WHERE id::text=$1`, repoID, started, et)
+	s.DB.Exec(ctx, `UPDATE git_repo SET last_sync_at=$2,sync_error=$4,etags=$3 WHERE id::text=$1`, repoID, started, et, access)
 	return len(evs), nil
 }
 

@@ -126,10 +126,13 @@ type API struct {
 	ExistingBranches map[string]bool
 	WriteStatus      int
 	DefaultBranch    string
-	limit            []limitRule
-	notModified      bool
-	etag             string
-	Hits             int
+	// Private is what the repository endpoint says about visibility; Members are the accounts with access (collaborators or project members).
+	Private     bool
+	Members     []string
+	limit       []limitRule
+	notModified bool
+	etag        string
+	Hits        int
 }
 
 type limitRule struct {
@@ -293,7 +296,11 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		if def == "" {
 			def = "main"
 		}
-		json.NewEncoder(w).Encode(M{"default_branch": def})
+		vis := "public"
+		if a.Private {
+			vis = "private"
+		}
+		json.NewEncoder(w).Encode(M{"default_branch": def, "private": a.Private, "visibility": vis})
 		return
 	}
 	if r.Header.Get("If-None-Match") == etag && strings.Contains(r.URL.Path, "/pulls") || r.Header.Get("If-None-Match") == etag && strings.Contains(r.URL.Path, "/merge_requests") {
@@ -310,6 +317,18 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 		a.page(w, r, a.Commits)
 	case strings.HasSuffix(p, "/pipelines"):
 		a.page(w, r, a.Pipelines)
+	case strings.HasSuffix(p, "/collaborators") || strings.HasSuffix(p, "/members/all"):
+		key := "login"
+		if a.Provider == "gitlab" {
+			key = "username"
+		}
+		a.mu.Lock()
+		var ms []M
+		for _, m := range a.Members {
+			ms = append(ms, M{key: m})
+		}
+		a.mu.Unlock()
+		a.page(w, r, ms)
 	case strings.Contains(p, "/check-runs"):
 		json.NewEncoder(w).Encode(M{"check_runs": a.Checks})
 	default:

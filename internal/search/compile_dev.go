@@ -20,12 +20,24 @@ import (
 // so a query can never return an issue the caller cannot see. By default anyone who can see an issue sees its development
 // data. These fields are not in the search index; the router sends a query that uses them to PostgreSQL.
 
-const (
-	prLinked = "EXISTS (SELECT 1 FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind='pr' WHERE l.issue_id=i.id"
-	buildAgg = `(SELECT CASE WHEN bool_or(b.state='failing') THEN 'failing' WHEN bool_or(b.state='running') THEN 'running' WHEN bool_or(b.state='passing') THEN 'passing' END
-		FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind IN ('pr','branch') AND o.sha<>''
+// vis is the visibility condition on the code object o (GIT-11): a restricted organization does not let a query see, or be
+// answered by, the details of a repository the caller may not see. Administrators and the system see everything.
+func (c *compiler) vis() string {
+	if c.sc.All || c.sc.UserID == "" {
+		return ""
+	}
+	return " AND git_repo_visible(o.repo_id, " + c.arg(c.sc.UserID) + "::uuid, " + c.arg(c.nowFn()) + "::timestamptz)"
+}
+
+func (c *compiler) prLinked() string {
+	return "EXISTS (SELECT 1 FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind='pr' WHERE l.issue_id=i.id" + c.vis()
+}
+
+func (c *compiler) buildAgg() string {
+	return `(SELECT CASE WHEN bool_or(b.state='failing') THEN 'failing' WHEN bool_or(b.state='running') THEN 'running' WHEN bool_or(b.state='passing') THEN 'passing' END
+		FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind IN ('pr','branch') AND o.sha<>''` + c.vis() + `
 		JOIN git_object b ON b.repo_id=o.repo_id AND b.kind='build' AND b.sha=o.sha WHERE l.issue_id=i.id)`
-)
+}
 
 var (
 	prStates    = map[string]bool{"draft": true, "open": true, "merged": true, "closed": true}
@@ -73,15 +85,15 @@ func (c *compiler) devClause(x tql.Cmp) (string, bool, error) {
 		}
 		switch x.Op {
 		case "is":
-			return "(NOT " + prLinked + "))", true, nil
+			return "(NOT " + c.prLinked() + "))", true, nil
 		case "isnot":
-			return "(" + prLinked + "))", true, nil
+			return "(" + c.prLinked() + "))", true, nil
 		case "=", "!=", "in", "notin":
 			vs, err := vals(allowed)
 			if err != nil {
 				return "", true, err
 			}
-			return negate(isNeg, prLinked+" AND "+col+" = ANY("+c.arg(vs)+"::text[]))"), true, nil
+			return negate(isNeg, c.prLinked()+" AND "+col+" = ANY("+c.arg(vs)+"::text[]))"), true, nil
 		}
 	case "pullrequest.count":
 		switch x.Op {
@@ -91,10 +103,10 @@ func (c *compiler) devClause(x tql.Cmp) (string, bool, error) {
 			if err != nil || v.Empty || v.Fn != "" || n < 0 {
 				return "", true, errAt(v.Pos, "pullRequest.count is compared with a whole number")
 			}
-			return "((SELECT count(*) FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind='pr' WHERE l.issue_id=i.id) " + x.Op + " " + c.arg(n) + "::int)", true, nil
+			return "((SELECT count(*) FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind='pr' WHERE l.issue_id=i.id" + c.vis() + ") " + x.Op + " " + c.arg(n) + "::int)", true, nil
 		}
 	case "branch":
-		const linked = "EXISTS (SELECT 1 FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind='branch' WHERE l.issue_id=i.id"
+		linked := "EXISTS (SELECT 1 FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.kind='branch' WHERE l.issue_id=i.id" + c.vis()
 		switch x.Op {
 		case "is":
 			return "(NOT " + linked + "))", true, nil
@@ -116,19 +128,19 @@ func (c *compiler) devClause(x tql.Cmp) (string, bool, error) {
 	case "build.state":
 		switch x.Op {
 		case "is":
-			return "(" + buildAgg + " IS NULL)", true, nil
+			return "(" + c.buildAgg() + " IS NULL)", true, nil
 		case "isnot":
-			return "(" + buildAgg + " IS NOT NULL)", true, nil
+			return "(" + c.buildAgg() + " IS NOT NULL)", true, nil
 		case "=", "!=", "in", "notin":
 			vs, err := vals(buildStates)
 			if err != nil {
 				return "", true, err
 			}
-			return negate(isNeg, buildAgg+" = ANY("+c.arg(vs)+"::text[])"), true, nil
+			return negate(isNeg, c.buildAgg()+" = ANY("+c.arg(vs)+"::text[])"), true, nil
 		}
 	case "deployment.environment":
-		const dep = `EXISTS (SELECT 1 FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.sha<>'' AND o.kind IN ('pr','branch','commit')
-			JOIN git_object x ON x.repo_id=o.repo_id AND x.kind='deployment' AND x.sha=o.sha WHERE l.issue_id=i.id`
+		dep := `EXISTS (SELECT 1 FROM git_link l JOIN git_object o ON o.id=l.object_id AND o.sha<>'' AND o.kind IN ('pr','branch','commit')
+			JOIN git_object x ON x.repo_id=o.repo_id AND x.kind='deployment' AND x.sha=o.sha WHERE l.issue_id=i.id` + c.vis()
 		switch x.Op {
 		case "is":
 			return "(NOT " + dep + "))", true, nil

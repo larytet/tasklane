@@ -68,4 +68,24 @@ func (s *Server) registerGitAuto(mux *http.ServeMux) {
 		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.UnlinkGitIdentity(r.Context(), actorOf(r), id))
 	}))
+	s.handle(mux, "GET /api/v1/git/visibility", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.GitVisibility(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "PUT /api/v1/git/visibility", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Mode string `json:"mode"`
+		}
+		if s.decode(w, r, &in) {
+			s.reply(w, map[string]bool{"ok": true}, s.Svc.SetGitVisibility(r.Context(), actorOf(r), in.Mode))
+		}
+	}))
+	s.handle(mux, "PUT /api/v1/git/repos/{id}/privacy", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Private *bool `json:"private"`
+		}
+		if s.decode(w, r, &in) {
+			s.reply(w, map[string]bool{"ok": true}, s.Svc.SetGitRepoPrivacy(r.Context(), actorOf(r), r.PathValue("id"), in.Private))
+		}
+	}))
 }

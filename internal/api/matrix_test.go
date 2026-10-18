@@ -756,6 +756,11 @@ func rows() []row {
 		{"POST /api/v1/issues/{key}/git/branch", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(400), admin: codes(400)}, func(f *fixture) req {
 			return J("POST", "/api/v1/issues/"+f.issue()+"/git/branch", map[string]any{})
 		}},
+		{"GET /api/v1/git/visibility", adminer, func(f *fixture) req { return J("GET", "/api/v1/git/visibility", nil) }},
+		{"PUT /api/v1/git/visibility", adminer, func(f *fixture) req { return J("PUT", "/api/v1/git/visibility", map[string]any{"mode": "default"}) }},
+		{"PUT /api/v1/git/repos/{id}/privacy", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/git/repos/00000000-0000-0000-0000-000000000000/privacy", map[string]any{"private": true})
+		}},
 		{"GET /api/v1/admin/mail/inbound", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound", nil) }},
 		{"GET /api/v1/admin/mail/inbound/{id}/raw", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/admin/mail/inbound/999999/raw", nil) }},
 		{"POST /api/v1/admin/mail/inbound/{id}/release", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/admin/mail/inbound/999999/release", nil) }},

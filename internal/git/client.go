@@ -304,3 +304,45 @@ func decode(b []byte) (map[string]any, error) {
 	}
 	return m, nil
 }
+
+// RepoInfo reads the repository's visibility and default branch (a read: GET only).
+func (c *Client) RepoInfo(ctx context.Context, repo string) (private bool, defaultBranch string, err error) {
+	base := strings.TrimSuffix(c.BaseURL, "/")
+	u := fmt.Sprintf("%s/repos/%s", base, repo)
+	if c.Provider == "gitlab" {
+		u = fmt.Sprintf("%s/api/v4/projects/%s", base, url.PathEscape(repo))
+	}
+	body, _, err := c.get(ctx, u)
+	if err != nil {
+		return false, "", err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false, "", err
+	}
+	if c.Provider == "gitlab" {
+		private = str(m, "visibility") != "public"
+	} else {
+		private = boolean(m, "private")
+	}
+	return private, str(m, "default_branch"), nil
+}
+
+// Members lists the provider accounts that have access to the repository (collaborators on GitHub, project members including
+// inherited ones on GitLab). The token needs enough permission to read them; without it the provider answers 403 and the caller
+// keeps what it had.
+func (c *Client) Members(ctx context.Context, repo string) ([]string, error) {
+	base := strings.TrimSuffix(c.BaseURL, "/")
+	u, key := fmt.Sprintf("%s/repos/%s/collaborators?per_page=100", base, repo), "login"
+	if c.Provider == "gitlab" {
+		u, key = fmt.Sprintf("%s/api/v4/projects/%s/members/all?per_page=100", base, url.PathEscape(repo)), "username"
+	}
+	var out []string
+	err := c.pages(ctx, u, 5000, func(m map[string]any) bool {
+		if l := str(m, key); l != "" {
+			out = append(out, strings.ToLower(l))
+		}
+		return true
+	})
+	return out, err
+}
