@@ -388,6 +388,7 @@
     const outcome = h('select', { 'aria-label': 'Outcome' }, [['quarantined', 'Quarantined'], ['', 'All'], ['accepted', 'Accepted'], ['ignored', 'Ignored'], ['rejected', 'Rejected']].map(o => h('option', { value: o[0] }, o[1])));
     const queue = h('div', { class: 'card', role: 'list', 'aria-label': 'Inbound messages' });
     const sources = h('div', { class: 'card', role: 'list', 'aria-label': 'Mail sources' });
+    const supp = h('div', { class: 'card', role: 'list', 'aria-label': 'Suppressed addresses' });
     const msg = h('div', { class: 'err', role: 'alert' });
     const name = h('input', { type: 'text', 'aria-label': 'New source name', placeholder: 'Source name' });
     const trusted = h('input', { type: 'checkbox', 'aria-label': 'Trusted receiver' });
@@ -398,6 +399,15 @@
       if (!r.data.length) sources.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No sources. Add one to receive mail by webhook.')));
       for (const x of r.data) sources.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, x.name), ' ', h('span', { class: 'muted' }, (x.trusted ? 'trusted receiver' : 'untrusted') + ' · POST /api/v1/mail/inbound/' + x.id)),
         h('button', { class: 'btn ghost', 'aria-label': 'Delete source ' + x.name, onclick: async () => { const d = await api('DELETE', '/api/v1/admin/mail/sources/' + x.id); if (d.status === 200) loadSources(); else toast(errText(d)); } }, 'Delete')));
+    }
+    async function loadSupp() {
+      clear(supp);
+      const r = await api('GET', '/api/v1/admin/mail/suppressions');
+      if (r.status !== 200) { supp.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
+      const live = r.data.filter(x => !x.cleared);
+      if (!live.length) supp.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No address is suppressed.')));
+      for (const x of live) supp.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, x.email), ' ', x.user ? '(' + x.user + ') ' : '', h('span', { class: 'muted' }, x.kind + ' · ' + x.reason + ' · since ' + new Date(x.since).toLocaleDateString())),
+        h('button', { class: 'btn ghost', 'aria-label': 'Clear suppression of ' + x.email, onclick: async () => { const d = await api('DELETE', '/api/v1/admin/mail/suppressions/' + encodeURIComponent(x.email)); if (d.status === 200) loadSupp(); else toast(errText(d)); } }, 'Clear')));
     }
     async function loadQueue() {
       clear(queue);
@@ -424,10 +434,11 @@
         if (r.status === 201) { name.value = ''; msg.textContent = ''; loadSources(); const close = modal(h('div', {}, h('h2', {}, 'Signing secret'), h('p', {}, 'Sign each request body with this secret (HMAC-SHA256, header X-Tasklane-Signature: sha256=<hex>). It is shown once.'), h('pre', { class: 'code', 'aria-label': 'Signing secret' }, r.data.secret), h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => close() }, 'Done')))); }
         else msg.textContent = errText(r);
       } }, 'Add source')), msg,
+      h('h3', { style: 'margin-top:16px' }, 'Suppressed addresses'), h('p', { class: 'muted' }, 'Email stops after a hard bounce, a complaint, or three soft bounces in a week. The in-app inbox is never affected.'), supp,
       h('div', { class: 'chips', style: 'margin-top:16px' }, h('h3', { style: 'margin:0' }, 'Messages'), outcome, h('span', { class: 'grow' }),
         h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/admin/mail/reply-keys'); toast(r.status === 201 ? 'New reply-address key ' + r.data.kid + ' is signing. Older addresses keep working until their key is revoked.' : errText(r)); } }, 'Rotate reply key')),
       queue));
-    await Promise.all([loadSources(), loadQueue()]);
+    await Promise.all([loadSources(), loadQueue(), loadSupp()]);
   }
 
   A.EXT.routes.push({ re: /^#\/admin\/email\/?$/, run: () => emailView() });

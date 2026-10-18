@@ -32,6 +32,9 @@ type Message struct {
 	// Instance names this installation in X-Tasklane-Instance; every message of ours carries it and a loop counter, so
 	// mail between two Tasklane installations (or back to us) is recognised and ignored.
 	Instance string
+	// ReturnPath is the envelope sender (MAIL FROM). A distinct one per message (VERP) lets a bounce be matched to the message it
+	// answers; empty means the From address.
+	ReturnPath string
 }
 
 // Mailer is the transport interface; provider APIs (SES, SendGrid, ...) implement it later.
@@ -148,7 +151,15 @@ func (s *SMTP) Send(ctx context.Context, m Message) error {
 	if err != nil {
 		return &Permanent{fmt.Errorf("bad recipient address: %w", err)}
 	}
-	if err := c.Mail(fa.Address); err != nil {
+	env := fa.Address
+	if m.ReturnPath != "" {
+		ra, err := mail.ParseAddress(m.ReturnPath)
+		if err != nil {
+			return &Permanent{fmt.Errorf("bad return path: %w", err)}
+		}
+		env = ra.Address
+	}
+	if err := c.Mail(env); err != nil {
 		return err
 	}
 	if err := c.Rcpt(ta.Address); err != nil {

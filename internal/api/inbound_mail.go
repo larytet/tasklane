@@ -86,4 +86,20 @@ func (s *Server) registerInboundMail(mux *http.ServeMux) {
 			s.reply(w, map[string]bool{"ok": true}, s.Svc.SetMailPolicy(r.Context(), actorOf(r), r.PathValue("key"), in.Policy))
 		}
 	}))
+	s.handle(mux, "POST /api/v1/mail/bounces/{id}", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
+		if err != nil {
+			s.fail(w, 400, "bad_request", "could not read the request", nil)
+			return
+		}
+		n, err := s.Svc.ReceiveBounceEvents(r.Context(), r.PathValue("id"), r.Header.Get("X-Tasklane-Signature"), body)
+		s.replyStatus(w, 200, map[string]int{"applied": n}, err)
+	})
+	s.handle(mux, "GET /api/v1/admin/mail/suppressions", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListSuppressions(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "DELETE /api/v1/admin/mail/suppressions/{email}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.ClearSuppression(r.Context(), actorOf(r), r.PathValue("email")))
+	}))
 }

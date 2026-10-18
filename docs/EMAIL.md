@@ -50,6 +50,18 @@ Each project has an address, `KEY@domain` (shown by `GET /api/v1/projects/{key}/
 
 Releasing a quarantined message that was addressed to a project creates the issue once, as the matched sender.
 
+## Bounces, complaints and suppression
+
+Every message leaves with its own **return path** (the envelope sender), `bounce+TOKEN@domain`; the token names the message and is signed with the reply-address keys. A delivery report (a DSN) or an abuse feedback report (ARF) that arrives there is matched to the message it answers **and to the address that message went to**: a report about a different address, a report without a valid token, one signed by a revoked key, or a person's mail to the return path is recorded as ignored and changes nothing. A valid report is handled:
+
+- a **hard bounce** (action `failed`, status `5.x.x`) suppresses the address at once;
+- a **soft bounce** (`failed` with `4.x.x`) is counted, and the address is suppressed on the third within seven days; `delayed` and success notices change nothing;
+- a **complaint** (a feedback report) suppresses at once.
+
+Providers that report these events themselves can post to `POST /api/v1/mail/bounces/{source}` a body `{"events":[{"type":"bounce|soft|complaint","email":"…","status":"…"}]}` signed like an inbound message (the source's secret, `X-Tasklane-Signature`); an event only counts for an address Tasklane has mailed.
+
+**Suppression stops email to that address and nothing else**: the in-app inbox still gets every notification, and the delivery log shows the held-back mail as suppressed. The person sees "Email to your address is being held back" in their notification preferences. Administrators see the list in Admin, Email and can **clear** an entry (audited), which also resets the soft-bounce count.
+
 ## Reply addresses
 
 Every notification carries `Reply-To: reply+TOKEN@domain`. The token holds the issue, an expiry (30 days) and a signature over the issue, the **recipient** and the expiry, so a forwarded notification does not give its power to whoever received the forward: the signature fails for any other sender. A forged, expired or wrong-sender address is quarantined (and, since it names no trusted issue, cannot be released).

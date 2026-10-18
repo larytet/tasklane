@@ -53,7 +53,7 @@
     const qs = h('input', { type: 'time', value: p.quiet_start || '', 'aria-label': 'Quiet hours start' }), qe = h('input', { type: 'time', value: p.quiet_end || '', 'aria-label': 'Quiet hours end' });
     const tz = h('input', { type: 'text', value: p.timezone || '', placeholder: 'Europe/Berlin', 'aria-label': 'Time zone for quiet hours' });
     const msg = h('div', { class: 'err', role: 'alert' });
-    const close = modal(h('div', {}, h('h2', {}, 'Notification preferences'), watch.el, inbox.el, email.el,
+    const close = modal(h('div', {}, h('h2', {}, 'Notification preferences'), p.email_bouncing ? h('p', { class: 'err', role: 'status' }, 'Email to your address is being held back because it bounced. Notifications still arrive here in the inbox. Ask an administrator to clear it once the address works.') : null, watch.el, inbox.el, email.el,
       h('strong', { style: 'display:block;margin-top:8px' }, 'Tell me about'), ...kinds.map(x => x.el),
       h('strong', { style: 'display:block;margin-top:8px' }, 'Hold email during quiet hours'), h('div', { class: 'chips' }, qs, ' to ', qe, tz), msg,
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {

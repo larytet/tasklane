@@ -21,6 +21,8 @@ type NotifyPrefs struct {
 	QuietStart string   `json:"quiet_start"` // email waits until quiet hours end, such as 22:00 to 07:00
 	QuietEnd   string   `json:"quiet_end"`
 	Timezone   string   `json:"timezone"` // an IANA name; quiet hours use it (default UTC)
+	// EmailBouncing is read only: mail to your address bounced or drew a complaint and is being held back (the inbox is not affected).
+	EmailBouncing bool `json:"email_bouncing,omitempty"`
 }
 
 var notifyKinds = map[string]bool{"assigned": true, "mention": true, "comment": true, "status": true, "edit": true, "created": true}
@@ -85,7 +87,9 @@ func (p NotifyPrefs) quietUntil(now time.Time) (time.Time, bool) {
 }
 
 func (s *Service) MyNotifyPrefs(ctx context.Context, a Actor) NotifyPrefs {
-	return s.prefsOf(ctx, s.DB, a.ID)
+	p := s.prefsOf(ctx, s.DB, a.ID)
+	p.EmailBouncing = s.EmailBouncing(ctx, a.ID)
+	return p
 }
 
 func (s *Service) SetNotifyPrefs(ctx context.Context, a Actor, p NotifyPrefs) (NotifyPrefs, error) {

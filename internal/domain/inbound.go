@@ -508,6 +508,10 @@ func ignore(reason string) verdict { return verdict{outcome: "ignored", reason: 
 // classifyInbound decides what to do with a parsed message. It changes nothing.
 func (s *Service) classifyInbound(ctx context.Context, p *mail.Parsed, raw []byte, trusted bool, from *netmail.Address, ferr error, id int64, now time.Time, lim InboundLimits) verdict {
 	h := p.Header
+	// a bounce or a complaint is handled as one, before anything that would ignore it as automatic mail
+	if bv, ok := s.classifyBounce(ctx, p, raw); ok {
+		return bv
+	}
 	// our own and automatic mail first: these never get a reply and never act
 	switch {
 	case h.Get("X-Tasklane-Loop") != "" || h.Get("X-Tasklane-Instance") != "":

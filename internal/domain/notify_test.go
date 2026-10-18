@@ -152,8 +152,12 @@ func TestMAIL03_NotificationContent(t *testing.T) {
 	if !strings.Contains(html, `href="https://tasklane.example.com/#/issue/ABC-1"`) {
 		t.Fatal(html)
 	}
-	if from := msgs[1].From; from != "tasklane@example.com" {
+	// the envelope sender is the per-message return path (VERP), so a bounce can be matched to the message; the From header is unchanged
+	if from := msgs[1].From; !strings.HasPrefix(from, "bounce+") || !strings.HasSuffix(from, "@tasklane.example.com") {
 		t.Fatalf("envelope sender %q", from)
+	}
+	if h, _, _ := readMsg(t, msgs[1].Raw); !strings.Contains(h.Get("From"), "tasklane@example.com") {
+		t.Fatalf("From header %q", h.Get("From"))
 	}
 }
 

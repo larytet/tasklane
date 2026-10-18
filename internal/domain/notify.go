@@ -422,7 +422,11 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 			s.DB.Exec(ctx, `UPDATE mail_message SET status='suppressed', last_error='recipient no longer has access' WHERE id=$1`, j.id)
 			continue
 		}
-		serr := s.Mail.Mailer.Send(ctx, mail.Message{From: s.Mail.From, To: j.to, Subject: j.subject, MessageID: j.mid, InReplyTo: j.irt, Refs: j.refs,
+		if s.suppressed(ctx, addrOnly(j.to)) { // a bounce or a complaint stopped mail to this address; the in-app inbox is not affected
+			s.DB.Exec(ctx, `UPDATE mail_message SET status='suppressed', last_error='the address is suppressed after a bounce or complaint' WHERE id=$1`, j.id)
+			continue
+		}
+		serr := s.Mail.Mailer.Send(ctx, mail.Message{ReturnPath: s.returnPath(ctx, j.id), From: s.Mail.From, To: j.to, Subject: j.subject, MessageID: j.mid, InReplyTo: j.irt, Refs: j.refs,
 			Text: j.text, HTML: j.html, ReplyTo: j.replyTo, Instance: s.Mail.Domain, ListUnsubscribe: "<mailto:" + addrOnly(s.Mail.From) + "?subject=unsubscribe>", Date: s.Now()})
 		if serr == nil {
 			s.DB.Exec(ctx, `UPDATE mail_message SET status='sent', sent_at=$2, attempts=attempts+1, last_error='' WHERE id=$1`, j.id, s.Now())
