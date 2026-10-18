@@ -505,7 +505,7 @@ func (s *Server) resolveAssignee(ctx context.Context, a domain.Actor, key, who s
 		return a.ID, nil
 	}
 	var id string
-	err := s.Svc.DB.QueryRow(ctx, `SELECT u.id FROM app_user u JOIN project_member m ON m.user_id=u.id JOIN project p ON p.id=m.project_id
+	err := s.Svc.DB.QueryRow(ctx, `SELECT u.id FROM app_user u JOIN effective_member m ON m.user_id=u.id JOIN project p ON p.id=m.project_id
 		WHERE p.key=(SELECT p2.key FROM issue i JOIN project p2 ON p2.id=i.project_id WHERE i.key=$1 OR i.id IN (SELECT issue_id FROM issue_key_alias WHERE old_key=$1) LIMIT 1)
 		AND u.active AND lower(u.name)=lower($2)`, strings.ToUpper(key), who).Scan(&id)
 	if err != nil {

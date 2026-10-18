@@ -119,7 +119,7 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 	switch r := s.role(ctx, a, pid); {
 	case r == "":
 		return Issue{}, ErrNotFound // a project one cannot see answers like one that does not exist
-	case !canWrite(r):
+	case !s.can(ctx, pid, r, "create"):
 		return Issue{}, ErrForbidden
 	}
 	summary, _ := Sanitize(strings.TrimSpace(in.Summary))
@@ -241,7 +241,7 @@ func rankFor(n int64) string {
 
 func (s *Service) checkAssignable(ctx context.Context, tx pgx.Tx, pid, userID string) error {
 	var ok bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM app_user u WHERE u.id=$2 AND u.active AND (u.is_admin OR EXISTS(SELECT 1 FROM project_member m WHERE m.project_id=$1 AND m.user_id=u.id AND m.role<>'viewer')))`, pid, userID).Scan(&ok)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM app_user u WHERE u.id=$2 AND u.active AND (u.is_admin OR EXISTS(SELECT 1 FROM effective_member m WHERE m.project_id=$1 AND m.user_id=u.id AND m.role<>'viewer')))`, pid, userID).Scan(&ok)
 	if err != nil {
 		return invalid("unknown assignee")
 	}
@@ -422,6 +422,9 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	pid, err := s.projectID(ctx, is.Project)
 	if err != nil {
 		return is, err
+	}
+	if ch.Assignee != nil && !s.canIn(ctx, is.Project, role, "assign") {
+		return is, ErrForbidden
 	}
 	changed := map[string]string{}
 	if ch.Priority != nil {
@@ -641,7 +644,7 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 	if err != nil {
 		return is, err
 	}
-	if !canWrite(role) {
+	if is.Archived != nil || !s.canIn(ctx, is.Project, role, "transition") {
 		return is, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, is.Project)

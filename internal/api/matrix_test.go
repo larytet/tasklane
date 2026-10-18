@@ -237,6 +237,15 @@ func (f *fixture) eraseTarget() string {
 	return u.ID
 }
 
+func (f *fixture) group() string {
+	f.n++
+	g, err := f.e.Svc.CreateGroup(testutil.Ctx(), f.e.Admin, fmt.Sprint("Group ", f.n))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return g.ID
+}
+
 func (f *fixture) attachment(key string) string {
 	a, err := f.e.Svc.AttachStream(testutil.Ctx(), f.e.Alice, key, "n.txt", "text/plain", strings.NewReader("hello matrix"))
 	if err != nil {
@@ -599,6 +608,28 @@ func rows() []row {
 		{"GET /api/v1/admin/users/{id}/personal-data", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/users/"+f.spare.ID+"/personal-data", nil) }},
 		{"POST /api/v1/admin/users/{id}/erase", adminer, func(f *fixture) req {
 			return J("POST", "/api/v1/admin/users/"+f.eraseTarget()+"/erase", map[string]any{"delete_content": true, "scrub_mentions": true})
+		}},
+		{"GET /api/v1/groups", adminer, func(f *fixture) req { return J("GET", "/api/v1/groups", nil) }},
+		{"POST /api/v1/groups", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/groups", map[string]any{"name": fmt.Sprint("New group ", f.n)})
+		}},
+		{"GET /api/v1/groups/{id}", adminer, func(f *fixture) req { return J("GET", "/api/v1/groups/"+f.group(), nil) }},
+		{"DELETE /api/v1/groups/{id}", adminer, func(f *fixture) req { return J("DELETE", "/api/v1/groups/"+f.group(), nil) }},
+		{"POST /api/v1/groups/{id}/members", adminer, func(f *fixture) req {
+			return J("POST", "/api/v1/groups/"+f.group()+"/members", map[string]any{"user": f.spare.ID})
+		}},
+		{"DELETE /api/v1/groups/{id}/members/{user}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/groups/"+f.group()+"/members/"+f.spare.ID, nil)
+		}},
+		{"GET /api/v1/projects/{key}/groups", projAdmin, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/groups", nil) }},
+		{"PUT /api/v1/projects/{key}/groups/{id}", projAdmin, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/groups/"+f.group(), map[string]any{"role": "viewer"})
+		}},
+		{"DELETE /api/v1/projects/{key}/groups/{id}", projAdmin, func(f *fixture) req { return J("DELETE", "/api/v1/projects/ABC/groups/"+f.group(), nil) }},
+		{"GET /api/v1/projects/{key}/permissions", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/permissions", nil) }},
+		{"PUT /api/v1/projects/{key}/permissions", projAdmin, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/permissions", map[string]any{"comment": ""})
 		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {

@@ -133,6 +133,18 @@ func (s *Service) role(ctx context.Context, a Actor, projectID string) string {
 
 func canWrite(role string) bool { return role == "member" || role == "admin" }
 
+// canIn is can for a project named by key.
+func (s *Service) canIn(ctx context.Context, projectKey, role, perm string) bool {
+	if role == "admin" {
+		return true
+	}
+	pid, err := s.projectID(ctx, projectKey)
+	if err != nil {
+		return false
+	}
+	return s.can(ctx, pid, role, perm)
+}
+
 func (s *Service) ListProjects(ctx context.Context, a Actor) ([]Project, error) {
 	q := `SELECT p.id,p.key,p.name,p.type,p.archived,p.mirror_of IS NOT NULL FROM project p `
 	args := []any{}

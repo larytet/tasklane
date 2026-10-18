@@ -173,7 +173,7 @@ func (s *Service) CreateSprint(ctx context.Context, a Actor, boardID string, in 
 	if err != nil {
 		return Sprint{}, err
 	}
-	if role != "admin" {
+	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
 		return Sprint{}, ErrForbidden
 	}
 	if b.Kind != "scrum" {
@@ -285,7 +285,7 @@ func (s *Service) RecomputeSprint(ctx context.Context, a Actor, sprintID string)
 	if err != nil {
 		return sp, err
 	}
-	if role != "admin" {
+	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
 		return sp, ErrForbidden
 	}
 	if sp.State == "closed" {
@@ -303,11 +303,11 @@ func (s *Service) RecomputeSprint(ctx context.Context, a Actor, sprintID string)
 
 // UpdateSprint edits the name and goal of a sprint that is not closed (administrators).
 func (s *Service) UpdateSprint(ctx context.Context, a Actor, sprintID string, name, goal *string) (Sprint, error) {
-	sp, _, role, err := s.sprintAccess(ctx, a, sprintID)
+	sp, b, role, err := s.sprintAccess(ctx, a, sprintID)
 	if err != nil {
 		return sp, err
 	}
-	if role != "admin" {
+	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
 		return sp, ErrForbidden
 	}
 	if sp.State == "closed" {
@@ -339,7 +339,7 @@ func (s *Service) StartSprint(ctx context.Context, a Actor, sprintID string) (Sp
 	if err != nil {
 		return sp, err
 	}
-	if role != "admin" {
+	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
 		return sp, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, b.Project)
@@ -398,7 +398,7 @@ func (s *Service) CompleteSprint(ctx context.Context, a Actor, sprintID, dest st
 	if err != nil {
 		return res, err
 	}
-	if role != "admin" {
+	if !s.canIn(ctx, b.Project, role, "manage_sprints") {
 		return res, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, b.Project)

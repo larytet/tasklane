@@ -38,7 +38,7 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 	if err != nil {
 		return Comment{}, err
 	}
-	if !canWrite(role) {
+	if is.Archived != nil || !s.canIn(ctx, is.Project, role, "comment") { // archived work stays read-only whatever a scheme says
 		return Comment{}, ErrForbidden
 	}
 	endWrite, perr := s.admit(ctx, is.Project)
