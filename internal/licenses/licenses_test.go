@@ -98,6 +98,10 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 				if strings.HasSuffix(p, "internal/git/client.go") || strings.HasSuffix(p, "internal/jira/client.go") || strings.HasSuffix(p, "internal/search/os_client.go") || strings.HasSuffix(p, "internal/egress/egress.go") {
 					continue
 				}
+				// a workflow webhook post-function calls the URL an administrator put in a transition, through the egress policy
+				if strings.HasSuffix(p, "internal/domain/trules.go") && strings.Contains(m, "http.NewRequest") {
+					continue
+				}
 				// the S3 backend talks to the bucket the operator configured and nothing else
 				if strings.HasSuffix(p, "internal/blob/s3.go") {
 					continue
@@ -115,7 +119,7 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 		t.Fatalf("possible outbound call or licence enforcement in production code:\n%s", strings.Join(offenders, "\n"))
 	}
 	// the front end loads nothing from other origins
-	for _, f := range []string{"index.html", "app.js", "app.css", "lib.js", "agile.js"} {
+	for _, f := range []string{"index.html", "app.js", "app.css", "lib.js", "agile.js", "admin.js"} {
 		b, _ := os.ReadFile(filepath.Join(root, "internal/web/static", f))
 		if regexp.MustCompile(`(src|href)="https?://|url\(https?://|fetch\("https?://|@import`).Match(b) {
 			t.Errorf("%s references another origin", f)

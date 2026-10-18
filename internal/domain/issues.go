@@ -43,6 +43,8 @@ type TransitionOpt struct {
 	To   string `json:"to"`
 	// RequiresHuman: the workflow lets only a person take this transition (agents are refused)
 	RequiresHuman bool `json:"requires_human,omitempty"`
+	// Screen lists the fields to ask for before the transition runs
+	Screen []string `json:"screen,omitempty"`
 }
 
 // InputRequest is an agent's open question for a person.
@@ -188,7 +190,7 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 		key = pkey + "-" + itoa(n)
 		var id string
 		err := tx.QueryRow(ctx, `INSERT INTO issue(project_id,number,key,issue_type_id,status_id,priority,reporter_id,assignee_id,labels,parent_id,summary,rank,created_at,updated_at)
-			VALUES($1,$2,$3,$4,(SELECT st.id FROM project p JOIN status st ON st.workflow_id=p.workflow_id WHERE p.id=$1 ORDER BY st.position LIMIT 1),$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING id`,
+			VALUES($1,$2,$3,$4,(SELECT st.id FROM project p JOIN status st ON st.workflow_id=p.workflow_id AND NOT st.retired WHERE p.id=$1 ORDER BY st.position LIMIT 1),$5,$6,$7,$8,$9,$10,$11,$12,$12) RETURNING id`,
 			pid, n, key, typeID, in.Priority, a.ID, assignee, labels, parentID, summary, rankFor(n), s.Now()).Scan(&id)
 		if err != nil {
 			return err
@@ -332,15 +334,31 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 		return IssueView{}, err
 	}
 	v := IssueView{Issue: is, Role: role, Transitions: []TransitionOpt{}}
-	rows, err := s.DB.Query(ctx, `SELECT t.id,t.name,st.name,t.requires_human FROM issue i JOIN project p ON p.id=i.project_id
+	rows, err := s.DB.Query(ctx, `SELECT t.id,t.name,st.name,t.requires_human,t.rules FROM issue i JOIN project p ON p.id=i.project_id
 		JOIN transition t ON t.workflow_id=p.workflow_id AND (t.from_status IS NULL OR t.from_status=i.status_id) JOIN status st ON st.id=t.to_status
 		WHERE i.id=$1 ORDER BY st.position, t.name`, is.ID)
 	if err != nil {
 		return v, err
 	}
+	var tc *tctx
 	for rows.Next() {
 		var t TransitionOpt
-		rows.Scan(&t.ID, &t.Name, &t.To, &t.RequiresHuman)
+		var raw []byte
+		rows.Scan(&t.ID, &t.Name, &t.To, &t.RequiresHuman, &raw)
+		if rules := parseRules(raw); len(rules.Conditions) > 0 || len(rules.Screen) > 0 {
+			if len(rules.Conditions) > 0 { // a transition whose conditions are not met is not offered
+				if tc == nil {
+					if tc, err = s.loadTctx(ctx, s.DB, a, is.ID, role); err != nil {
+						rows.Close()
+						return v, err
+					}
+				}
+				if ok, _ := s.checkConditions(ctx, s.DB, rules.Conditions, tc); !ok {
+					continue
+				}
+			}
+			t.Screen = rules.Screen
+		}
 		v.Transitions = append(v.Transitions, t)
 	}
 	rows.Close()
@@ -641,11 +659,12 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 		if baseVersion != nil && fv["status"] > *baseVersion {
 			return &VersionConflict{CurrentVersion: cur, Fields: []string{"status"}}
 		}
-		var to, toName, cat, fromName string
+		var to, toName, cat, fromName, tname string
 		var human bool
-		err := tx.QueryRow(ctx, `SELECT t.to_status,st.name,st.category,(SELECT name FROM status WHERE id=$3),t.requires_human FROM transition t JOIN status st ON st.id=t.to_status
+		var rulesRaw []byte
+		err := tx.QueryRow(ctx, `SELECT t.to_status,st.name,st.category,(SELECT name FROM status WHERE id=$3),t.requires_human,t.rules,t.name FROM transition t JOIN status st ON st.id=t.to_status
 			WHERE t.id=$1 AND (t.from_status IS NULL OR t.from_status=$2) AND t.workflow_id=(SELECT p.workflow_id FROM issue i JOIN project p ON p.id=i.project_id WHERE i.id=$4)`,
-			transitionID, statusID, statusID, is.ID).Scan(&to, &toName, &cat, &fromName, &human)
+			transitionID, statusID, statusID, is.ID).Scan(&to, &toName, &cat, &fromName, &human, &rulesRaw, &tname)
 		if err == pgx.ErrNoRows {
 			return invalid("transition is not available from status %q", is.Status)
 		}
@@ -654,6 +673,19 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 		}
 		if human && a.Kind == "agent" {
 			return invalid("%q needs a person: agents cannot take this transition (use request_human_input to ask for review)", toName)
+		}
+		rules := parseRules(rulesRaw)
+		var tc *tctx
+		if !rules.empty() {
+			if tc, err = s.loadTctx(ctx, tx, a, is.ID, role); err != nil {
+				return err
+			}
+			if ok, why := s.checkConditions(ctx, tx, rules.Conditions, tc); !ok {
+				return invalid("%q is not available: %s", tname, why)
+			}
+			if err := s.checkValidators(rules.Validators, tc); err != nil {
+				return err
+			}
 		}
 		next := cur + 1
 		fv["status"] = next
@@ -670,6 +702,11 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 			return err
 		}
 		s.hist(ctx, tx, is.ID, a, "status", &fromName, &toName)
+		if tc != nil && len(rules.PostFunctions) > 0 {
+			if err := s.runPostFunctions(ctx, tx, a, tc, rules.PostFunctions, fromName, toName, next); err != nil {
+				return err
+			}
+		}
 		return outbox(ctx, tx, "issue:"+is.Key, "issue.transitioned", map[string]any{"key": is.Key, "from": fromName, "to": toName, "version": next, "actor": a.Label, "actor_id": a.ID})
 	})
 	if err != nil {

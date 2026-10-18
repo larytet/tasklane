@@ -183,6 +183,7 @@ func serve(ctx context.Context, cfg config.Config) {
 		}
 	}
 	svc := domain.New(st.Pool)
+	svc.WebhookAllowPrivate = cfg.WebhookAllowPrivate
 	if cfg.SecretKey != "" {
 		k, err := hex.DecodeString(cfg.SecretKey)
 		if err != nil || len(k) != 32 {
@@ -204,6 +205,8 @@ func serve(ctx context.Context, cfg config.Config) {
 	go svc.RunLifecycle(ctx, log.Printf)
 	go svc.RunGitWorkers(ctx, log.Printf)
 	go svc.RunJiraWorkers(ctx, log.Printf)
+	go svc.RunWorkflowJobs(ctx, log.Printf)
+	go svc.RunWorkflowMigrations(ctx, log.Printf)
 	if cfg.SMTPHost != "" {
 		dom := "tasklane.local"
 		if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {

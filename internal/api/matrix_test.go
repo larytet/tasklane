@@ -208,6 +208,15 @@ func (f *fixture) rule() int64 {
 	return r.ID
 }
 
+func (f *fixture) workflow() string {
+	f.n++
+	w, err := f.e.Svc.CreateWorkflow(testutil.Ctx(), f.e.Admin, fmt.Sprint("Flow ", f.n), "simple", nil)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return w.ID
+}
+
 func (f *fixture) attachment(key string) string {
 	a, err := f.e.Svc.AttachStream(testutil.Ctx(), f.e.Alice, key, "n.txt", "text/plain", strings.NewReader("hello matrix"))
 	if err != nil {
@@ -431,6 +440,26 @@ func rows() []row {
 		}},
 		{"DELETE /api/v1/behavior-rules/{id}", adminer, func(f *fixture) req { return J("DELETE", fmt.Sprintf("/api/v1/behavior-rules/%d", f.rule()), nil) }},
 		{"GET /api/v1/projects/{key}/form", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/form?type=Task", nil) }},
+		{"GET /api/v1/workflows", adminer, func(f *fixture) req { return J("GET", "/api/v1/workflows", nil) }},
+		{"POST /api/v1/workflows", adminer, func(f *fixture) req {
+			f.n++
+			return J("POST", "/api/v1/workflows", map[string]any{"name": fmt.Sprint("New flow ", f.n), "template": "software"})
+		}},
+		{"PUT /api/v1/projects/{key}/workflow", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/workflow", map[string]any{"workflow": f.workflow()})
+		}},
+		{"GET /api/v1/workflow-templates", authed, func(f *fixture) req { return J("GET", "/api/v1/workflow-templates", nil) }},
+		{"GET /api/v1/workflows/{id}", adminer, func(f *fixture) req { return J("GET", "/api/v1/workflows/"+f.workflow(), nil) }},
+		{"GET /api/v1/workflows/{id}/export", adminer, func(f *fixture) req { return J("GET", "/api/v1/workflows/"+f.workflow()+"/export", nil) }},
+		{"POST /api/v1/workflows/{id}/draft", adminer, func(f *fixture) req { return J("POST", "/api/v1/workflows/"+f.workflow()+"/draft", nil) }},
+		{"PUT /api/v1/workflows/{id}/draft", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/workflows/"+f.workflow()+"/draft", map[string]any{"statuses": []map[string]any{{"name": "Open", "category": "todo"}}, "transitions": []any{}})
+		}},
+		{"DELETE /api/v1/workflows/{id}/draft", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/workflows/"+f.workflow()+"/draft", nil) }},
+		{"POST /api/v1/workflows/{id}/draft/check", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req {
+			return J("POST", "/api/v1/workflows/"+f.workflow()+"/draft/check", map[string]any{})
+		}},
+		{"POST /api/v1/workflows/{id}/publish", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req { return J("POST", "/api/v1/workflows/"+f.workflow()+"/publish", map[string]any{}) }},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

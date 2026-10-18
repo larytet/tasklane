@@ -25,10 +25,13 @@ type Service struct {
 	SecretKey []byte
 	// GitEgress lets tests adjust the egress policy used for provider calls (the production policy is the default).
 	GitEgress func(egress.Policy) egress.Policy
-	secretMu  sync.Mutex
-	derived   []byte
-	gateOnce  sync.Once
-	gate      *gate
+	// HookEgress and WebhookAllowPrivate shape the egress policy for webhook post-functions (private targets are refused unless allowed).
+	HookEgress          func(egress.Policy) egress.Policy
+	WebhookAllowPrivate bool
+	secretMu            sync.Mutex
+	derived             []byte
+	gateOnce            sync.Once
+	gate                *gate
 	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
 	TrashRetention time.Duration
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:

@@ -85,6 +85,7 @@
       q,
       h('button', { class: 'btn primary', onclick: createDialog }, '+ Create'),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
+      S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
       h('span', { class: 'muted' }, S.me ? S.me.label : ''),

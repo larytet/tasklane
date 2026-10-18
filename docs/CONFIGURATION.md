@@ -29,6 +29,7 @@ Precedence, lowest to highest: built-in default, config file (`--config PATH`, `
 | `opensearch_password` | `TASKLANE_OPENSEARCH_PASSWORD`, `TASKLANE_OPENSEARCH_PASSWORD_FILE` | `--opensearch-password` | unset | OpenSearch password |
 | `opensearch_api_key` | `TASKLANE_OPENSEARCH_API_KEY`, `TASKLANE_OPENSEARCH_API_KEY_FILE` | `--opensearch-api-key` | unset | OpenSearch API key (used instead of user and password when set) |
 | `opensearch_allow_private` | `TASKLANE_OPENSEARCH_ALLOW_PRIVATE` | `--opensearch-allow-private` | `false` | Allow the cluster to be on a private or loopback address (the usual case in a private network) |
+| `webhook_allow_private` | `TASKLANE_WEBHOOK_ALLOW_PRIVATE` | `--webhook-allow-private` | `false` | Allow workflow webhook post-functions to call private or loopback addresses (refused by default so a webhook cannot reach internal services) |
 | `opensearch_index` | `TASKLANE_OPENSEARCH_INDEX` | `--opensearch-index` | `tasklane-issues` | Alias name for the issue index; versioned indexes are created behind it |
 | `opensearch_shards` | `TASKLANE_OPENSEARCH_SHARDS` | `--opensearch-shards` | `1` | Primary shards for new indexes |
 | `opensearch_replicas` | `TASKLANE_OPENSEARCH_REPLICAS` | `--opensearch-replicas` | `0` | Replicas for new indexes (use at least 1 on a multi-node cluster) |
