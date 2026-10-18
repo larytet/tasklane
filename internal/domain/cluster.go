@@ -37,6 +37,33 @@ var BuiltinGates = []Gate{
 	{Name: MailRetentionG, MinVersion: "0.1.0", Doc: "Purging inbound mail replaces its Message-ID by a hash; a node that does not know the hash would treat a redelivery as new mail"},
 }
 
+// maxClockRTT: a measurement that took longer than this says nothing reliable about the offset and is ignored.
+const maxClockRTT = 2 * time.Second
+
+// ClockWarnAt is the offset from the database above which the operator is told to fix the machine's clock (it is corrected for
+// either way).
+const ClockWarnAt = 5 * time.Second
+
+// SyncClock measures this machine's clock against the database's and corrects Now by the difference. It returns the offset (what
+// must be added to the machine's clock). Only the database's time is common to every node, so it is the reference.
+func (s *Service) SyncClock(ctx context.Context) (time.Duration, error) {
+	t0 := s.Clock()
+	var db time.Time
+	if err := s.DB.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&db); err != nil {
+		return 0, err
+	}
+	t1 := s.Clock()
+	if t1.Sub(t0) > maxClockRTT {
+		return time.Duration(s.clockOffset.Load()), nil
+	}
+	off := db.Sub(t0.Add(t1.Sub(t0) / 2)) // the database answered about half way through the round trip
+	s.clockOffset.Store(int64(off))
+	return off, nil
+}
+
+// ClockOffset is the correction currently applied.
+func (s *Service) ClockOffset() time.Duration { return time.Duration(s.clockOffset.Load()) }
+
 type Node struct {
 	ID       string    `json:"id"`
 	Version  string    `json:"version"`
@@ -44,6 +71,9 @@ type Node struct {
 	Seen     time.Time `json:"last_seen_at"`
 	Live     bool      `json:"live"`
 	Draining bool      `json:"draining"`
+	// ClockOffsetMS is how far the node's own clock was from the database's when it last reported; ClockWarning is set when that is large.
+	ClockOffsetMS int64  `json:"clock_offset_ms"`
+	ClockWarning  string `json:"clock_warning,omitempty"`
 }
 
 type GateState struct {
@@ -117,8 +147,8 @@ func (s *Service) RegisterNode(ctx context.Context) error {
 	if s.NodeID == "" || s.NodeVersion == "" {
 		return nil
 	}
-	_, err := s.DB.Exec(ctx, `INSERT INTO cluster_node(id,version,started_at,seen_at,draining) VALUES($1,$2,$3,$3,false)
-		ON CONFLICT (id) DO UPDATE SET version=$2, seen_at=$3, draining=false`, s.NodeID, s.NodeVersion, s.Now())
+	_, err := s.DB.Exec(ctx, `INSERT INTO cluster_node(id,version,started_at,seen_at,draining,clock_offset_ms) VALUES($1,$2,$3,$3,false,$4)
+		ON CONFLICT (id) DO UPDATE SET version=$2, seen_at=$3, draining=false, clock_offset_ms=$4`, s.NodeID, s.NodeVersion, s.Now(), -s.ClockOffset().Milliseconds())
 	return err
 }
 
@@ -139,7 +169,7 @@ func (s *Service) Drain(ctx context.Context) {
 func (s *Service) liveNodes(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }) ([]Node, error) {
-	rows, err := q.Query(ctx, `SELECT id,version,started_at,seen_at,draining FROM cluster_node ORDER BY id`)
+	rows, err := q.Query(ctx, `SELECT id,version,started_at,seen_at,draining,clock_offset_ms FROM cluster_node ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -147,10 +177,13 @@ func (s *Service) liveNodes(ctx context.Context, q interface {
 	var out []Node
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.ID, &n.Version, &n.Started, &n.Seen, &n.Draining); err != nil {
+		if err := rows.Scan(&n.ID, &n.Version, &n.Started, &n.Seen, &n.Draining, &n.ClockOffsetMS); err != nil {
 			return nil, err
 		}
 		n.Live = s.Now().Sub(n.Seen) < nodeLiveFor
+		if d := time.Duration(n.ClockOffsetMS) * time.Millisecond; d > ClockWarnAt || d < -ClockWarnAt {
+			n.ClockWarning = fmt.Sprintf("this machine's clock is %s %s the database's; Tasklane corrects for it, but fix the machine's time synchronisation", d.Abs().Round(time.Second), map[bool]string{true: "ahead of", false: "behind"}[d > 0])
+		}
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -307,6 +340,9 @@ func (s *Service) RunCluster(ctx context.Context, logf func(string, ...any)) {
 	t := time.NewTicker(nodeBeatEvery)
 	defer t.Stop()
 	for {
+		if _, err := s.SyncClock(ctx); err != nil && ctx.Err() == nil {
+			logf("clock: %v", err)
+		}
 		if err := s.RegisterNode(ctx); err != nil && ctx.Err() == nil {
 			logf("cluster: %v", err)
 		} else if err := s.EvaluateGates(ctx); err != nil && ctx.Err() == nil {

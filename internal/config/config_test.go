@@ -192,3 +192,21 @@ func TestUPG11_RenamedAndRemovedSettingsAreMappedWithAWarning(t *testing.T) {
 		t.Errorf("%v %q", err, warns)
 	}
 }
+
+// A duration of zero is refused where it would mean nothing sensible (a session that lasts no time) and accepted where the setting
+// says that zero means none (a stopping server that does not wait before it closes).
+func TestCFG01_ZeroDurationsOnlyWhereTheSettingAllowsThem(t *testing.T) {
+	c, err := config.Load(opts(nil, map[string]string{"TASKLANE_SHUTDOWN_DRAIN_DELAY": "0s"}, nil))
+	if err != nil || c.DrainDelay != 0 {
+		t.Fatalf("%v %v", err, c.DrainDelay)
+	}
+	if _, err := config.Load(opts(nil, map[string]string{"TASKLANE_SESSION_TTL": "0s"}, nil)); err == nil || !strings.Contains(err.Error(), "not a duration") {
+		t.Fatalf("a zero session time was accepted: %v", err)
+	}
+	if _, err := config.Load(opts(nil, map[string]string{"TASKLANE_SHUTDOWN_DRAIN_DELAY": "-1s"}, nil)); err == nil {
+		t.Fatal("a negative delay was accepted")
+	}
+	if c, err := config.Load(opts(nil, nil, nil)); err != nil || c.DrainDelay != 5*time.Second {
+		t.Fatalf("the default: %v %v", err, c.DrainDelay)
+	}
+}

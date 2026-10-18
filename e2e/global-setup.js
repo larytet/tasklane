@@ -20,7 +20,7 @@ export default async function globalSetup() {
   const bin = join(dir, 'tasklane');
   execFileSync('go', ['build', '-o', bin, './cmd/tasklane'], { cwd: '..', stdio: 'inherit', env: { ...process.env, PATH: process.env.PATH + ':/usr/local/go/bin' } });
   const child = spawn(bin, ['serve'], {
-    env: { ...process.env, TASKLANE_DATABASE_URL: `${PG}/${db}`, TASKLANE_LISTEN: `127.0.0.1:${PORT}`, TASKLANE_BLOB_DIR: join(dir, 'blobs'), TASKLANE_ADMIN_EMAIL: 'admin@example.com', TASKLANE_ADMIN_PASSWORD: 'adminpass1', TASKLANE_BASE_URL: BASE, TASKLANE_WEBAUTHN_RP_ID: 'localhost', TASKLANE_WEBAUTHN_ORIGINS: `http://localhost:${PORT}` },
+    env: { ...process.env, TASKLANE_DATABASE_URL: `${PG}/${db}`, TASKLANE_LISTEN: `127.0.0.1:${PORT}`, TASKLANE_BLOB_DIR: join(dir, 'blobs'), TASKLANE_ADMIN_EMAIL: 'admin@example.com', TASKLANE_ADMIN_PASSWORD: 'adminpass1', TASKLANE_BASE_URL: BASE, TASKLANE_WEBAUTHN_RP_ID: 'localhost', TASKLANE_SHUTDOWN_DRAIN_DELAY: '0s', TASKLANE_WEBAUTHN_ORIGINS: `http://localhost:${PORT}` },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   writeFileSync(join(dir, 'pid'), String(child.pid));

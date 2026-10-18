@@ -323,10 +323,10 @@ live in a version-controlled file so changes are reviewed.
 | CHAOS-02 | Redis down, then restored (multi-node) | Readiness degraded; presence and events local only and cache invalidation on TTL; saves unaffected; full recovery on return |
 | CHAOS-03 | Packet loss and latency (5% loss, 300 ms) | Editing and saving stay usable; retries idempotent; conflicts still caught |
 | CHAOS-04 | Network partition between nodes | Saves on either side stay correct (the database decides); presence local; events resume on heal |
-| CHAOS-05 | Slow or full disk | Backpressure, clear error, no corruption |
-| CHAOS-06 | Realtime layer disabled | Ticket loads; saves work through REST; presence absent; conflicts still caught |
-| CHAOS-07 | Deploy with graceful drain | Clients reconnect to another node in under 1 s; no lost save; drafts untouched |
-| CHAOS-08 | Clock skew between nodes | Ordering by the database compare-and-set and assigned versions, never node clocks; timestamps sane |
+| CHAOS-05 | Slow or full disk | Backpressure, clear error, no corruption | **covered** `TestCHAOS05_*` (a full disk: 507 `storage_full` with a plain message, nothing left behind, other work unaffected, recovery; a stuck disk: the next upload refused at once as busy, interactive p95 unchanged, clean failure and slot release; the 507 mapping mutation-tested). The database's own disk-full error is mapped but not exercised
+| CHAOS-06 | Realtime layer disabled | Ticket loads; saves work through REST; presence absent; conflicts still caught | **covered** `TestCHAOS06_*` (no hub: the ticket answers 404 `realtime_disabled`, presence by HTTP, a stale save caught) and e2e `CHAOS-06` (the page asks once and stops, edits, saves, and gets the conflict dialog)
+| CHAOS-07 | Deploy with graceful drain | Clients reconnect to another node in under 1 s; no lost save; drafts untouched | **covered** `TestCHAOS07_*`: the hub (24 pages told to reconnect with spread delays, sockets closed, new ones refused) and the real binary on SIGTERM (readiness fails within a second while liveness stays up, an open page gets the hint, a request in flight when the signal arrives is still answered, clean exit; each step mutation-tested). Not covered: a real load balancer and a multi-node rolling restart
+| CHAOS-08 | Clock skew between nodes | Ordering by the database compare-and-set and assigned versions, never node clocks; timestamps sane | **covered** `TestCHAOS08_*` (nodes an hour ahead and behind: comment and history order follow the database, versions have no gaps, a stale save is refused; lease expiry across skewed nodes, with a control showing the hazard before the correction; the offset is measured and reported)
 | CHAOS-09 | Very large documents and merge-size limits | Over-limit documents refused or offered keep/copy only, with a clear message; the server stays up; others unaffected |
 
 ### 5.4 Search and TQL

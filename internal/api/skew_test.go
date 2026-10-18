@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -112,5 +113,66 @@ func TestUPG10_MaintenanceIsVisibleWritesAreRefusedWithRetryAfterAndResume(t *te
 	}
 	if w, _ := post(t, ts, "/api/v1/issues/"+is.Key+"/comments", map[string]any{"body": "after"}, map[string]string{"Authorization": "Bearer " + tok}); w.StatusCode != 201 && w.StatusCode != 200 {
 		t.Fatalf("after the pause: %d", w.StatusCode)
+	}
+}
+
+// CHAOS-06: with the realtime layer switched off the server says so plainly, presence still works by plain requests, saves still go
+// through REST, and a stale save is still caught by its version.
+func TestCHAOS06_WithoutTheRealtimeLayerSavesPresenceAndConflictsStillWork(t *testing.T) {
+	e := testutil.New(t)
+	e.Project()
+	is := e.Issue("no sockets", "original")
+	ta, _ := e.Svc.CreateAPIToken(testutil.Ctx(), e.Alice.ID, "a")
+	tb, _ := e.Svc.CreateAPIToken(testutil.Ctx(), e.Bob.ID, "b")
+	ts := httptest.NewServer((&api.Server{Svc: e.Svc, SessionTTL: time.Hour}).Handler()) // no Hub
+	defer ts.Close()
+	auth := func(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
+	// the ticket and the socket answer 404 with a code a page recognises (and stops asking on)
+	r, body := post(t, ts, "/api/v1/ws/ticket", nil, auth(ta))
+	if r.StatusCode != 404 || body["code"] != "realtime_disabled" {
+		t.Fatalf("%d %v", r.StatusCode, body)
+	}
+	if r, _ := getWith(t, ts, "/api/v1/ws", ta, nil); r.StatusCode != 404 {
+		t.Fatalf("%d", r.StatusCode)
+	}
+	// presence by plain requests: Bob sees Alice is here
+	if r, _ := post(t, ts, "/api/v1/issues/"+is.Key+"/presence", map[string]any{"field": "description"}, auth(ta)); r.StatusCode != 200 {
+		t.Fatalf("presence: %d", r.StatusCode)
+	}
+	rp, _ := http.NewRequest("POST", ts.URL+"/api/v1/issues/"+is.Key+"/presence", strings.NewReader(`{"field":""}`))
+	rp.Header.Set("Authorization", "Bearer "+tb)
+	rp.Header.Set("Content-Type", "application/json")
+	presResp, err := http.DefaultClient.Do(rp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pres bytes.Buffer
+	pres.ReadFrom(presResp.Body)
+	presResp.Body.Close()
+	if !strings.Contains(pres.String(), e.Alice.ID) || !strings.Contains(pres.String(), `"editing":"description"`) {
+		t.Fatalf("Bob does not see Alice: %s", pres.String())
+	}
+	// saves by REST, and the conflict check by version, without any socket: Bob saves from the version he saw, then Alice does
+	put := func(tok, text string, base int64, id string) (int, map[string]any) {
+		b, _ := json.Marshal(map[string]any{"body": text, "base_seq": base, "save_id": id, "mode": "save"})
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/issues/"+is.Key+"/text/description", strings.NewReader(string(b)))
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	v, _ := e.Svc.View(testutil.Ctx(), e.Alice, is.Key)
+	if code, _ := put(tb, "Bob's text", v.Issue.DescSeq, "b1"); code != 200 {
+		t.Fatalf("%d", code)
+	}
+	code, out := put(ta, "Alice's text", v.Issue.DescSeq, "a1")
+	if code != 409 || out["code"] != "text_conflict" {
+		t.Fatalf("a stale save was not caught: %d %v", code, out)
 	}
 }

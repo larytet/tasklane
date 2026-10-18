@@ -37,6 +37,8 @@ type Config struct {
 	MailRawDays, MailBounceDays, MinClient    int
 	WebAuthnRPID                              string
 	TrustedProxies                            []string
+	DrainDelay                                time.Duration
+	Realtime                                  bool
 	WebAuthnOrigins                           []string
 	WebAuthnRequireUV                         bool
 	BlobCold, BlobColdDir                     string
@@ -74,6 +76,7 @@ type Key struct {
 	Kind    string // string, int, duration, enum
 	Enum    []string
 	Secret  bool
+	Zero    bool // a duration may be 0 (meaning none)
 	Doc     string
 }
 
@@ -94,6 +97,8 @@ var Schema = []Key{
 	{Name: "smtp_listen", Default: "", Kind: "string", Doc: "Receive inbound email directly: the address for the built-in SMTP receiver to listen on, such as `:25` (empty: off). It accepts mail only for the reply, bounce and project addresses of the mail domain (the host of `base_url`), never relays, and never sends a bounce. Mail it receives needs its own DKIM signature to count; put a receiver you run in front and use the webhook if you want its verdict believed"},
 	{Name: "smtp_listen_tls_cert", Default: "", Kind: "string", Doc: "Certificate file (PEM) for STARTTLS on the built-in SMTP receiver; with `smtp_listen_tls_key`. Without them STARTTLS is not offered"},
 	{Name: "smtp_listen_tls_key", Default: "", Kind: "string", Doc: "Private key file (PEM) for STARTTLS on the built-in SMTP receiver"},
+	{Name: "realtime", Default: "true", Kind: "enum", Enum: []string{"true", "false"}, Doc: "The realtime layer: live presence and change events over a WebSocket. Off, pages work without it: people appear as present through periodic requests, saves still go through the normal conflict check, and nothing depends on the socket"},
+	{Name: "shutdown_drain_delay", Default: "5s", Kind: "duration", Zero: true, Doc: "How long a stopping server keeps serving after it starts failing its readiness check, so that a load balancer notices and moves new requests to other nodes before this one stops accepting them. Open pages are told to reconnect (spread over a second); requests in flight finish. 0 stops at once"},
 	{Name: "trusted_proxies", Default: "", Kind: "string", Doc: "Comma-separated networks of reverse proxies in front of Tasklane. Only from these is the X-Forwarded-For header believed, to learn a visitor's real address (the sign-in record, lockouts and an organization's allowed networks use it). Empty: the connecting address is used and the header is ignored. Never list a network that visitors can reach directly"},
 	{Name: "webauthn_rp_id", Default: "", Kind: "string", Doc: "The relying party id that passkeys and security keys are bound to: a host name (never an IP address). Empty: the host of `base_url`. A key registered for one id does not work for another, so change it only if you mean to re-register keys"},
 	{Name: "webauthn_origins", Default: "", Kind: "string", Doc: "Comma-separated origins (scheme, host and port) pages may use passkeys from. Empty: the origin of `base_url`"},
@@ -467,7 +472,7 @@ func validate(k Key, v string) error {
 			return fmt.Errorf("%q is not a non-negative whole number", v)
 		}
 	case "duration":
-		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
+		if d, err := time.ParseDuration(v); err != nil || d < 0 || (d == 0 && !k.Zero) {
 			return fmt.Errorf("%q is not a duration such as 30s, 15m or 336h", v)
 		}
 	case "enum":
@@ -495,7 +500,7 @@ func Load(o Options) (Config, error) {
 	d := func(k string) time.Duration { v, _ := time.ParseDuration(m[k]); return v }
 	return Config{Listen: m["listen"], DatabaseURL: m["database_url"], BlobDir: m["blob_dir"], SecretKey: m["secret_key"], SearchEngine: m["search_engine"], OSURL: m["opensearch_url"], OSUser: m["opensearch_user"], OSPassword: m["opensearch_password"],
 		OSAPIKey: m["opensearch_api_key"], OSAllowPrivate: m["opensearch_allow_private"] == "true", WebhookAllowPrivate: m["webhook_allow_private"] == "true", PasswordMinLength: n("password_min_length"), SSOAllowPrivate: m["sso_allow_private"] == "true", OSIndex: m["opensearch_index"], OSShards: n("opensearch_shards"), OSReplicas: n("opensearch_replicas"), MaxUploadMB: n("max_upload_mb"),
-		BlobBackend: m["blob_backend"], BlobFallback: m["blob_fallback"], BlobFallbackDir: m["blob_fallback_dir"], BlobEncKeys: m["blob_encryption_keys"], IMAPAllowPrivate: m["imap_allow_private"] == "true", MinClient: int(n("min_client_version")), WebAuthnRPID: m["webauthn_rp_id"], TrustedProxies: splitList(m["trusted_proxies"]), WebAuthnOrigins: splitList(m["webauthn_origins"]), WebAuthnRequireUV: m["webauthn_require_user_verification"] == "true", MailRawDays: int(n("mail_raw_retention_days")), MailBounceDays: int(n("mail_bounce_retention_days")), BlobCold: m["blob_cold_backend"], BlobColdDir: m["blob_cold_dir"], SMTPListen: m["smtp_listen"], SMTPListenCert: m["smtp_listen_tls_cert"], SMTPListenKey: m["smtp_listen_tls_key"], BlobEncCurrent: m["blob_encryption_current"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
+		BlobBackend: m["blob_backend"], BlobFallback: m["blob_fallback"], BlobFallbackDir: m["blob_fallback_dir"], BlobEncKeys: m["blob_encryption_keys"], IMAPAllowPrivate: m["imap_allow_private"] == "true", MinClient: int(n("min_client_version")), WebAuthnRPID: m["webauthn_rp_id"], TrustedProxies: splitList(m["trusted_proxies"]), DrainDelay: d("shutdown_drain_delay"), Realtime: m["realtime"] != "false", WebAuthnOrigins: splitList(m["webauthn_origins"]), WebAuthnRequireUV: m["webauthn_require_user_verification"] == "true", MailRawDays: int(n("mail_raw_retention_days")), MailBounceDays: int(n("mail_bounce_retention_days")), BlobCold: m["blob_cold_backend"], BlobColdDir: m["blob_cold_dir"], SMTPListen: m["smtp_listen"], SMTPListenCert: m["smtp_listen_tls_cert"], SMTPListenKey: m["smtp_listen_tls_key"], BlobEncCurrent: m["blob_encryption_current"], S3Endpoint: m["s3_endpoint"], S3Region: m["s3_region"], S3Bucket: m["s3_bucket"], S3Prefix: m["s3_prefix"], S3AccessKey: m["s3_access_key"],
 		S3SecretKey: m["s3_secret_key"], S3PathStyle: m["s3_path_style"] == "true", S3SSE: m["s3_sse"], S3KMSKeyID: m["s3_kms_key_id"], S3PartSizeMB: n("s3_part_size_mb"),
 		SessionTTL: d("session_ttl"), BaseURL: m["base_url"], SMTPHost: m["smtp_host"], SMTPPort: int(n("smtp_port")), SMTPFrom: m["smtp_from"],
 		SMTPTLS: m["smtp_tls"], SMTPUser: m["smtp_user"], SMTPPass: m["smtp_pass"], AdminEmail: m["admin_email"], AdminPassword: m["admin_password"],

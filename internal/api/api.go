@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/larytet/tasklane/internal/domain"
@@ -38,8 +41,12 @@ type Server struct {
 	// reload with 426. Requests that do not say (API tokens, MCP, scripts) are not clients in this sense and are never refused.
 	Version   string
 	MinClient int
+	draining  atomic.Bool
 	routes    []string
 }
+
+// Drain makes /readyz fail, the first step of a graceful stop; /healthz keeps answering (the process is alive).
+func (s *Server) Drain() { s.draining.Store(true) }
 
 // ClientVersion is the newest browser client this server speaks to (sent by the page in X-Tasklane-Client).
 const ClientVersion = 1
@@ -78,6 +85,10 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.handle(mux, "GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	s.handle(mux, "GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if s.draining.Load() { // a load balancer stops sending new work here while what is in flight finishes
+			http.Error(w, "draining", 503)
+			return
+		}
 		if s.Ready != nil {
 			if err := s.Ready(r.Context()); err != nil {
 				http.Error(w, "not ready", 503)
@@ -300,6 +311,12 @@ func (s *Server) Handler() http.Handler {
 			s.json(w, 200, map[string]any{"ticket": s.Hub.Mint(actorOf(r)), "expires_in": 30})
 		}))
 		s.handle(mux, "GET /api/v1/ws", s.Hub.Handler())
+	} else { // the realtime layer is switched off: say so plainly, so a page stops asking and carries on without it
+		off := func(w http.ResponseWriter, r *http.Request) {
+			s.fail(w, 404, "realtime_disabled", "live updates are switched off on this server", nil)
+		}
+		mux.HandleFunc("POST /api/v1/ws/ticket", off)
+		mux.HandleFunc("GET /api/v1/ws", off)
 	}
 	s.handle(mux, "GET /api/v1/admin/fields", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		t, err := s.Svc.FieldTracking(r.Context(), actorOf(r))
@@ -768,6 +785,10 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.fail(w, 409, "conflict", ce.Error(), nil)
 	case errors.As(err, &nd):
 		s.fail(w, 423, "not_downloadable", "this file is "+nd.State+" and cannot be downloaded", nil)
+	case isDiskFull(err):
+		// nothing was saved and nothing is left half-written; the operator must free space. Said plainly, not as a generic fault.
+		w.Header().Set("Retry-After", "30")
+		s.fail(w, 507, "storage_full", "the server has run out of storage space: nothing was saved. Ask an administrator to free some, then try again", nil)
 	case errors.Is(err, domain.ErrBusy):
 		w.Header().Set("Retry-After", "2")
 		s.fail(w, 503, "busy", "too many uploads in progress; retry shortly", nil)
@@ -782,3 +803,13 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 }
 
 func asErr[T any](err error, target *T) bool { return errors.As(err, target) }
+
+// isDiskFull recognises a full disk or an exhausted quota, from the filesystem (the blob store, staging files) or from PostgreSQL
+// (SQLSTATE 53100 disk_full, 53200 out_of_memory is not this).
+func isDiskFull(err error) bool {
+	if errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) {
+		return true
+	}
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "53100"
+}

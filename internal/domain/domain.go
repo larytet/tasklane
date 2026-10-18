@@ -62,6 +62,9 @@ type Service struct {
 	// NodeID and NodeVersion say which node this is and what it runs (the cluster version gate); Gates overrides BuiltinGates.
 	NodeID, NodeVersion string
 	Gates               []Gate
+	// Clock is the machine's own clock (time.Now); Now corrects it by the measured offset from the database.
+	Clock       func() time.Time
+	clockOffset atomic.Int64
 	// WebAuthnRPID and WebAuthnOrigins override the relying party that passkeys are bound to (default: the host of BaseURL);
 	// WebAuthnRequireUV demands a PIN or biometric on the key as well as its presence.
 	WebAuthnRPID      string
@@ -82,7 +85,10 @@ type Service struct {
 }
 
 func New(db *pgxpool.Pool) *Service {
-	s := &Service{DB: db, Now: time.Now}
+	s := &Service{DB: db, Clock: time.Now}
+	// Now is the node's clock corrected to the database's (see SyncClock): leases, expiries and every stored time must mean the same
+	// thing on every node, whatever each machine's own clock says
+	s.Now = func() time.Time { return s.Clock().Add(time.Duration(s.clockOffset.Load())) }
 	s.Presence = NewPresence(func() time.Time { return s.Now() })
 	return s
 }

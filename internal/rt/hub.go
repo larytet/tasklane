@@ -33,11 +33,12 @@ type Hub struct {
 	Now            func() time.Time
 	MsgsPerSecond  float64
 
-	mu      sync.Mutex
-	conns   map[*conn]struct{}
-	subs    map[string]map[*conn]struct{} // issue key -> subscribers
-	tickets map[string]ticket
-	Sent    int64 // messages written to clients, for the "no per-keystroke traffic" assertion
+	mu       sync.Mutex
+	conns    map[*conn]struct{}
+	subs     map[string]map[*conn]struct{} // issue key -> subscribers
+	tickets  map[string]ticket
+	draining bool
+	Sent     int64 // messages written to clients, for the "no per-keystroke traffic" assertion
 }
 
 type ticket struct {
@@ -103,6 +104,11 @@ type inbound struct {
 // Handler upgrades GET /api/v1/ws?ticket=... Without a valid ticket the handshake is refused before any upgrade.
 func (h *Hub) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if h.Draining() { // this node is going away: the client should connect to another one
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "this server is restarting", http.StatusServiceUnavailable)
+			return
+		}
 		actor, ok := h.redeem(r.URL.Query().Get("ticket"))
 		if !ok {
 			http.Error(w, "invalid or expired ticket", http.StatusUnauthorized)
@@ -371,6 +377,47 @@ func (h *Hub) SweepLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// Draining says whether Drain has been called.
+func (h *Hub) Draining() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.draining
+}
+
+// Drain is the realtime side of a graceful stop (SPEC 17.8): new connections are refused (so a load balancer's next try lands on
+// another node) and every open one is told to reconnect after a random delay within spread, so that a whole node's clients do not
+// come back in the same instant, and is then closed. The pages work without the socket in the meantime.
+func (h *Hub) Drain(spread time.Duration) {
+	h.mu.Lock()
+	h.draining = true
+	cs := make([]*conn, 0, len(h.conns))
+	for c := range h.conns {
+		cs = append(cs, c)
+	}
+	h.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, c := range cs {
+		wg.Add(1)
+		go func(c *conn) {
+			defer wg.Done()
+			after := int64(0)
+			if spread > 0 {
+				var b [4]byte
+				rand.Read(b[:])
+				after = int64(uint32(b[0])<<24|uint32(b[1])<<16|uint32(b[2])<<8|uint32(b[3])) % spread.Milliseconds()
+			}
+			c.send(map[string]any{"type": "reconnect", "after_ms": after})
+			for i := 0; i < 50 && len(c.out) > 0; i++ { // give the message a moment to be written
+				time.Sleep(10 * time.Millisecond)
+			}
+			time.Sleep(50 * time.Millisecond)
+			c.ws.Close(websocket.StatusGoingAway, "this server is restarting")
+			c.cancel()
+		}(c)
+	}
+	wg.Wait()
 }
 
 // Stats for tests and metrics.

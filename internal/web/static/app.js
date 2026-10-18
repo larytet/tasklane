@@ -90,20 +90,24 @@
   try { theme(localStorage.getItem('tl-theme') || 'dark'); } catch (e) { /* default dark */ }
 
   // ---------- realtime: presence and change events; best effort, pages work without it ----------
-  const RT = { ws: null, up: false, subs: new Map(), backoff: 1000, timer: 0 };
+  const RT = { ws: null, up: false, subs: new Map(), backoff: 1000, timer: 0, hint: null, off: false };
   async function rtConnect() {
     clearTimeout(RT.timer);
-    if (!S.me || RT.ws) return;
+    if (!S.me || RT.ws || RT.off) return;
     let tk;
-    try { const r = await api('POST', '/api/v1/ws/ticket'); if (r.status !== 200) throw new Error('no ticket'); tk = r.data.ticket; } catch (e) { return rtRetry(); }
+    try {
+      const r = await api('POST', '/api/v1/ws/ticket');
+      if (r.status === 404) { RT.off = true; return; } // the realtime layer is switched off on this server: pages work without it (presence by HTTP, saves by REST, conflicts by version)
+      if (r.status !== 200) throw new Error('no ticket'); tk = r.data.ticket;
+    } catch (e) { return rtRetry(); }
     const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/v1/ws?ticket=' + encodeURIComponent(tk));
     RT.ws = ws;
     ws.onopen = () => { RT.up = true; RT.backoff = 1000; for (const k of RT.subs.keys()) ws.send(JSON.stringify({ op: 'sub', channel: 'issue:' + k })); };
-    ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch (e) { return; } const k = m.issue || (m.event && m.event.issue) || (m.channel || '').replace('issue:', ''); const h = RT.subs.get(k); if (h) h(m); };
+    ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch (e) { return; } if (m.type === 'reconnect') { RT.hint = Number(m.after_ms) || 0; RT.backoff = 1000; return; } /* the server is stopping: come back when it says, spread out */ const k = m.issue || (m.event && m.event.issue) || (m.channel || '').replace('issue:', ''); const h = RT.subs.get(k); if (h) h(m); };
     ws.onclose = () => { RT.up = false; RT.ws = null; rtRetry(); };
     ws.onerror = () => { try { ws.close(); } catch (e) { /* already closed */ } };
   }
-  function rtRetry() { if (!S.me) return; RT.timer = setTimeout(rtConnect, RT.backoff * (0.5 + Math.random())); RT.backoff = Math.min(RT.backoff * 2, 30000); } // jittered, so a restart does not bring every tab back in the same second
+  function rtRetry() { if (!S.me || RT.off) return; const wait = RT.hint !== null ? RT.hint : RT.backoff * (0.5 + Math.random()); RT.hint = null; RT.timer = setTimeout(rtConnect, wait); RT.backoff = Math.min(RT.backoff * 2, 30000); } // jittered, so a restart does not bring every tab back in the same second
   function rtSub(key, handler) { RT.subs.set(key, handler); if (RT.up) RT.ws.send(JSON.stringify({ op: 'sub', channel: 'issue:' + key })); else rtConnect(); }
   function rtUnsub(key) { RT.subs.delete(key); if (RT.up) RT.ws.send(JSON.stringify({ op: 'unsub', channel: 'issue:' + key })); }
   function rtSend(m) { if (RT.up) { RT.ws.send(JSON.stringify(m)); return true; } return false; }

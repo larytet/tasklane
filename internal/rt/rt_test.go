@@ -495,3 +495,68 @@ func TestSEC09_WebSocketsDoNotCrossOrganizations(t *testing.T) {
 		t.Fatal("the instance administrator lost access")
 	}
 }
+
+// CHAOS-07: a node that is stopping tells every open page to come back after a random delay (so they do not all return in the same
+// instant), closes the sockets, and turns away new connections so that a load balancer's next try lands on another node.
+func TestCHAOS07_DrainTellsEveryPageWhenToReconnectAndRefusesNewOnes(t *testing.T) {
+	e := newEnv(t)
+	const n = 24
+	var socks []*sock
+	for i := 0; i < n; i++ {
+		s := e.dial(e.Alice)
+		s.sub(e.key)
+		socks = append(socks, s)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if c, _ := e.hub.Stats(); c != n {
+		t.Fatalf("%d connections", c)
+	}
+	start := time.Now()
+	e.hub.Drain(time.Second)
+	if !e.hub.Draining() {
+		t.Fatal("not draining")
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("the drain took %s", took)
+	}
+	var afters []int
+	for i, s := range socks {
+		m, ok := s.next(2*time.Second, typ("reconnect"))
+		if !ok {
+			t.Fatalf("page %d was never told to reconnect", i)
+		}
+		a := int(m["after_ms"].(float64))
+		if a < 0 || a >= 1000 {
+			t.Fatalf("a reconnect delay of %d ms is outside the spread", a)
+		}
+		afters = append(afters, a)
+		// and then the socket is closed
+		closed := false
+		for deadline := time.After(2 * time.Second); !closed; {
+			select {
+			case _, open := <-s.in:
+				closed = !open
+			case <-deadline:
+				t.Fatalf("page %d's socket was not closed after the hint", i)
+			}
+		}
+	}
+	sort.Ints(afters)
+	if afters[n-1]-afters[0] < 300 {
+		t.Fatalf("the delays are not spread out: %v", afters) // every page coming back in the same instant is what the spread is for
+	}
+	// new sockets are turned away with a retry hint
+	req, _ := http.NewRequest("GET", e.srv.URL+"/api/v1/ws?ticket="+e.hub.Mint(e.Alice), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 503 || resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("a connection during the drain: %d %v", resp.StatusCode, resp.Header)
+	}
+	// nothing is lost meanwhile: saves go through REST and the page refetches
+	if _, err := e.Svc.AddComment(context.Background(), e.Alice, e.key, "still works", false); err != nil {
+		t.Fatal(err)
+	}
+}

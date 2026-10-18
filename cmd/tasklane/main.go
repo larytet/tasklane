@@ -261,6 +261,11 @@ func serve(ctx context.Context, cfg config.Config) {
 	host, _ := os.Hostname()
 	nb := make([]byte, 4)
 	rand.Read(nb)
+	if off, err := svc.SyncClock(ctx); err != nil {
+		log.Printf("warning: could not compare this machine's clock with the database's: %v", err)
+	} else if off > domain.ClockWarnAt || off < -domain.ClockWarnAt {
+		log.Printf("warning: this machine's clock is %s from the database's; times are corrected, but fix the machine's time synchronisation", off.Round(time.Second))
+	}
 	svc.WebAuthnRPID, svc.WebAuthnOrigins, svc.WebAuthnRequireUV = cfg.WebAuthnRPID, cfg.WebAuthnOrigins, cfg.WebAuthnRequireUV
 	for _, c := range cfg.TrustedProxies {
 		if _, n, err := net.ParseCIDR(c); err == nil {
@@ -345,8 +350,25 @@ func serve(ctx context.Context, cfg config.Config) {
 	svc.Matcher = search.Matcher{Engine: pgEngine, Now: svc.Now} // automation reads PostgreSQL, never a lagging copy
 	go svc.RunAutomation(ctx, log.Printf)
 	go sprintJobs(ctx, svc)
-	hub := rt.New(svc)
-	go hub.SweepLoop(ctx)
+	var hub *rt.Hub
+	if cfg.Realtime {
+		hub = rt.New(svc)
+		go hub.SweepLoop(ctx)
+	} else { // no socket to tell anyone: presence that missed its heartbeats is still removed
+		log.Printf("realtime is switched off: pages work without live updates")
+		go func() {
+			t := time.NewTicker(5 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					svc.Presence.Sweep()
+				}
+			}
+		}()
+	}
 	srv := &api.Server{Version: svc.NodeVersion, MinClient: cfg.MinClient, Hub: hub, Svc: svc, Search: searcher, SearchAdmin: searchAdmin, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
 		Ready: func(ctx context.Context) error {
 			if err := st.Pool.Ping(ctx); err != nil {
@@ -364,9 +386,21 @@ func serve(ctx context.Context, cfg config.Config) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
+	// a graceful stop (SPEC 17.8): readiness fails first so a load balancer moves new requests elsewhere, open pages are told to
+	// reconnect (spread out), the node is marked as draining, and only after the delay does the listener close and wait for what is in
+	// flight
+	log.Printf("stopping: readiness now fails; draining for %s", cfg.DrainDelay)
+	srv.Drain()
+	svc.Drain(ctx)
+	if hub != nil {
+		go hub.Drain(time.Second)
+	}
+	time.Sleep(cfg.DrainDelay)
 	shutdown, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	hs.Shutdown(shutdown)
+	svc.LeaveCluster(context.Background())
+	log.Printf("stopped")
 }
 
 // sprintJobs is the scheduler for auto-sprints and auto-rollover. Every node runs it: each step re-checks state under a lock.
