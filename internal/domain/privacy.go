@@ -149,7 +149,7 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 		short = short[:8]
 	}
 	newEmail := "erased-" + short + "@erased.invalid"
-	needSweep := false   // originals of mail from this person were let go: their bytes are removed after the commit
+	needSweep := false           // originals of mail from this person were let go: their bytes are removed after the commit
 	touched := map[string]bool{} // issues whose text or participants changed: their derived data is rebuilt
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		mark := func(q string, args ...any) error {

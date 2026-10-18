@@ -11,6 +11,7 @@ import (
 	"github.com/larytet/tasklane/internal/egress"
 	"github.com/larytet/tasklane/internal/mail"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -57,7 +58,10 @@ type Service struct {
 	// MailRawDays and MailBounceDays are the retention of inbound mail and of bounce records, in days (0 keeps them, once
 	// MailRetentionSet says the values were chosen; unset, the defaults apply).
 	MailRawDays, MailBounceDays int
-	MailRetentionSet            bool
+	// MailWorkers is how many messages are sent at the same time (default 8).
+	MailWorkers      int
+	lastMailBatch    atomic.Int64
+	MailRetentionSet bool
 	// Publish, when set, receives every committed change for the realtime channel. Events are best effort:
 	// a lost event is repaired by a refetch, and nothing depends on delivery.
 	Publish func(Event)

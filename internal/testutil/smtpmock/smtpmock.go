@@ -54,6 +54,7 @@ type Options struct {
 	Hostname   string
 	Bind       string // listen address, default 127.0.0.1 (127.0.0.2 is a non-local host for plaintext-auth tests)
 	RejectRcpt map[string]bool
+	Delay      time.Duration // how long the relay takes to accept each message (a slow relay)
 }
 
 // Message is one accepted message.
@@ -375,6 +376,9 @@ func (m *Mock) handle(c net.Conn, b Behavior, n int) {
 			if s.b.DropAtEnd { // the message is stored, the acknowledgement never arrives
 				s.log("S", "<connection dropped without a reply>")
 				return
+			}
+			if m.opts.Delay > 0 {
+				time.Sleep(m.opts.Delay)
 			}
 			s.reply(250, "2.0.0 queued")
 			s.from, s.rcpts = "", nil

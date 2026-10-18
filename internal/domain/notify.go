@@ -9,6 +9,8 @@ import (
 	netmail "net/mail"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,6 +33,7 @@ type MailConfig struct {
 const (
 	consumerNotifier = "notifier"
 	maxAttempts      = 8
+	mailBatch        = 100 // messages taken per pass; a full pass is followed at once by another
 	leaseFor         = 5 * time.Minute
 )
 
@@ -386,6 +389,14 @@ func (s *Service) queueAccountMail(ctx context.Context, u User) {
 
 // SendMailOnce sends due mail. A row is leased before sending (so two nodes never send the same one), the
 // recipient's access is checked again at send time, and failures back off exponentially.
+// mailWorkers is how many messages are sent at the same time (default 8).
+func (s *Service) mailWorkers() int {
+	if s.MailWorkers > 0 {
+		return s.MailWorkers
+	}
+	return 8
+}
+
 func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 	if s.Mail == nil {
 		return 0, nil
@@ -400,8 +411,8 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 	}
 	now := s.Now()
 	rows, err := s.DB.Query(ctx, `UPDATE mail_message SET next_attempt_at=$2 WHERE id IN (
-		SELECT id FROM mail_message WHERE status='pending' AND next_attempt_at<=$1 ORDER BY id LIMIT 20 FOR UPDATE SKIP LOCKED)
-		RETURNING id,issue_id,recipient_id,internal,attempts,recipient,subject,message_id,in_reply_to,refs,body_text,body_html,reply_to`, now, now.Add(leaseFor))
+		SELECT id FROM mail_message WHERE status='pending' AND next_attempt_at<=$1 ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED)
+		RETURNING id,issue_id,recipient_id,internal,attempts,recipient,subject,message_id,in_reply_to,refs,body_text,body_html,reply_to`, now, now.Add(leaseFor), mailBatch)
 	if err != nil {
 		return 0, err
 	}
@@ -415,7 +426,10 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 		jobs = append(jobs, j)
 	}
 	rows.Close()
-	for _, j := range jobs {
+	// Messages go out concurrently (each send has its own connection): a burst of notifications must leave within the delivery
+	// target even when the relay takes a while per message (MAIL-17).
+	var nsent int64
+	send := func(j job) {
 		// permission may have changed between the event and now
 		ok := j.issueID == nil // account mail has no issue to check
 		if j.issueID != nil && j.userID != nil {
@@ -426,28 +440,54 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 		}
 		if !ok {
 			s.DB.Exec(ctx, `UPDATE mail_message SET status='suppressed', last_error='recipient no longer has access' WHERE id=$1`, j.id)
-			continue
+			return
 		}
 		if s.suppressed(ctx, addrOnly(j.to)) { // a bounce or a complaint stopped mail to this address; the in-app inbox is not affected
 			s.DB.Exec(ctx, `UPDATE mail_message SET status='suppressed', last_error='the address is suppressed after a bounce or complaint' WHERE id=$1`, j.id)
-			continue
+			return
 		}
 		serr := s.Mail.Mailer.Send(ctx, mail.Message{ReturnPath: s.returnPath(ctx, j.id), From: s.Mail.From, To: j.to, Subject: j.subject, MessageID: j.mid, InReplyTo: j.irt, Refs: j.refs,
 			Text: j.text, HTML: j.html, ReplyTo: j.replyTo, Instance: s.Mail.Domain, ListUnsubscribe: "<mailto:" + addrOnly(s.Mail.From) + "?subject=unsubscribe>", Date: s.Now()})
 		if serr == nil {
 			s.DB.Exec(ctx, `UPDATE mail_message SET status='sent', sent_at=$2, attempts=attempts+1, last_error='' WHERE id=$1`, j.id, s.Now())
-			sent++
-			continue
+			atomic.AddInt64(&nsent, 1)
+			return
 		}
 		att := j.attempts + 1
 		var perm *mail.Permanent
 		if asPermanent(serr, &perm) || att >= maxAttempts {
 			s.DB.Exec(ctx, `UPDATE mail_message SET status='failed', attempts=$2, last_error=$3 WHERE id=$1`, j.id, att, serr.Error())
-			continue
+			return
 		}
 		back := time.Duration(math.Min(float64(30*time.Second)*math.Pow(2, float64(j.attempts)), float64(6*time.Hour)))
 		s.DB.Exec(ctx, `UPDATE mail_message SET attempts=$2, last_error=$3, next_attempt_at=$4 WHERE id=$1`, j.id, att, serr.Error(), s.Now().Add(back))
 	}
+	// Messages to one address keep their order (an assignment is not overtaken by the comment that follows it); different
+	// addresses go at the same time.
+	groups := map[string][]job{}
+	var order []string
+	for _, j := range jobs {
+		k := strings.ToLower(addrOnly(j.to))
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], j)
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, s.mailWorkers())
+	for _, k := range order {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(js []job) {
+			defer func() { <-sem; wg.Done() }()
+			for _, j := range js {
+				send(j)
+			}
+		}(groups[k])
+	}
+	wg.Wait()
+	sent = int(nsent)
+	s.lastMailBatch.Store(int64(len(jobs)))
 	return sent, nil
 }
 
@@ -474,6 +514,8 @@ func (s *Service) RunMail(ctx context.Context, logf func(string, ...any)) {
 	for {
 		if _, err := s.SendMailOnce(ctx); err != nil && ctx.Err() == nil {
 			logf("mail: %v", err)
+		} else if err == nil && s.lastMailBatch.Load() >= mailBatch && ctx.Err() == nil {
+			continue // a full batch means more is waiting: do not sleep
 		}
 		select {
 		case <-ctx.Done():
