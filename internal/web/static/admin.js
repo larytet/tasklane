@@ -14,6 +14,7 @@
       h('a', { href: '#/admin/automation', class: 'tab', 'aria-current': active === 'automation' ? 'page' : null }, 'Automation'),
       h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
       h('a', { href: '#/admin/email', class: 'tab', 'aria-current': active === 'email' ? 'page' : null }, 'Email'),
+      h('a', { href: '#/admin/git', class: 'tab', 'aria-current': active === 'git' ? 'page' : null }, 'Git'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
   }
 
@@ -461,6 +462,133 @@
     await Promise.all([loadSources(), loadQueue(), loadSupp(), loadBoxes()]);
   }
 
+
+  // Git: connections and their health, mapped repositories, visibility, identity links, and per-project smart commits and rules.
+  async function gitView() {
+    const app = document.getElementById('app'); clear(app);
+    const msg = h('div', { class: 'err', role: 'alert' }), rmsg = h('div', { class: 'err', role: 'alert' }), imsg = h('div', { class: 'err', role: 'alert' }), umsg = h('div', { class: 'err', role: 'alert' });
+    const conns = h('div', { class: 'list', role: 'list', 'aria-label': 'Connections' });
+    const repos = h('div', { class: 'list', role: 'list', 'aria-label': 'Repositories' });
+    const ids = h('div', { class: 'list', role: 'list', 'aria-label': 'Linked accounts' });
+    const vis = h('div', {});
+    const rules = h('div', { class: 'list', role: 'list', 'aria-label': 'Rules' });
+    const runs = h('div', { class: 'list', role: 'list', 'aria-label': 'Rule runs' });
+    const row = (...c) => h('div', { class: 'row', role: 'listitem' }, ...c);
+    const none = t => row(h('span', { class: 'muted' }, t));
+    const btn = (label, aria, fn, cls) => h('button', { class: 'btn ' + (cls || 'ghost'), 'aria-label': aria, onclick: fn }, label);
+    const projSel = h('select', { 'aria-label': 'Project for rules and smart commits' });
+    const commits = h('select', { 'aria-label': 'Smart commits' }, h('option', { value: 'off' }, 'Off'), h('option', { value: 'default_branch' }, 'Commits on the default branch'), h('option', { value: 'any' }, 'Commits on any branch'));
+    async function loadConns() {
+      clear(conns);
+      const r = await api('GET', '/api/v1/git/connections');
+      if (r.status !== 200) { conns.append(row(errText(r))); return; }
+      if (!r.data.length) conns.append(none('No connection. Add one to link pull requests, branches, builds and deployments to issues.'));
+      for (const c of r.data) {
+        const health = c.disconnected ? 'disconnected (read-only)' : c.health + (c.health_detail ? ': ' + c.health_detail : '');
+        conns.append(row(h('span', { class: 'sum' }, h('strong', {}, c.name), ' ', h('span', { class: 'muted' }, c.provider + ' · ' + c.base_url + ' · token ' + (c.token_fingerprint || 'none') + ' · webhook ' + c.webhook_fingerprint + ' · ' + health)),
+          h('label', {}, h('input', { type: 'checkbox', 'aria-label': 'Allow write actions for ' + c.name, checked: c.write_enabled, disabled: c.disconnected, onchange: async e => { const d = await api('PUT', '/api/v1/git/connections/' + c.id + '/options', { write_enabled: e.target.checked }); if (d.status !== 200) { toast(errText(d)); e.target.checked = !e.target.checked; } } }), ' Write actions'),
+          btn('Check', 'Check connection ' + c.name, async () => { const d = await api('POST', '/api/v1/git/connections/' + c.id + '/check'); toast(d.status === 200 ? 'Connection ' + (d.data.health || 'checked') : errText(d)); loadConns(); }),
+          btn('Disconnect', 'Disconnect ' + c.name, async () => { const d = await api('DELETE', '/api/v1/git/connections/' + c.id + '?mode=keep_read_only'); if (d.status === 200) loadConns(); else toast(errText(d)); })));
+      }
+    }
+    async function loadRepos() {
+      clear(repos);
+      const r = await api('GET', '/api/v1/git/repos');
+      if (r.status !== 200) { repos.append(row(errText(r))); return; }
+      if (!r.data.length) repos.append(none('No repository is mapped.'));
+      for (const x of r.data) repos.append(row(h('span', { class: 'sum' }, h('strong', {}, x.full_name), ' ', h('span', { class: 'muted' }, 'projects ' + (x.projects || []).join(', ') + (x.last_sync_at ? ' · synced ' + new Date(x.last_sync_at).toLocaleString() : ' · not synced'))), x.sync_error ? h('span', { class: 'err' }, x.sync_error) : null,
+        btn('Sync', 'Sync ' + x.full_name, async () => { const d = await api('POST', '/api/v1/git/repos/' + x.id + '/sync'); toast(d.status === 200 ? d.data.events + ' event(s) applied' : errText(d)); loadRepos(); })));
+    }
+    async function loadVis() {
+      clear(vis);
+      const r = await api('GET', '/api/v1/git/visibility');
+      if (r.status !== 200) { vis.append(h('div', { class: 'muted' }, errText(r))); return; }
+      const sel = h('select', { 'aria-label': 'Who sees development data' }, h('option', { value: 'default' }, 'Anyone who can see the issue'), h('option', { value: 'restricted' }, 'Only people with access to a private repository'));
+      sel.value = r.data.mode;
+      sel.addEventListener('change', async () => { const d = await api('PUT', '/api/v1/git/visibility', { mode: sel.value }); toast(d.status === 200 ? 'Visibility saved' : errText(d)); loadVis(); });
+      vis.append(sel);
+      if (r.data.mode === 'restricted') for (const x of r.data.repos || []) {
+        const state = x.private === null || x.private === undefined ? 'privacy unknown (treated as private)' : x.private ? 'private' : 'public';
+        const set = async v => { const d = await api('PUT', '/api/v1/git/repos/' + x.id + '/privacy', { private: v }); if (d.status === 200) loadVis(); else toast(errText(d)); };
+        vis.append(row(h('span', { class: 'sum' }, h('strong', {}, x.full_name), ' ', h('span', { class: 'muted' }, state + ' · ' + x.members + ' with access' + (x.access_list_synced_at ? ' · list read ' + new Date(x.access_list_synced_at).toLocaleString() : ' · list not read'))),
+          btn('Treat as private', 'Treat ' + x.full_name + ' as private', () => set(true)), btn('Treat as public', 'Treat ' + x.full_name + ' as public', () => set(false)), btn('Use the provider’s answer', 'Use the provider answer for ' + x.full_name, () => set(null))));
+      }
+    }
+    async function loadIds() {
+      clear(ids);
+      const r = await api('GET', '/api/v1/git/identities');
+      if (r.status !== 200) { ids.append(row(errText(r))); return; }
+      if (!r.data.length) ids.append(none('No provider account is linked to a person.'));
+      for (const x of r.data) ids.append(row(h('span', { class: 'sum' }, h('strong', {}, x.login), ' ', h('span', { class: 'muted' }, x.provider + ' → ' + x.user)),
+        btn('Unlink', 'Unlink ' + x.login, async () => { const d = await api('DELETE', '/api/v1/git/identities/' + x.id); if (d.status === 200) loadIds(); else toast(errText(d)); })));
+    }
+    async function loadRules() {
+      clear(rules); clear(runs);
+      if (!projSel.value) { rules.append(none('No project.')); return; }
+      const k = projSel.value;
+      const sc = await api('GET', '/api/v1/projects/' + k + '/git/smart-commits');
+      if (sc.status === 200) commits.value = sc.data.mode;
+      const r = await api('GET', '/api/v1/projects/' + k + '/git/rules');
+      if (r.status !== 200) { rules.append(row(errText(r))); return; }
+      if (!r.data.length) rules.append(none('No rule in this project.'));
+      for (const x of r.data) {
+        const mode = h('select', { 'aria-label': 'Mode of rule ' + x.name }, h('option', { value: 'off' }, 'Off'), h('option', { value: 'dry_run' }, 'Dry run'), h('option', { value: 'on' }, 'On'));
+        mode.value = x.mode;
+        mode.addEventListener('change', async () => { const d = await api('PUT', '/api/v1/projects/' + k + '/git/rules/' + x.id, { ...x, mode: mode.value }); if (d.status !== 200) toast(errText(d)); loadRules(); });
+        rules.append(row(h('span', { class: 'sum' }, h('strong', {}, x.name), ' ', h('span', { class: 'muted' }, 'when ' + x.trigger.replace('_', ' ') + (x.transition ? ' → ' + x.transition : '') + (x.comment ? ' · comments' : ''))), mode,
+          btn('Delete', 'Delete rule ' + x.name, async () => { const d = await api('DELETE', '/api/v1/projects/' + k + '/git/rules/' + x.id); if (d.status === 200) loadRules(); else toast(errText(d)); })));
+      }
+      const q = await api('GET', '/api/v1/projects/' + k + '/git/rule-runs?limit=20');
+      if (q.status === 200) {
+        if (!q.data.length) runs.append(none('No run yet.'));
+        for (const x of q.data) runs.append(row(h('span', { class: 'sum' }, h('strong', {}, x.rule), ' ', x.issue, ' ', h('span', { class: 'muted' }, x.outcome + (x.detail ? ': ' + x.detail : '') + ' · ' + new Date(x.at).toLocaleString()))));
+      }
+    }
+    commits.addEventListener('change', async () => { const d = await api('PUT', '/api/v1/projects/' + projSel.value + '/git/smart-commits', { mode: commits.value }); toast(d.status === 200 ? 'Smart commits saved' : errText(d)); });
+    projSel.addEventListener('change', loadRules);
+    const cf = {};
+    for (const [k, label, type, ph] of [['name', 'Connection name', 'text', 'GitHub'], ['base_url', 'Base URL', 'text', 'https://api.github.com'], ['token', 'Access token', 'password', 'token']]) cf[k] = h('input', { type, 'aria-label': label, placeholder: ph, autocomplete: 'off' });
+    const prov = h('select', { 'aria-label': 'Provider' }, h('option', { value: 'github' }, 'GitHub'), h('option', { value: 'gitlab' }, 'GitLab'));
+    const rf = { conn: h('select', { 'aria-label': 'Connection for the repository' }), name: h('input', { type: 'text', 'aria-label': 'Repository', placeholder: 'owner/name' }), proj: h('input', { type: 'text', 'aria-label': 'Projects to link', placeholder: 'ABC, DEF' }) };
+    const lf = { provider: h('select', { 'aria-label': 'Account provider' }, h('option', { value: 'github' }, 'GitHub'), h('option', { value: 'gitlab' }, 'GitLab')), login: h('input', { type: 'text', 'aria-label': 'Provider account', placeholder: 'octocat' }), user: h('select', { 'aria-label': 'Person' }) };
+    const nr = { name: h('input', { type: 'text', 'aria-label': 'Rule name', placeholder: 'Move to In Progress on a branch' }), trigger: h('select', { 'aria-label': 'Trigger' }, ...[['branch_created', 'A branch is created'], ['pr_opened', 'A pull request is opened'], ['pr_merged', 'A pull request is merged'], ['build_failed', 'A build fails']].map(([v, t]) => h('option', { value: v }, t))), transition: h('input', { type: 'text', 'aria-label': 'Transition', placeholder: 'Start progress' }), comment: h('input', { type: 'text', 'aria-label': 'Comment', placeholder: 'Comment (optional)' }) };
+    app.append(topbar(), adminTabs('git'), h('div', { class: 'page' }, h('h2', {}, 'Git'),
+      h('p', { class: 'muted' }, 'Pull requests, branches, builds and deployments are linked to issues by their keys. Tasklane stores no source and no message bodies, and the provider is read only unless write actions are allowed for a connection.'),
+      h('h3', {}, 'Connections'), conns,
+      h('div', { class: 'chips', style: 'margin:8px 0' }, cf.name, prov, cf.base_url, cf.token, h('button', { class: 'btn', onclick: async () => {
+        const r = await api('POST', '/api/v1/git/connections', { name: cf.name.value, provider: prov.value, base_url: cf.base_url.value, token: cf.token.value });
+        if (r.status === 201) { msg.textContent = ''; for (const k in cf) cf[k].value = ''; loadConns(); refreshConnSel(); const close = modal(h('div', {}, h('h2', {}, 'Webhook'), h('p', {}, 'Send the provider’s webhooks to this address with this secret. The secret is shown once.'), h('pre', { class: 'code', 'aria-label': 'Webhook address' }, r.data.webhook_url), h('pre', { class: 'code', 'aria-label': 'Webhook secret' }, r.data.webhook_secret), h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: () => close() }, 'Done')))); }
+        else msg.textContent = errText(r);
+      } }, 'Add connection')), msg,
+      h('h3', { style: 'margin-top:16px' }, 'Repositories'), repos,
+      h('div', { class: 'chips', style: 'margin:8px 0' }, rf.conn, rf.name, rf.proj, h('button', { class: 'btn', onclick: async () => {
+        const r = await api('POST', '/api/v1/git/connections/' + rf.conn.value + '/repos', { full_name: rf.name.value, projects: rf.proj.value.split(/[\s,]+/).filter(Boolean) });
+        if (r.status === 201) { rf.name.value = ''; rf.proj.value = ''; rmsg.textContent = ''; loadRepos(); } else rmsg.textContent = errText(r);
+      } }, 'Map repository')), rmsg,
+      h('h3', { style: 'margin-top:16px' }, 'Who sees development data'), h('p', { class: 'muted' }, 'In the restricted setting a person sees the code of a private repository only when their linked account has access to it. Until a repository’s privacy and access list are read, it counts as private.'), vis,
+      h('h3', { style: 'margin-top:16px' }, 'Linked accounts'), h('p', { class: 'muted' }, 'A commit can act as a person (smart commits) and show as theirs only through an account you link here, or an address the provider vouches for.'), ids,
+      h('div', { class: 'chips', style: 'margin:8px 0' }, lf.provider, lf.login, lf.user, h('button', { class: 'btn', onclick: async () => {
+        const r = await api('POST', '/api/v1/git/identities', { provider: lf.provider.value, login: lf.login.value, user: lf.user.value });
+        if (r.status === 201) { lf.login.value = ''; imsg.textContent = ''; loadIds(); } else imsg.textContent = errText(r);
+      } }, 'Link account')), imsg,
+      h('div', { class: 'chips', style: 'margin-top:16px' }, h('h3', { style: 'margin:0' }, 'Project'), projSel, h('label', {}, 'Smart commits ', commits)),
+      h('h3', {}, 'Rules'), h('p', { class: 'muted' }, 'A rule acts on a live event once per object and issue. A dry run records what would happen and changes nothing.'), rules,
+      h('div', { class: 'chips', style: 'margin:8px 0' }, nr.name, nr.trigger, nr.transition, nr.comment, h('button', { class: 'btn', onclick: async () => {
+        const r = await api('POST', '/api/v1/projects/' + projSel.value + '/git/rules', { name: nr.name.value, trigger: nr.trigger.value, transition: nr.transition.value, comment: nr.comment.value, mode: 'dry_run' });
+        if (r.status === 201) { nr.name.value = ''; nr.transition.value = ''; nr.comment.value = ''; umsg.textContent = ''; loadRules(); } else umsg.textContent = errText(r);
+      } }, 'Add rule (dry run)')), umsg,
+      h('h3', {}, 'Recent runs'), runs));
+    async function refreshConnSel() {
+      const r = await api('GET', '/api/v1/git/connections'); clear(rf.conn);
+      if (r.status === 200) for (const c of r.data) if (!c.disconnected) rf.conn.append(h('option', { value: c.id }, c.name));
+    }
+    const [pr, us] = await Promise.all([api('GET', '/api/v1/projects'), api('GET', '/api/v1/users')]);
+    if (pr.status === 200) for (const p of pr.data) projSel.append(h('option', { value: p.key }, p.key + ' ' + p.name));
+    if (us.status === 200) for (const u of us.data) lf.user.append(h('option', { value: u.id }, u.name || u.email));
+    await Promise.all([loadConns(), loadRepos(), loadVis(), loadIds(), loadRules(), refreshConnSel()]);
+  }
+
+  A.EXT.routes.push({ re: /^#\/admin\/git\/?$/, run: () => gitView() });
   A.EXT.routes.push({ re: /^#\/admin\/email\/?$/, run: () => emailView() });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/([0-9a-f-]{36})/, run: m => editorView(m[1]) });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/?$/, run: () => listView() });

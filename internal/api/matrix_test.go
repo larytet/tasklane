@@ -736,6 +736,7 @@ func rows() []row {
 		}},
 		{"DELETE /api/v1/projects/{key}/git/rules/{id}", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/projects/ABC/git/rules/999999", nil) }},
 		{"GET /api/v1/projects/{key}/git/rule-runs", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/git/rule-runs", nil) }},
+		{"GET /api/v1/projects/{key}/git/smart-commits", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/git/smart-commits", nil) }},
 		{"PUT /api/v1/projects/{key}/git/smart-commits", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
 			return J("PUT", "/api/v1/projects/ABC/git/smart-commits", map[string]any{"mode": "off"})
 		}},

@@ -262,6 +262,17 @@ func (s *Service) GitRuleRuns(ctx context.Context, a Actor, key string, limit in
 
 // SetSmartCommits chooses where commit commands run: off (the default), only on the default branch (and for pull requests
 // merged into it), or on any branch.
+// SmartCommits is the project's current setting.
+func (s *Service) SmartCommits(ctx context.Context, a Actor, key string) (string, error) {
+	pid, _, err := s.gitProjectAdmin(ctx, a, key)
+	if err != nil {
+		return "", err
+	}
+	var m string
+	err = s.DB.QueryRow(ctx, `SELECT git_smart_commits FROM project WHERE id::text=$1`, pid).Scan(&m)
+	return m, err
+}
+
 func (s *Service) SetSmartCommits(ctx context.Context, a Actor, key, mode string) error {
 	pid, mirrored, err := s.gitProjectAdmin(ctx, a, key)
 	if err != nil {

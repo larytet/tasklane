@@ -41,6 +41,10 @@ func (s *Server) registerGitAuto(mux *http.ServeMux) {
 		v, err := s.Svc.GitRuleRuns(r.Context(), actorOf(r), r.PathValue("key"), n)
 		s.reply(w, v, err)
 	}))
+	s.handle(mux, "GET /api/v1/projects/{key}/git/smart-commits", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		m, err := s.Svc.SmartCommits(r.Context(), actorOf(r), r.PathValue("key"))
+		s.reply(w, map[string]string{"mode": m}, err)
+	}))
 	s.handle(mux, "PUT /api/v1/projects/{key}/git/smart-commits", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Mode string `json:"mode"`

@@ -99,7 +99,7 @@ ABC-123 ABC-124 #comment both #in-review
 
 ### Not built
 
-An Admin screen for rules, identities and the smart-commit setting (these are API only); self-service identity linking by the person (an administrator vouches for each link); `#time`; rules for deployments and reviews; a "recently pushed" window; flagging an issue (a rule can comment but not set a flag); and the visibility setting is per organization and an access list is read only for repositories of a restricted organization.
+Editing a rule after it is created; self-service identity linking by the person (an administrator vouches for each link); `#time`; rules for deployments and reviews; a "recently pushed" window; flagging an issue (a rule can comment but not set a flag); and the visibility setting is per organization and an access list is read only for repositories of a restricted organization.
 
 
 ## Write actions, connection health and disconnect
@@ -167,3 +167,7 @@ Each organization has a Git visibility setting, changed by an administrator (`PU
 - `restricted`: development data from a **private** repository is shown only to a person whose linked provider account is on the repository's access list (GitHub collaborators, GitLab project members), and to instance administrators. Everyone else sees a count ("N in a private repository you cannot access") and nothing of the titles, branches, builds or deployments. TQL development fields, rule and command entries and the MCP `list_development` tool follow the same rule.
 
 It fails closed: a repository whose privacy has not been read yet counts as private, a person with no linked account has no access, and an access list not refreshed within 24 hours is not believed. Access is re-read on every sync, so a provider revoking someone takes effect at the next sync; unlinking an account takes effect at once. An administrator can override the provider's answer for a repository (`PUT /api/v1/git/repos/{id}/privacy`, audited). Access lists are read only while some organization is restricted. Gap: a token that may not list collaborators leaves the last list in place, and the problem is shown on the repository.
+
+## Admin screen
+
+Administration → **Git** manages everything above without the API: connections (the token and webhook secret are shown once or not at all, only fingerprints after), repositories, the visibility setting, linked accounts, and for each project the smart-commit setting and the rules with their recent runs. `GET /api/v1/projects/{key}/git/smart-commits` reads the current setting.
