@@ -56,7 +56,7 @@
         before = e.id;
       }
       more.hidden = r.data.length < 50;
-      if (reset && !r.data.length) list.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No entries match.')));
+      if (reset && !r.data.length) list.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No entries match.')));
     }
     more.addEventListener('click', () => load(false));
     const verify = h('button', { class: 'btn', onclick: async () => {

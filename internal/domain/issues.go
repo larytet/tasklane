@@ -215,7 +215,7 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 		if err := s.hist(ctx, tx, id, a, "created", nil, sp(key)); err != nil {
 			return err
 		}
-		return outbox(ctx, tx, "issue:"+key, "issue.created", map[string]any{"key": key, "actor": a.Label, "actor_id": a.ID})
+		return outbox(ctx, tx, "issue:"+key, "issue.created", map[string]any{"key": key, "actor": a.Label, "actor_id": a.ID, "assignee": in.Assignee})
 	})
 	if err != nil {
 		return Issue{}, err

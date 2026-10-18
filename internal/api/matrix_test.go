@@ -469,6 +469,27 @@ func rows() []row {
 		{"GET /api/v1/admin/audit", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/audit", nil) }},
 		{"GET /api/v1/admin/audit/verify", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/audit/verify", nil) }},
 		{"GET /api/v1/admin/audit/export", adminer, func(f *fixture) req { return J("GET", "/api/v1/admin/audit/export", nil) }},
+		{"GET /api/v1/notifications", authed, func(f *fixture) req { return J("GET", "/api/v1/notifications", nil) }},
+		{"GET /api/v1/notifications/unread-count", authed, func(f *fixture) req { return J("GET", "/api/v1/notifications/unread-count", nil) }},
+		{"POST /api/v1/notifications/read-all", authed, func(f *fixture) req { return J("POST", "/api/v1/notifications/read-all", nil) }},
+		{"POST /api/v1/notifications/{id}/state", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/notifications/999999/state", map[string]any{"state": "read"})
+		}},
+		{"GET /api/v1/me/notification-prefs", authed, func(f *fixture) req { return J("GET", "/api/v1/me/notification-prefs", nil) }},
+		{"PUT /api/v1/me/notification-prefs", authed, func(f *fixture) req {
+			return J("PUT", "/api/v1/me/notification-prefs", map[string]any{"auto_watch": true, "inbox": true, "email": true})
+		}},
+		{"GET /api/v1/issues/{key}/watch", reader, func(f *fixture) req { return J("GET", "/api/v1/issues/"+f.issue()+"/watch", nil) }},
+		{"PUT /api/v1/issues/{key}/watch", reader, func(f *fixture) req {
+			return J("PUT", "/api/v1/issues/"+f.issue()+"/watch", map[string]any{"watch": true})
+		}},
+		{"DELETE /api/v1/issues/{key}/watch", reader, func(f *fixture) req { return J("DELETE", "/api/v1/issues/"+f.issue()+"/watch", nil) }},
+		{"GET /api/v1/projects/{key}/notification-scheme", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("GET", "/api/v1/projects/ABC/notification-scheme", nil)
+		}},
+		{"PUT /api/v1/projects/{key}/notification-scheme", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/notification-scheme", map[string]any{"issue.transitioned": []string{"assignee"}})
+		}},
 		{"GET /api/v1/users", authed, func(f *fixture) req { return J("GET", "/api/v1/users", nil) }},
 		{"POST /api/v1/users", adminer, func(f *fixture) req {
 			f.n++

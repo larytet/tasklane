@@ -1,0 +1,10 @@
+# Notifications
+
+Two channels read the same events: the **in-app inbox** (always available) and **email** (when the server is configured to send mail). A background worker turns each event into at most one notification per person, event and kind, so a retry, a replay or a second node never produces a duplicate.
+
+- **Who hears.** By default: the assignee when an issue is created for them or assigned to them; the reporter, the assignee, people who commented and **watchers** when the status changes or someone comments; the reporter, the assignee and watchers when the description is edited; anyone **mentioned** (once, with a specific message). People are never told about their own actions.
+- **Watching.** The **Watch** button on a ticket subscribes you. Choosing not to watch (`PUT /api/v1/issues/{key}/watch` with `watch: false`) silences an issue even if you reported it or are assigned to it. `DELETE` on the same address forgets your choice.
+- **Preferences** (Inbox → Preferences, `/api/v1/me/notification-prefs`): watch what you touch (auto-watch), inbox on or off, email on or off, kinds you do not want (assigned, mention, comment, status, edit, created), and **quiet hours** with a time zone. Email waits for quiet hours to end; the inbox does not. Direct events (an assignment, a mention) reach you even with auto-watch off.
+- **Notification schemes.** `PUT /api/v1/projects/{key}/notification-scheme` sets who each event notifies in a project (assignee, reporter, commenters, watchers). An event left out keeps the built-in default; an empty list notifies nobody by the scheme. Mentions are not affected.
+- **Permissions.** A notification is shown only while you can still read the issue's project, and one from an internal comment only while you may see internal comments; revoking access hides what was already delivered and restoring it brings it back. Trashed issues' notifications are hidden.
+- **Inbox.** Unread, All and Archived views, read and unread, archive, mark all read, an unread count on the Inbox button, and a list that refreshes itself every few seconds.

@@ -206,6 +206,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	go svc.RunGitWorkers(ctx, log.Printf)
 	go svc.RunJiraWorkers(ctx, log.Printf)
 	go svc.RunWorkflowJobs(ctx, log.Printf)
+	go svc.RunNotifier(ctx, log.Printf)
 	go svc.RunWorkflowMigrations(ctx, log.Printf)
 	if cfg.SMTPHost != "" {
 		dom := "tasklane.local"

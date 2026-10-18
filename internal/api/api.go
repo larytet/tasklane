@@ -335,6 +335,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerWorkflows(mux)
 	s.registerArchive(mux)
 	s.registerAudit(mux)
+	s.registerInbox(mux)
 	s.registerJira(mux)
 	s.registerSearchAdmin(mux)
 	s.registerAttachments(mux)

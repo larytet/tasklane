@@ -36,25 +36,23 @@ type notifyEvent struct {
 	ID      int64
 	Type    string
 	Payload struct {
-		Key     string   `json:"key"`
-		Actor   string   `json:"actor"`
-		ActorID string   `json:"actor_id"`
-		Comment string   `json:"comment"`
-		From    string   `json:"from"`
-		To      string   `json:"to"`
-		Fields  []string `json:"fields"`
-		Field   string   `json:"field"`
-		TextSeq int64    `json:"text_seq"`
+		Key      string   `json:"key"`
+		Actor    string   `json:"actor"`
+		ActorID  string   `json:"actor_id"`
+		Assignee string   `json:"assignee"` // issue.created: who the issue was assigned to when it was made
+		Comment  string   `json:"comment"`
+		From     string   `json:"from"`
+		To       string   `json:"to"`
+		Fields   []string `json:"fields"`
+		Field    string   `json:"field"`
+		TextSeq  int64    `json:"text_seq"`
 	}
 }
 
 // NotifyOnce turns new outbox events into queued mail: one row per event and recipient, keyed so that a
 // retry or a second node can never create a duplicate. It reads the outbox through its own cursor.
 func (s *Service) NotifyOnce(ctx context.Context) (int, error) {
-	if s.Mail == nil {
-		return 0, nil
-	}
-	queued := 0
+	queued := 0 // mail queued; in-app notifications are written whether or not the server sends mail
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO outbox_cursor(consumer) VALUES($1) ON CONFLICT DO NOTHING`, consumerNotifier); err != nil {
 			return err
@@ -117,6 +115,7 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		return 0, err
 	}
 	var ids []string
+	evName, baseKind := "", "comment"
 	var what, body string
 	internal := false
 	kind := "event"
@@ -125,10 +124,17 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 	var mentionWhat string
 	switch e.Type {
 	case "issue.created":
-		if assignee == nil {
+		// the event says who was assigned at creation; the issue may have been reassigned since, which is its own event
+		if e.Payload.Assignee == "" {
 			return 0, nil
 		}
-		ids = []string{*assignee}
+		var ok bool
+		tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM app_user WHERE id::text=$1)`, e.Payload.Assignee).Scan(&ok)
+		if !ok {
+			return 0, nil
+		}
+		assignee = &e.Payload.Assignee
+		evName, baseKind = "issue.created", "created"
 		what = e.Payload.Actor + " created this issue and assigned it to you"
 	case "issue.updated":
 		assigned := false
@@ -140,33 +146,17 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		if !assigned || assignee == nil {
 			return 0, nil
 		}
-		ids = []string{*assignee}
+		evName, baseKind = "issue.assigned", "assigned"
 		what = e.Payload.Actor + " assigned this issue to you"
 	case "issue.transitioned":
-		ids = []string{reporter}
-		if assignee != nil {
-			ids = append(ids, *assignee)
-		}
+		evName, baseKind = "issue.transitioned", "status"
 		what = fmt.Sprintf("%s changed the status from %s to %s", e.Payload.Actor, e.Payload.From, e.Payload.To)
 	case "comment.added":
 		var c string
 		if err := tx.QueryRow(ctx, `SELECT body,internal FROM comment WHERE id=$1`, e.Payload.Comment).Scan(&c, &internal); err != nil {
 			return 0, nil
 		}
-		ids = []string{reporter}
-		if assignee != nil {
-			ids = append(ids, *assignee)
-		}
-		rows, err := tx.Query(ctx, `SELECT DISTINCT author_id FROM comment WHERE issue_id=$1`, id)
-		if err != nil {
-			return 0, err
-		}
-		for rows.Next() {
-			var a string
-			rows.Scan(&a)
-			ids = append(ids, a)
-		}
-		rows.Close()
+		evName, baseKind = "comment.added", "comment"
 		what = e.Payload.Actor + " commented"
 		body = c
 		mentionWhat = e.Payload.Actor + " mentioned you in a comment"
@@ -174,10 +164,7 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 			mentioned[m.id] = m
 		}
 	case "issue.text_saved":
-		ids = []string{reporter}
-		if assignee != nil {
-			ids = append(ids, *assignee)
-		}
+		evName, baseKind = "issue.text_saved", "edit"
 		kind, delay = "edit", s.editBatchWindow()
 		what = e.Payload.Actor + " edited the description"
 		// only mentions that this save introduced notify anyone: saving again with the same mention stays quiet
@@ -199,10 +186,32 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 			body = cur
 		}
 	}
+	classes := s.schemeClasses(ctx, tx, pid, evName)
+	if ids, err = s.audience(ctx, tx, id, reporter, assignee, classes, evName == "issue.created" || evName == "issue.assigned"); err != nil {
+		return 0, err
+	}
 	seen := map[string]bool{e.Payload.ActorID: true} // people are not notified of their own actions
 	n := 0
 	queue := func(r recipient, k, w, text string, due time.Duration, keySuffix string) error {
 		if !s.mayReceive(ctx, tx, r.id, pid, internal) { // visibility is decided now and again at send time
+			return nil
+		}
+		nk := baseKind
+		if k == "mention" {
+			nk = "mention"
+		} else if k == "edit" {
+			nk = "edit"
+		}
+		pr := s.prefsOf(ctx, tx, r.id)
+		if pr.mutes(nk) {
+			return nil
+		}
+		if pr.Inbox {
+			if err := s.inboxWrite(ctx, tx, e, id, r.id, nk, w, text, internal); err != nil {
+				return err
+			}
+		}
+		if s.Mail == nil || !pr.Email {
 			return nil
 		}
 		if k == "edit" { // one "edited by" notice per person and issue while the previous one is still waiting
@@ -222,6 +231,9 @@ func (s *Service) queueEvent(ctx context.Context, tx pgx.Tx, e notifyEvent) (int
 		next := s.Now()
 		if due > 0 {
 			next = next.Add(due)
+		}
+		if end, quiet := pr.quietUntil(next); quiet { // email waits for the quiet hours to end; the inbox does not
+			next = end
 		}
 		var actor any
 		if e.Payload.ActorID != "" {
@@ -426,14 +438,27 @@ func (s *Service) SendMailOnce(ctx context.Context) (sent int, err error) {
 	return sent, nil
 }
 
-// RunMail is the worker loop: queue new events, send due mail.
-func (s *Service) RunMail(ctx context.Context, logf func(string, ...any)) {
+// RunNotifier turns new events into in-app notifications (and queued mail when the server sends mail), until the context ends.
+func (s *Service) RunNotifier(ctx context.Context, logf func(string, ...any)) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
 		if _, err := s.NotifyOnce(ctx); err != nil && ctx.Err() == nil {
 			logf("notify: %v", err)
 		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// RunMail is the sending loop: due mail goes out, with the lease, send-time permission check and backoff of SendMailOnce.
+func (s *Service) RunMail(ctx context.Context, logf func(string, ...any)) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
 		if _, err := s.SendMailOnce(ctx); err != nil && ctx.Err() == nil {
 			logf("mail: %v", err)
 		}
@@ -476,4 +501,34 @@ func (s *Service) MailLog(ctx context.Context, a Actor, limit int) ([]MailLogEnt
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// schemeClasses returns who an event notifies in a project: the project's scheme, or the built-in default.
+func (s *Service) schemeClasses(ctx context.Context, tx pgx.Tx, projectID, event string) []string {
+	var cl []string
+	if tx.QueryRow(ctx, `SELECT recipients FROM notification_scheme WHERE project_id=$1 AND event=$2`, projectID, event).Scan(&cl) == nil {
+		return cl
+	}
+	return defaultScheme[event]
+}
+
+// inboxWrite adds an in-app notification, once per person, event and kind (a replay changes nothing). A burst of
+// description edits by one person stays one unread notice.
+func (s *Service) inboxWrite(ctx context.Context, tx pgx.Tx, e notifyEvent, issueID, userID, kind, what, body string, internal bool) error {
+	if kind == "edit" {
+		var pending bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM notification WHERE user_id=$1 AND issue_id=$2 AND kind='edit' AND actor_label=$3 AND state='unread' AND created_at > $4)`,
+			userID, issueID, e.Payload.Actor, s.Now().Add(-s.editBatchWindow())).Scan(&pending); err != nil {
+			return err
+		}
+		if pending {
+			return nil
+		}
+	}
+	if len(body) > 2000 {
+		body = body[:2000]
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO notification(user_id,issue_id,event_id,kind,what,body,internal,actor_label,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (user_id,event_id,kind) DO NOTHING`,
+		userID, issueID, e.ID, kind, what, body, internal, e.Payload.Actor, s.Now())
+	return err
 }

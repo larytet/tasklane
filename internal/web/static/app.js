@@ -84,6 +84,7 @@
       h('span', { class: 'brand', tabindex: 0, role: 'link', onclick: () => { location.hash = '#/'; }, onkeydown: e => { if (e.key === 'Enter') location.hash = '#/'; } }, 'Tasklane'),
       q,
       h('button', { class: 'btn primary', onclick: createDialog }, '+ Create'),
+      h('button', { class: 'btn ghost', id: 'bell', 'aria-label': 'Inbox', onclick: () => { location.hash = '#/inbox/unread'; } }, 'Inbox', h('span', { id: 'bell-n', class: 'badge', hidden: true })),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/trash/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Trash'),
@@ -331,9 +332,11 @@
       root.append(h('div', { class: 'chips' },
         h('button', { class: 'btn ghost', onclick: () => history.back(), 'aria-label': 'Back' }, '←'),
         h('span', { class: 'key' }, is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' }),
+        h('button', { class: 'btn', id: 'watch-btn', 'aria-pressed': 'false' }, 'Watch'),
         canEdit() ? h('button', { class: 'btn', 'aria-haspopup': 'dialog', onclick: actionsMenu }, 'Actions ▾') : null));
       if (st.deleted) root.append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted' + (st.deleted.by ? ' by ' + st.deleted.by : '') + '. Anything you were typing stays in your draft. ', h('a', { href: '#/trash/' + is.project }, 'Open the trash')));
       fillPresence();
+      fillWatch();
       if (v.mirror) {
         const m = v.mirror, ago = m.synced_at ? L.relTime(m.synced_at) : 'not yet';
         root.append(h('div', { class: 'banner ' + (m.stale ? 'warn' : 'info'), role: 'status' },
@@ -413,6 +416,21 @@
     }
     function deleteDialog() {
       lifecycleDialog(key, 'delete', 'Delete ' + v.issue.key, [], () => ({}), () => { toast('Moved to the trash. It can be restored for 30 days.'); location.hash = '#/'; });
+    }
+
+    // ----- watching: the button shows whether you hear about this issue and flips your explicit choice
+    async function fillWatch() {
+      const b = document.getElementById('watch-btn');
+      if (!b) return;
+      const r = await api('GET', '/api/v1/issues/' + key + '/watch');
+      if (r.status !== 200) { b.hidden = true; return; }
+      const paint = w => {
+        b.textContent = w.watching ? 'Watching ✓' : 'Watch';
+        b.setAttribute('aria-pressed', String(w.watching));
+        b.title = w.watchers + ' watching';
+        b.onclick = async () => { const x = await api('PUT', '/api/v1/issues/' + key + '/watch', { watch: !w.watching }); if (x.status === 200) paint(x.data); else toast((x.data && x.data.error) || 'Could not change watching'); };
+      };
+      paint(r.data);
     }
 
     // ----- subject (editable in place; same save protocol as the description)
@@ -843,6 +861,7 @@
 
   // ---------- routing ----------
   function route() {
+    setTimeout(bell, 0);
     window.onbeforeunload = null;
     if (!S.me) return loginView();
     const hash = location.hash || '#/';
@@ -853,6 +872,16 @@
     const q = hash.startsWith('#/?q=') ? decodeURIComponent(hash.slice(5)) : '';
     return listView(q);
   }
+  // the unread count on the Inbox button: fetched on every screen and every 30 seconds
+  async function bell() {
+    if (!S.me) return;
+    const r = await api('GET', '/api/v1/notifications/unread-count');
+    const b = document.getElementById('bell-n'), btn = document.getElementById('bell');
+    if (!b || r.status !== 200) return;
+    b.hidden = !r.data.unread; b.textContent = r.data.unread > 99 ? '99+' : String(r.data.unread);
+    if (btn) btn.setAttribute('aria-label', r.data.unread ? 'Inbox, ' + r.data.unread + ' unread' : 'Inbox');
+  }
+  setInterval(bell, 30000);
   async function boot() {
     const r = await api('GET', '/api/v1/bootstrap');
     if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect(); } else S.me = null;
@@ -860,7 +889,7 @@
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [] };
-  window.TLApp = { h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route };
+  window.TLApp = { bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route };
   window.addEventListener('hashchange', route);
   boot();
 })();

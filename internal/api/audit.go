@@ -31,7 +31,9 @@ var ordinaryWork = map[string]bool{
 	"POST /api/v1/attachments/{id}/link": true, "POST /api/v1/attachments/{id}/thumbnail": true,
 	"POST /api/v1/issues/{key}/development/links": true, "DELETE /api/v1/issues/{key}/development/links/{id}": true,
 	"POST /api/v1/boards/{id}/move": true, "POST /api/v1/boards/{id}/rank": true, "POST /api/v1/boards/{id}/plan": true,
-	"PUT /api/v1/sprints/{id}/retro":          true,
+	"PUT /api/v1/sprints/{id}/retro":      true,
+	"POST /api/v1/notifications/read-all": true, "POST /api/v1/notifications/{id}/state": true, "PUT /api/v1/me/notification-prefs": true, // a person managing their own inbox
+	"PUT /api/v1/issues/{key}/watch": true, "DELETE /api/v1/issues/{key}/watch": true,
 	"POST /api/v1/workflows/{id}/draft/check": true, // a read: it plans and changes nothing
 }
 
