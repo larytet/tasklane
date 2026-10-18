@@ -14,7 +14,7 @@ this file is updated, and the work is committed and pushed.
 | M1a Tracker | **built, exit gate not passed** | milestones M1a.1 to M1a.9 below; see the exit gate audit for what is still open |
 | M1b Lifecycle and exchange | built, gate to be audited | milestones M1b.1 to M1b.3 below |
 | M1c Agents | **MCP server, gates, kill switch built** | milestones M1c.1 and M1c.2 below; OAuth, subscriptions and bulk tools are open |
-| M2 Agile | **in progress** | M2.1 work calendar done; boards, sprints, reports, S3, Git, OpenSearch, Jira mirror open |
+| M2 Agile | **built, exit gate not passed** | M2.1 to M2.9 below; the audit at the end of the M2 section lists what only a real service or a scale run can prove |
 | M3 to M5 | not started | |
 
 ## M2 milestones
@@ -32,6 +32,16 @@ this file is updated, and the work is committed and pushed.
 | M2.9 Jira mirror (read-only, one way) | stdlib Jira client under the egress policy (rate limits and Retry-After, pacing, JQL in the account's time zone); ADF reader (supported nodes as text, unsupported marked and counted, dangerous link targets dropped, original kept); connection with checked credentials, encrypted token, once-only webhook secret; mirrored projects with their own workflow built from Jira statuses; backfill and incremental sync by `updated` with overlap, resumable watermark, idempotent per issue id and `updated`, one node at a time, comments and changelog paged beyond Jira's inline caps, links and parents resolved after the batch, key changes recorded as aliases, deletions by reconcile (refusing to wipe on an empty answer) with the purge reaching the index; webhooks as signed hints; read-only enforced in the mutation layer (`admit`, plus import, uploads, sprints and board moves) with one typed error carrying the Jira site, through REST (403 `read_only_mirror`), MCP and the UI (banner, Edit in Jira, freshness); permissions from Jira roles and groups (readers only), refreshed every 5 minutes and failing closed after 15 (`effective_member`), security-level issues and restricted comments hidden, warnings in status; placeholders claimed by the real account on creation; pause drains the sync; cut-over to native; status for the Admin tab; `docs/JIRA.md` | done; no attachment files, worklogs, versions, components, Jira boards and sprints, custom field values, OAuth 3LO, "verify with Jira" mode, permission schemes, erasure reports, never run against a real Jira site |
 
 Note: SPEC places OAuth, budgets, kill switch and human gates in M4; they were built early in M1c.2, so M4 has less MCP work. Regional holiday lists by country are not built (holidays are manual or imported dates); the calendar is a value type, org/project/board/team/user inheritance arrives with the board.
+
+### M2 audit (what the in-process tests cannot prove)
+
+| Area | State | Open |
+|---|---|---|
+| Calendars, boards, sprints, reports | built and tested at the service, API and browser level | visual baselines for the new pages, realtime push and presence on boards, regional holiday lists, epics and versions panels, version burndown, multi-select drag, admin screens for board and sprint settings, board performance at 500 issues is measured at the service layer only |
+| S3 backend and direct upload | built against a strict in-process S3 | real MinIO and AWS runs (BLOB-21), the compose `multi` environment, `fs`-to-`s3` migration (BLOB-14), key rotation and TLS enforcement (BLOB-16) |
+| Git (read-only) | built against in-process GitHub and GitLab | real providers, GitHub App and OAuth, TQL fields, board-card icons, write actions, smart commits and automation (M4) |
+| OpenSearch | built against a strict in-process cluster | a real cluster, the 5-million-issue run (TQL-19), cursor paging, custom-field and attachment text, organizations (TQL-17) |
+| Jira mirror | built against an in-process Jira | a real site, the 10,000-issue backfill, attachments, worklogs, versions, Jira boards and sprints, custom fields, OAuth 3LO, "verify with Jira" |
 
 ## M1c milestones
 
