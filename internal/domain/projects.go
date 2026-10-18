@@ -96,7 +96,10 @@ func (s *Service) AddMember(ctx context.Context, a Actor, projectKey, userID, ro
 	if err != nil {
 		return err
 	}
-	if r := s.role(ctx, a, pid); r != "admin" {
+	switch r := s.role(ctx, a, pid); {
+	case r == "":
+		return ErrNotFound // no existence leak for people who cannot see the project
+	case r != "admin":
 		return ErrForbidden
 	}
 	_, err = s.DB.Exec(ctx, `INSERT INTO project_member(project_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT (project_id,user_id) DO UPDATE SET role=$3`, pid, userID, role)

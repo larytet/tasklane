@@ -29,7 +29,17 @@ type Server struct {
 	Search     *search.Postgres
 	BlobOrigin string // optional separate origin for signed file links
 	Hub        *rt.Hub
+	routes     []string
 }
+
+// handle registers a route and records its pattern, so a test can prove that every route is covered by the authorization matrix.
+func (s *Server) handle(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
+	s.routes = append(s.routes, pattern)
+	mux.HandleFunc(pattern, h)
+}
+
+// Routes lists the registered patterns (method and path), for the authorization matrix test.
+func (s *Server) Routes() []string { s.Handler(); return append([]string(nil), s.routes...) }
 
 type ctxKey struct{}
 
@@ -41,9 +51,10 @@ func actorOf(r *http.Request) domain.Actor {
 const cookieName = "tl_session"
 
 func (s *Server) Handler() http.Handler {
+	s.routes = nil
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	s.handle(mux, "GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if s.Ready != nil {
 			if err := s.Ready(r.Context()); err != nil {
 				http.Error(w, "not ready", 503)
@@ -52,15 +63,15 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.Write([]byte("ready"))
 	})
-	mux.HandleFunc("POST /api/v1/login", s.login)
-	mux.HandleFunc("POST /api/v1/logout", s.auth(s.logout))
-	mux.HandleFunc("GET /api/v1/me", s.auth(func(w http.ResponseWriter, r *http.Request) { s.json(w, 200, actorOf(r)) }))
-	mux.HandleFunc("GET /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/login", s.login)
+	s.handle(mux, "POST /api/v1/logout", s.auth(s.logout))
+	s.handle(mux, "GET /api/v1/me", s.auth(func(w http.ResponseWriter, r *http.Request) { s.json(w, 200, actorOf(r)) }))
+	s.handle(mux, "GET /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		us, err := s.Svc.ListUsers(r.Context())
 		s.reply(w, us, err)
 	}))
 
-	mux.HandleFunc("POST /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/users", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		if !actorOf(r).Admin {
 			s.fail(w, 403, "forbidden", "administrators only", nil)
 			return
@@ -75,11 +86,11 @@ func (s *Server) Handler() http.Handler {
 		u, err := s.Svc.CreateUser(r.Context(), in.Email, in.Name, in.Password, in.Admin)
 		s.replyStatus(w, 201, u, err)
 	}))
-	mux.HandleFunc("GET /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		ps, err := s.Svc.ListProjects(r.Context(), actorOf(r))
 		s.reply(w, ps, err)
 	}))
-	mux.HandleFunc("POST /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/projects", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Key, Name string }
 		if !s.decode(w, r, &in) {
 			return
@@ -87,7 +98,7 @@ func (s *Server) Handler() http.Handler {
 		p, err := s.Svc.CreateProject(r.Context(), actorOf(r), in.Key, in.Name)
 		s.replyStatus(w, 201, p, err)
 	}))
-	mux.HandleFunc("POST /api/v1/projects/{key}/members", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/projects/{key}/members", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			User string `json:"user"`
 			Role string `json:"role"`
@@ -98,7 +109,7 @@ func (s *Server) Handler() http.Handler {
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.AddMember(r.Context(), actorOf(r), r.PathValue("key"), in.User, in.Role))
 	}))
 
-	mux.HandleFunc("POST /api/v1/issues", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/issues", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in domain.CreateIn
 		if !s.decode(w, r, &in) {
 			return
@@ -109,9 +120,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.replyStatus(w, 201, is, err)
 	}))
-	mux.HandleFunc("GET /api/v1/issues/{key}/view", s.auth(s.view))
-	mux.HandleFunc("PATCH /api/v1/issues/{key}", s.auth(s.patchIssue))
-	mux.HandleFunc("POST /api/v1/issues/{key}/transitions", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/issues/{key}/view", s.auth(s.view))
+	s.handle(mux, "PATCH /api/v1/issues/{key}", s.auth(s.patchIssue))
+	s.handle(mux, "POST /api/v1/issues/{key}/transitions", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Transition  string `json:"transition"`
 			BaseVersion *int64 `json:"base_version"`
@@ -122,19 +133,19 @@ func (s *Server) Handler() http.Handler {
 		is, err := s.Svc.Transition(r.Context(), actorOf(r), r.PathValue("key"), in.Transition, in.BaseVersion)
 		s.reply(w, is, err)
 	}))
-	mux.HandleFunc("GET /api/v1/issues/{key}/history", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/issues/{key}/history", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		h, err := s.Svc.History(r.Context(), actorOf(r), r.PathValue("key"))
 		s.reply(w, h, err)
 	}))
 
-	mux.HandleFunc("PUT /api/v1/issues/{key}/text/{field}", s.auth(s.saveText))
-	mux.HandleFunc("POST /api/v1/issues/{key}/text/{field}/patch", s.auth(s.patchText))
-	mux.HandleFunc("POST /api/v1/issues/{key}/text/{field}/replace", s.auth(s.replaceText))
-	mux.HandleFunc("GET /api/v1/issues/{key}/text/{field}/versions", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "PUT /api/v1/issues/{key}/text/{field}", s.auth(s.saveText))
+	s.handle(mux, "POST /api/v1/issues/{key}/text/{field}/patch", s.auth(s.patchText))
+	s.handle(mux, "POST /api/v1/issues/{key}/text/{field}/replace", s.auth(s.replaceText))
+	s.handle(mux, "GET /api/v1/issues/{key}/text/{field}/versions", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Svc.TextVersions(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field"))
 		s.reply(w, v, err)
 	}))
-	mux.HandleFunc("POST /api/v1/issues/{key}/text/{field}/restore", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/issues/{key}/text/{field}/restore", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Seq int64 `json:"seq"`
 		}
@@ -145,11 +156,11 @@ func (s *Server) Handler() http.Handler {
 		s.reply(w, res, err)
 	}))
 
-	mux.HandleFunc("GET /api/v1/issues/{key}/drafts", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/issues/{key}/drafts", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		d, err := s.Svc.GetDrafts(r.Context(), actorOf(r), r.PathValue("key"))
 		s.reply(w, d, err)
 	}))
-	mux.HandleFunc("PUT /api/v1/issues/{key}/drafts/{field}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "PUT /api/v1/issues/{key}/drafts/{field}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Body    string `json:"body"`
 			BaseSeq int64  `json:"base_seq"`
@@ -159,11 +170,11 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.SaveDraft(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field"), in.Body, in.BaseSeq))
 	}))
-	mux.HandleFunc("DELETE /api/v1/issues/{key}/drafts/{field}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "DELETE /api/v1/issues/{key}/drafts/{field}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.DeleteDraft(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("field")))
 	}))
 
-	mux.HandleFunc("POST /api/v1/issues/{key}/comments", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/issues/{key}/comments", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Body     string `json:"body"`
 			Internal bool   `json:"internal"`
@@ -174,7 +185,7 @@ func (s *Server) Handler() http.Handler {
 		c, err := s.Svc.AddComment(r.Context(), actorOf(r), r.PathValue("key"), in.Body, in.Internal)
 		s.replyStatus(w, 201, c, err)
 	}))
-	mux.HandleFunc("PATCH /api/v1/issues/{key}/comments/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "PATCH /api/v1/issues/{key}/comments/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Body string `json:"body"`
 		}
@@ -184,7 +195,7 @@ func (s *Server) Handler() http.Handler {
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.EditComment(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("id"), in.Body))
 	}))
 
-	mux.HandleFunc("POST /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Field string `json:"field"`
 		}
@@ -197,7 +208,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.reply(w, p, err)
 	}))
-	mux.HandleFunc("DELETE /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "DELETE /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		key := strings.ToUpper(r.PathValue("key"))
 		if s.Svc.Presence.Leave(key, actorOf(r).ID) && s.Hub != nil {
 			s.Hub.BroadcastPresence(key)
@@ -207,7 +218,7 @@ func (s *Server) Handler() http.Handler {
 	if s.Search == nil {
 		s.Search = &search.Postgres{DB: s.Svc.DB}
 	}
-	mux.HandleFunc("GET /api/v1/bootstrap", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/bootstrap", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		ps, err1 := s.Svc.ListProjects(r.Context(), actorOf(r))
 		us, err2 := s.Svc.ListUsers(r.Context())
 		if err1 != nil || err2 != nil {
@@ -216,21 +227,21 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.json(w, 200, map[string]any{"me": actorOf(r), "projects": ps, "users": us})
 	}))
-	mux.HandleFunc("GET /api/v1/admin/mail", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/admin/mail", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		l, err := s.Svc.MailLog(r.Context(), actorOf(r), 100)
 		s.reply(w, l, err)
 	}))
 	if s.Hub != nil {
-		mux.HandleFunc("POST /api/v1/ws/ticket", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.handle(mux, "POST /api/v1/ws/ticket", s.auth(func(w http.ResponseWriter, r *http.Request) {
 			s.json(w, 200, map[string]any{"ticket": s.Hub.Mint(actorOf(r)), "expires_in": 30})
 		}))
-		mux.HandleFunc("GET /api/v1/ws", s.Hub.Handler())
+		s.handle(mux, "GET /api/v1/ws", s.Hub.Handler())
 	}
-	mux.HandleFunc("GET /api/v1/admin/fields", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/admin/fields", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		t, err := s.Svc.FieldTracking(r.Context(), actorOf(r))
 		s.reply(w, t, err)
 	}))
-	mux.HandleFunc("PUT /api/v1/admin/fields/{field}/history", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "PUT /api/v1/admin/fields/{field}/history", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Track bool `json:"track"`
 		}

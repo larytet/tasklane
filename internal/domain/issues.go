@@ -87,7 +87,10 @@ func (s *Service) CreateIssue(ctx context.Context, a Actor, in CreateIn) (Issue,
 	if err != nil {
 		return Issue{}, err
 	}
-	if !canWrite(s.role(ctx, a, pid)) {
+	switch r := s.role(ctx, a, pid); {
+	case r == "":
+		return Issue{}, ErrNotFound // a project one cannot see answers like one that does not exist
+	case !canWrite(r):
 		return Issue{}, ErrForbidden
 	}
 	summary, _ := Sanitize(strings.TrimSpace(in.Summary))

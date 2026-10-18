@@ -15,7 +15,7 @@ import (
 
 func (s *Server) registerAttachments(mux *http.ServeMux) {
 	// single-request fast path: multipart (streamed, constant memory) or a raw body with ?name=
-	mux.HandleFunc("POST /api/v1/issues/{key}/attachments", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/issues/{key}/attachments", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var name, ctype string
 		var body io.Reader = r.Body
 		if mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mt == "multipart/form-data" {
@@ -45,7 +45,7 @@ func (s *Server) registerAttachments(mux *http.ServeMux) {
 		att, err := s.Svc.AttachStream(r.Context(), actorOf(r), r.PathValue("key"), name, ctype, body)
 		s.replyStatus(w, 201, att, err)
 	}))
-	mux.HandleFunc("POST /api/v1/issues/{key}/uploads", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/issues/{key}/uploads", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name string `json:"name"`
 			Size int64  `json:"size"`
@@ -57,7 +57,7 @@ func (s *Server) registerAttachments(mux *http.ServeMux) {
 		us, err := s.Svc.StartUpload(r.Context(), actorOf(r), r.PathValue("key"), in.Name, in.Type, in.Size)
 		s.replyStatus(w, 201, us, err)
 	}))
-	mux.HandleFunc("HEAD /api/v1/uploads/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "HEAD /api/v1/uploads/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		us, err := s.Svc.UploadStatus(r.Context(), actorOf(r), r.PathValue("id"))
 		if err != nil {
 			w.WriteHeader(404)
@@ -67,11 +67,11 @@ func (s *Server) registerAttachments(mux *http.ServeMux) {
 		w.Header().Set("Upload-Length", strconv.FormatInt(us.Size, 10))
 		w.WriteHeader(200)
 	}))
-	mux.HandleFunc("GET /api/v1/uploads/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/uploads/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		us, err := s.Svc.UploadStatus(r.Context(), actorOf(r), r.PathValue("id"))
 		s.reply(w, us, err)
 	}))
-	mux.HandleFunc("PATCH /api/v1/uploads/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "PATCH /api/v1/uploads/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		off, err := strconv.ParseInt(r.Header.Get("Upload-Offset"), 10, 64)
 		if err != nil {
 			s.fail(w, 400, "bad_request", "Upload-Offset header is required", nil)
@@ -81,18 +81,18 @@ func (s *Server) registerAttachments(mux *http.ServeMux) {
 		w.Header().Set("Upload-Offset", strconv.FormatInt(us.Offset, 10))
 		s.reply(w, us, err)
 	}))
-	mux.HandleFunc("POST /api/v1/uploads/{id}/commit", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/uploads/{id}/commit", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		att, err := s.Svc.CommitUpload(r.Context(), actorOf(r), r.PathValue("id"))
 		s.replyStatus(w, 201, att, err)
 	}))
-	mux.HandleFunc("DELETE /api/v1/issues/{key}/attachments/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "DELETE /api/v1/issues/{key}/attachments/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.DeleteAttachment(r.Context(), actorOf(r), r.PathValue("key"), r.PathValue("id")))
 	}))
-	mux.HandleFunc("POST /api/v1/attachments/{id}/thumbnail", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/attachments/{id}/thumbnail", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.RetryThumbnail(r.Context(), actorOf(r), r.PathValue("id")))
 	}))
 	// links are minted only after the permission checks and expire in minutes
-	mux.HandleFunc("POST /api/v1/attachments/{id}/link", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "POST /api/v1/attachments/{id}/link", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		path, exp, err := s.Svc.MintLink(r.Context(), actorOf(r), r.PathValue("id"), r.URL.Query().Get("thumb") == "1")
 		if err == nil && s.BlobOrigin != "" {
 			path = strings.TrimRight(s.BlobOrigin, "/") + path
@@ -100,12 +100,12 @@ func (s *Server) registerAttachments(mux *http.ServeMux) {
 		s.reply(w, map[string]any{"url": path, "expires": exp}, err)
 	}))
 	// authenticated download for the UI itself (checks the permission on every request)
-	mux.HandleFunc("GET /api/v1/attachments/{id}/download", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/attachments/{id}/download", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		d, err := s.Svc.FileInfo(r.Context(), actorOf(r), r.PathValue("id"), r.URL.Query().Get("thumb") == "1")
 		s.serveFile(w, r, d, err)
 	}))
 	// signed link: no cookie, so it can be served from a separate origin
-	mux.HandleFunc("GET /files/{id}", func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /files/{id}", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		d, err := s.Svc.VerifyLink(r.Context(), r.PathValue("id"), q.Get("exp"), q.Get("sig"), q.Get("v"))
 		s.serveFile(w, r, d, err)

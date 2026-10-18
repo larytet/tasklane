@@ -16,7 +16,7 @@ func (s *Server) scope(r *http.Request) (search.Scope, error) {
 }
 
 func (s *Server) registerSearch(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/issues", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/issues", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		sc, err := s.scope(r)
 		if err != nil {
 			s.replyStatus(w, 200, nil, err)
@@ -31,7 +31,7 @@ func (s *Server) registerSearch(mux *http.ServeMux) {
 		}
 		s.replyStatus(w, 200, res, err)
 	}))
-	mux.HandleFunc("GET /api/v1/search/typeahead", s.auth(func(w http.ResponseWriter, r *http.Request) {
+	s.handle(mux, "GET /api/v1/search/typeahead", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		sc, err := s.scope(r)
 		if err != nil {
 			s.replyStatus(w, 200, nil, err)
