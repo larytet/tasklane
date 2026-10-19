@@ -54,3 +54,11 @@ save server drafts, lose acknowledgements, crash at random and are judged on rec
 rate of each class is below 3/N with 95% confidence (the rule of three), set against the targets (1 in 10^8 saves for E1 and E4, 1 in 10^9 for E2, 1 in 10^6 editing sessions
 for E3) and against the sample sizes SPEC 21 asks for (3x10^8 saves and 3x10^6 sessions). The run fails if it counted anything. On a development machine it makes about 380 saves a second,
 so the full sample is about nine days of one machine; the harness is built to be run for as long as there is machine time, and a short run says how little it proves.
+
+### Lost drafts (E3), measured in a browser
+
+`e2e/tests/drafts_e3.spec.js` is the editing-session half of the campaign, in a real browser: a simulated person types without a pause (five characters and a breath, for between
+2.5 and 11.5 seconds), and the tab dies at that moment in one of three ways (closed without warning, a renderer crash, a reload); a new tab is opened and what the page offers back is
+compared with what the editor held at every moment. The loss window is the time between the moment the recovered text was typed and the moment of the crash; it must be at most the
+local autosave interval (2 s) plus a margin for timers (3.5 s in all). `E3_SESSIONS=300 npx playwright test drafts_e3` runs as many sessions as you have time for (nine by default).
+The page writes the local draft every two seconds while typing goes on, and at once when the tab is hidden or going away; the server draft follows every ten seconds.

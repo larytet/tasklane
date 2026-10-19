@@ -705,13 +705,18 @@
       showChanged();
       ta.addEventListener('input', () => {
         ed.body = ta.value; st.dirty = true; state.textContent = 'Editing…';
-        clearTimeout(st.localTimer);
-        st.localTimer = setTimeout(() => { setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); state.textContent = 'Draft saved'; }, 2000);
+        // every 2 s while typing goes on, not 2 s after it stops: a timer restarted by each key would never fire for someone who does not pause (E3, SPEC 21)
+        if (!st.localTimer) st.localTimer = setTimeout(flushLocal, 2000);
       });
+      const flushLocal = () => { st.localTimer = 0; if (st.editing && st.dirty) { setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); state.textContent = 'Draft saved'; } };
+      // a tab that is hidden or going away writes what it has at once
+      const leaving = () => { clearTimeout(st.localTimer); flushLocal(); };
+      window.addEventListener('pagehide', leaving);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') leaving(); });
       clearInterval(st.serverTimer);
       st.serverTimer = setInterval(() => { if (st.dirty && st.editing) api('PUT', '/api/v1/issues/' + key + '/drafts/description', { body: ed.body, base_seq: ed.baseSeq }); }, 10000);
       const save = async () => {
-        clearTimeout(st.localTimer); setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); // never lose it
+        clearTimeout(st.localTimer); st.localTimer = 0; setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); // never lose it
         state.textContent = 'Saving…';
         st.saveId = st.saveId || L.uuid();
         const r = await saveText('description', ed.body, ed.baseSeq, 'save', st.saveId);
@@ -736,7 +741,7 @@
       if (st.changedBy) bn.append(h('div', { class: 'banner info', role: 'status' }, 'The description was changed by ' + st.changedBy + '. Nothing changes in your text until you save; saving will open the merge dialog.'));
     }
     function stopEditing(saved) {
-      clearInterval(st.serverTimer); clearTimeout(st.localTimer);
+      clearInterval(st.serverTimer); clearTimeout(st.localTimer); st.localTimer = 0;
       if (saved) { setLocalDraft(key, 'description', null); }
       st.editing = null; st.dirty = false; st.saveId = null; st.changedBy = null; heartbeat('');
     }
