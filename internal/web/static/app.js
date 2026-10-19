@@ -1062,6 +1062,16 @@
     if (btn) btn.setAttribute('aria-label', r.data.unread ? 'Inbox, ' + r.data.unread + ' unread' : 'Inbox');
   }
   setInterval(bell, 30000);
+  // scheduled maintenance announced by the operator of a hosted installation, shown until it is over
+  async function showScheduled() {
+    try {
+      const r = await api('GET', '/api/v1/system/status');
+      const list = (r.status === 200 && r.data && r.data.scheduled) || [];
+      if (!list.length || MAINT.on) return;
+      const n = list[0], f = d => new Date(d).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+      banner('info', 'Scheduled maintenance: ' + f(n.starts_at) + ' to ' + f(n.ends_at) + (n.message ? '. ' + n.message : '') + ' Reading continues; changes made during it are kept as drafts.');
+    } catch (e) { /* the banner is a courtesy */ }
+  }
   async function boot() {
     const r = await api('GET', '/api/v1/bootstrap');
     if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect(); }
@@ -1071,6 +1081,7 @@
       if (m.status === 200) { S.me = m.data; S.projects = []; S.users = []; } else S.me = null;
     } else S.me = null;
     route();
+    if (S.me) showScheduled();
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [] };

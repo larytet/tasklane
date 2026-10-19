@@ -106,7 +106,7 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte("ready"))
 	})
 	s.handle(mux, "GET /api/v1/system/status", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		s.json(w, 200, map[string]any{"server_version": s.Version, "client_version": ClientVersion, "min_client": s.minClient(), "maintenance": s.Svc.ActiveMaintenance(r.Context())})
+		s.json(w, 200, map[string]any{"server_version": s.Version, "client_version": ClientVersion, "min_client": s.minClient(), "maintenance": s.Svc.ActiveMaintenance(r.Context()), "scheduled": s.Svc.UpcomingMaintenance(r.Context(), actorOf(r))})
 	}))
 	s.handle(mux, "POST /api/v1/login", s.login)
 	s.handle(mux, "POST /api/v1/login/mfa", s.loginMFA)
@@ -204,6 +204,38 @@ func (s *Server) Handler() http.Handler {
 		}
 		if s.decode(w, r, &in) {
 			v, err := s.Svc.VoidInvoice(r.Context(), actorOf(r), r.PathValue("id"), r.PathValue("number"), in.Reason)
+			s.reply(w, v, err)
+		}
+	}))
+	// managed upgrades (hosted only): service terms, and the maintenance the operator announces to a tenant
+	s.handle(mux, "PUT /api/v1/orgs/{id}/terms", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.ServiceTerms
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.SetServiceTerms(r.Context(), actorOf(r), r.PathValue("id"), in)
+			s.reply(w, v, err)
+		}
+	}))
+	s.handle(mux, "GET /api/v1/orgs/{id}/terms", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.GetServiceTerms(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/orgs/{id}/maintenance", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.MaintenanceIn
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.ScheduleMaintenance(r.Context(), actorOf(r), r.PathValue("id"), in)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "GET /api/v1/orgs/{id}/maintenance", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListMaintenance(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/orgs/{id}/maintenance/{nid}/cancel", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Reason string `json:"reason"`
+		}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.CancelMaintenance(r.Context(), actorOf(r), r.PathValue("id"), r.PathValue("nid"), in.Reason)
 			s.reply(w, v, err)
 		}
 	}))

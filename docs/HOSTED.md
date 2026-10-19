@@ -57,3 +57,27 @@ Numbers are `TL-YYYYMM-NNNN`.
 With `billing_webhook_url` (and `billing_webhook_secret`) set, `send` posts the invoice as JSON, signed with HMAC-SHA-256 of the body in
 `X-Tasklane-Signature`, with the number as `Idempotency-Key` so the receiver can recognise a repeat; a failed delivery (502) leaves the invoice open to send
 again. The operator makes, sends and voids; an organization's administrators read their own. Creating, voiding, sending and setting prices are audited.
+
+## Support levels, upgrade channels and managed maintenance
+
+The operator upgrades and maintains tenants. A plan carries the terms:
+
+```
+PUT /api/v1/orgs/{id}/terms   {"support_level":"standard","upgrade_channel":"early","window":{"weekday":0,"start_hour":2,"hours":2}}
+GET /api/v1/orgs/{id}/terms
+```
+
+The **support level** (`community`, `standard`, `premium`) sets the notice a tenant is promised before planned work: none, 24 hours, 72 hours. The **upgrade
+channel** (`stable`, `early`) says which releases the operator moves the tenant to first; it is recorded for the operator's rollout tooling. The **window** is
+the weekly span, in UTC, in which the operator may work on this tenant (none: any time).
+
+```
+POST /api/v1/orgs/{id}/maintenance                  {"kind":"upgrade","starts_at":"...","ends_at":"...","message":"..."}
+GET  /api/v1/orgs/{id}/maintenance
+POST /api/v1/orgs/{id}/maintenance/{id}/cancel      {"reason":"..."}
+```
+
+A notice is refused unless the work lies inside the window, starts after the promised notice, lasts at most eight hours, and does not overlap other announced work
+for that tenant. The tenant's people see the next one in a banner from two weeks before until it is over (`scheduled` in `GET /api/v1/system/status`), and a
+cancelled one disappears with its reason kept in the audit log. The notice announces; the work itself is done with the pause (docs/BACKUP.md) and the
+rolling upgrade procedure (docs/UPGRADE.md). The operator sets terms and notices; a tenant's administrators read their own.

@@ -697,6 +697,17 @@ func rows() []row {
 		{"POST /api/v1/orgs/{id}/invoices/{number}/void", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
 			return J("POST", "/api/v1/orgs/"+domain.DefaultOrg+"/invoices/TL-1/void", map[string]any{"reason": "x"})
 		}},
+		{"PUT /api/v1/orgs/{id}/terms", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/orgs/"+domain.DefaultOrg+"/terms", map[string]any{"support_level": "standard"})
+		}},
+		{"GET /api/v1/orgs/{id}/terms", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/orgs/"+domain.DefaultOrg+"/terms", nil) }},
+		{"POST /api/v1/orgs/{id}/maintenance", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/orgs/"+domain.DefaultOrg+"/maintenance", map[string]any{"kind": "upgrade"})
+		}},
+		{"GET /api/v1/orgs/{id}/maintenance", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/orgs/"+domain.DefaultOrg+"/maintenance", nil) }},
+		{"POST /api/v1/orgs/{id}/maintenance/{nid}/cancel", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/orgs/"+domain.DefaultOrg+"/maintenance/n1/cancel", map[string]any{"reason": "x"})
+		}},
 		{"GET /api/v1/portal/{key}/challenge", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/challenge", nil) }},
 		{"GET /api/v1/portal/{key}", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC", nil) }}, // the portal is off until its administrator turns it on
 		{"POST /api/v1/portal/{key}/code", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
