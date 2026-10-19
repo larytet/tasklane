@@ -110,3 +110,9 @@ change is lost).
 **MCP sessions.** The id of an MCP session is now self-contained and signed with a key every node derives from the instance secret, so a session started
 on one node continues on any other (and survives a restart) for 24 hours. It belongs to the person it was issued to: another person's use of it is not
 acknowledged. What does not move is node-local: an event stream and subscriptions have to be opened again after the node changes.
+
+The run also carries the LIVE-09 campaign and a Git provider. Six people append to one shared text with compare-and-set (conflicts are resolved on top of
+the newer text, lost acknowledgements retried with the same save id) through the node replacements, the Redis outage and the database restart, and the
+reconciler of SPEC 21 judges the final text: no acknowledged save missing (E1), none that replaced a newer change (E2), none duplicated (E4), and the
+sequence gapless. A provider sends signed push deliveries through the balancer all the while, retrying the ones that fail and repeating some; every delivery
+that was acknowledged must be stored and applied exactly once and its commit linked to its issue.

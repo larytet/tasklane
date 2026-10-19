@@ -28,6 +28,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/larytet/tasklane/internal/domain"
+	"github.com/larytet/tasklane/internal/testutil"
+	"github.com/larytet/tasklane/internal/testutil/gitmock"
 	"github.com/larytet/tasklane/internal/testutil/smtpmock"
 )
 
@@ -450,6 +453,12 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	st.total.Store(0)
 	st.ok.Store(0)
 	st.lat = nil
+	// a Git provider: a connection and a repository mapped to the crowd's project, and a sender of signed push deliveries, retrying and repeating as providers do
+	gc := adm.mustJSON(t, "POST", "/api/v1/git/connections", map[string]any{"name": "github-upgrade", "provider": "github", "token": "upgrade-token"}, 201)
+	gconn, _ := gc["connection"].(map[string]any)
+	connID, secret := fmt.Sprint(gconn["id"]), fmt.Sprint(gc["webhook_secret"])
+	adm.mustJSON(t, "POST", "/api/v1/git/connections/"+connID+"/repos", map[string]any{"full_name": "acme/shop", "projects": []string{"UPG"}}, 201)
+	provider := &gitSender{base: front, conn: connID, secret: secret, issues: len(crowd)}
 	var probe *busProbe
 	if bus {
 		probe = newBusProbe(t, adm)
@@ -462,6 +471,16 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 		wg.Add(1)
 		go func(u *user, seed int64) { defer wg.Done(); u.run(stop, rand.New(rand.NewSource(seed))) }(u, int64(i+1))
 	}
+	// the LIVE-09 campaign on the same cluster: people appending to the same text with compare-and-set, conflicts and retries; a reconciler judges the final text
+	camp := adm.mustJSON(t, "POST", "/api/v1/issues", map[string]any{"project": "UPG", "type": "Task", "summary": "Shared text under the upgrade", "description": "start"}, 201)
+	campKey := fmt.Sprint(camp["key"])
+	var writers []*appender
+	for i := 0; i < 6 && i < len(crowd); i++ {
+		w := &appender{u: &user{base: front, c: crowd[i].c, st: &stats{}}, key: campKey, n: i} // its own counters: a retried attempt is not a failed request
+		writers = append(writers, w)
+		wg.Add(1)
+		go func(w *appender, seed int64) { defer wg.Done(); w.run(stop, rand.New(rand.NewSource(seed))) }(w, int64(200+i))
+	}
 	var agents []*mcpAgent
 	for i := 0; i < 6 && i < len(crowd); i++ {
 		tk := crowd[i].mustTokenJSON(t, "/api/v1/me/tokens", map[string]any{"name": "upgrade agent", "expires_in_days": 1})
@@ -470,6 +489,8 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 		wg.Add(1)
 		go func(a *mcpAgent, seed int64) { defer wg.Done(); a.run(stop, rand.New(rand.NewSource(seed))) }(a, int64(100+i))
 	}
+	wg.Add(1)
+	go func() { defer wg.Done(); provider.run(stop) }()
 	watchers := make([]*watcher, 0, 4)
 	wctx, wcancel := context.WithCancel(ctx)
 	defer wcancel()
@@ -660,6 +681,47 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 
 	close(stop)
 	wg.Wait()
+
+	// ---- the reconciler (SPEC 21): over the final text of the shared issue, after every node replacement, the Redis outage and the database restart
+	var tokens []string
+	for _, w := range writers {
+		tokens = append(tokens, w.acked...)
+	}
+	for _, w := range writers {
+		if w.gaveUp > 0 {
+			t.Errorf("writer %d: %d appends were never acknowledged (last answer: %s)", w.n, w.gaveUp, w.last)
+		}
+	}
+	var vs []domain.TextVersion
+	eventually(t, "the versions of the shared text", 30*time.Second, func() bool {
+		st, b, err := adm.do("GET", "/api/v1/issues/"+campKey+"/text/description/versions", nil, true)
+		vs = nil
+		return err == nil && st == 200 && json.Unmarshal(b, &vs) == nil && len(vs) > 0
+	})
+	e1, e2, e4, gap := testutil.Reconcile(tokens, vs)
+	t.Logf("reconciler: %d acknowledged appends by %d people: E1=%d E2=%d E4=%d gap=%v", len(tokens), len(writers), e1, e2, e4, gap)
+	if len(tokens) < 100 || e1+e2+e4 != 0 || gap {
+		t.Errorf("the reconciler: %d appends, E1=%d (lost) E2=%d (stale replaced newer) E4=%d (duplicated), gap=%v", len(tokens), e1, e2, e4, gap)
+	}
+	// ---- the Git provider's deliveries: every one acknowledged is stored and applied, once, whichever node took it
+	acked := provider.ackedDeliveries()
+	if len(acked) < 100 {
+		t.Errorf("only %d deliveries were acknowledged", len(acked))
+	}
+	eventually(t, "every acknowledged delivery to be applied", 90*time.Second, func() bool {
+		var done int
+		if pool.QueryRow(ctx, `SELECT count(*) FROM git_inbox WHERE processed_at IS NOT NULL AND delivery_id = ANY($1)`, acked).Scan(&done) != nil {
+			return false
+		}
+		return done == len(acked)
+	})
+	var linked, dupRows int
+	pool.QueryRow(ctx, `SELECT count(DISTINCT o.ext_id) FROM git_object o JOIN git_link l ON l.object_id=o.id WHERE o.kind='commit' AND o.sha = ANY($1)`, provider.ackedShas()).Scan(&linked)
+	pool.QueryRow(ctx, `SELECT count(*) FROM (SELECT delivery_id FROM git_inbox GROUP BY connection_id, delivery_id HAVING count(*) > 1) d`).Scan(&dupRows)
+	if linked != len(acked) || dupRows != 0 {
+		t.Errorf("%d of %d acknowledged commits are linked to their issues, %d deliveries are stored twice", linked, len(acked), dupRows)
+	}
+	t.Logf("%d Git deliveries acknowledged (%d sent in all, repeats included), all applied once", len(acked), provider.sent.Load())
 
 	// ---- what the rolling upgrade must not have cost
 	total, failed := st.total.Load()-st.outageFailed.Load(), st.failed.Load() // the deliberate PostgreSQL outage is judged by its recovery, not by this rate
@@ -969,4 +1031,152 @@ func (u *user) mustTokenJSON(t testing.TB, path string, body any) string {
 		t.Fatalf("no token in %v", m)
 	}
 	return tok
+}
+
+// ---- the LIVE-09 appenders: each save adds the person's token to the text that was current, with compare-and-set; a conflict is resolved on top of the
+// newer text, a lost acknowledgement is retried with the same save id
+
+type appender struct {
+	u      *user
+	key    string
+	n      int
+	acked  []string
+	gaveUp int
+	last   string // the last answer to a save that was never acknowledged, for the report
+}
+
+func (a *appender) run(stop <-chan struct{}, rng *rand.Rand) {
+	for i := 0; ; i++ {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		token := fmt.Sprintf("[w%02dn%04d]", a.n, i)
+		time.Sleep(time.Duration(10+rng.Intn(40)) * time.Millisecond)
+		body, seq, ok := a.current()
+		saveID := fmt.Sprintf("camp-%d-%d-%d", a.n, i, rng.Int63())
+		done := false
+		for attempt := 0; attempt < 600 && !done; attempt++ {
+			if attempt > 0 {
+				time.Sleep(time.Duration(50+rng.Intn(200)) * time.Millisecond)
+			}
+			if !ok {
+				body, seq, ok = a.current()
+				continue
+			}
+			st, b, err := a.u.do("PUT", "/api/v1/issues/"+a.key+"/text/description", map[string]any{"body": body + "\n\n" + token, "base_seq": seq, "save_id": saveID}, false)
+			switch {
+			case err == nil && st == 200:
+				a.acked = append(a.acked, token)
+				done = true
+			case err == nil && st == 409: // someone saved first: save on top of what is there now, as a new decision
+				var out struct {
+					Detail struct {
+						Current    string `json:"current"`
+						CurrentSeq int64  `json:"current_seq"`
+					} `json:"detail"`
+				}
+				json.Unmarshal(b, &out)
+				body, seq = out.Detail.Current, out.Detail.CurrentSeq
+				saveID = fmt.Sprintf("camp-%d-%d-%d", a.n, i, rng.Int63())
+			default: // no acknowledgement, a node going away, a database restarting: the very same save is sent again
+				a.last = fmt.Sprintf("%d %v %.200s", st, err, b)
+			}
+		}
+		if !done {
+			a.gaveUp++
+		}
+	}
+}
+
+func (a *appender) current() (string, int64, bool) {
+	st, b, err := a.u.do("GET", "/api/v1/issues/"+a.key+"/view", nil, true)
+	if err != nil || st != 200 {
+		return "", 0, false
+	}
+	var v struct {
+		Issue struct {
+			Description string `json:"description"`
+			Seq         int64  `json:"description_seq"`
+		} `json:"issue"`
+	}
+	json.Unmarshal(b, &v)
+	return v.Issue.Description, v.Issue.Seq, true
+}
+
+// ---- a Git provider delivering push events through the balancer
+
+type gitSender struct {
+	base, conn, secret string
+	issues             int
+	sent               atomic.Int64
+	mu                 sync.Mutex
+	acked              map[string]string // delivery id -> commit sha
+}
+
+func (g *gitSender) deliver(id, sha string, issue int) bool {
+	hook := gitmock.GitHubHook(g.secret, "push", id, gitmock.GHPush("acme/shop", fmt.Sprintf("feature/UPG-%d", issue), sha,
+		[]gitmock.M{gitmock.GHCommit(sha, fmt.Sprintf("UPG-%d note from delivery %s", issue, id), "octo@example.com", time.Now())}, time.Now()))
+	for attempt := 0; attempt < 8; attempt++ {
+		req, _ := http.NewRequest("POST", g.base+"/api/v1/git/webhooks/"+g.conn, bytes.NewReader(hook.Body))
+		for k, v := range hook.Header {
+			req.Header[k] = v
+		}
+		req.Header.Set("Content-Type", "application/json")
+		g.sent.Add(1)
+		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return true
+			}
+		}
+		time.Sleep(time.Duration(300*(attempt+1)) * time.Millisecond) // a provider retries a delivery that failed
+	}
+	return false
+}
+
+func (g *gitSender) run(stop <-chan struct{}) {
+	g.acked = map[string]string{}
+	for i := 0; ; i++ {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		id := fmt.Sprintf("upgrade-delivery-%05d", i)
+		sha := fmt.Sprintf("%040x", i+1)
+		issue := 1 + i%g.issues
+		if g.deliver(id, sha, issue) {
+			g.mu.Lock()
+			g.acked[id] = sha
+			g.mu.Unlock()
+			if i%7 == 0 { // a duplicate of a delivery already made
+				g.deliver(id, sha, issue)
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (g *gitSender) ackedDeliveries() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]string, 0, len(g.acked))
+	for id := range g.acked {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (g *gitSender) ackedShas() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]string, 0, len(g.acked))
+	for _, sha := range g.acked {
+		out = append(out, sha)
+	}
+	return out
 }
