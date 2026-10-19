@@ -391,7 +391,7 @@ live in a version-controlled file so changes are reviewed.
 | IMP-06 | Idempotency | Re-importing the same source updates in place; no duplicates |
 | IMP-07 | Rollback by import id | Removes only records created by that import |
 | IMP-08 | Rate limits (`429`, `Retry-After`) during import, scripted in `jira-fake` | Job slows, resumes, completes |
-| IMP-09 | **M5.13: GitHub Issues, Trello, Linear and Asana built (IMP01..05 on a fixture per tool, e2e); generic CSV earlier; generic JSON with a mapping open.** Third-party presets: GitHub Issues, Trello, Linear, Asana, generic CSV and JSON | Mapped fields correct on a fixture per tool; mapping templates reusable |
+| IMP-09 | **M5.13: GitHub Issues, Trello, Linear and Asana built (IMP01..05 on a fixture per tool, e2e); generic CSV earlier. M5.17: generic JSON with a JSONPath mapping built (IMP10, `internal/jsonpath` tests, e2e).** Third-party presets: GitHub Issues, Trello, Linear, Asana, generic CSV and JSON | Mapped fields correct on a fixture per tool; mapping templates reusable |
 | EXP-01 | JSON bundle and CSV bundle round trip (export, import into empty instance) | Semantically identical project; attachments verified by checksum |
 | EXP-02 | Large export (`org` data) | Streams, resumable, bounded memory, manifest checksums valid |
 | EXP-03 | Export respects permissions, security levels, field restrictions | Restricted data absent unless an admin runs an audited full export |

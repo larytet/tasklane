@@ -104,20 +104,30 @@ func render(values map[string]any) (map[string][]map[string]any, error) {
 	}
 	root := template.New("root")
 	funcs := template.FuncMap{
-		"toYaml":    toYAML,
-		"nindent":   func(n int, s string) string { return "\n" + indent(n, s) },
-		"indent":    indent,
-		"quote":     func(v any) string { return fmt.Sprintf("%q", fmt.Sprint(v)) },
-		"default":   func(d, v any) any { if truthy(v) { return v }; return d },
-		"trunc":     func(n int, s string) string { if len(s) > n { return s[:n] }; return s },
+		"toYaml":  toYAML,
+		"nindent": func(n int, s string) string { return "\n" + indent(n, s) },
+		"indent":  indent,
+		"quote":   func(v any) string { return fmt.Sprintf("%q", fmt.Sprint(v)) },
+		"default": func(d, v any) any {
+			if truthy(v) {
+				return v
+			}
+			return d
+		},
+		"trunc": func(n int, s string) string {
+			if len(s) > n {
+				return s[:n]
+			}
+			return s
+		},
 		"trimSuffix": func(suf, s string) string { return strings.TrimSuffix(s, suf) },
-		"replace":   func(o, n, s string) string { return strings.ReplaceAll(s, o, n) },
-		"contains":  func(sub, s string) bool { return strings.Contains(s, sub) },
-		"upper":     strings.ToUpper,
-		"toString":  func(v any) string { return fmt.Sprint(v) },
-		"int":       asInt,
-		"sha256sum": func(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) },
-		"fail":      func(s string) (string, error) { return "", fmt.Errorf("%s", s) },
+		"replace":    func(o, n, s string) string { return strings.ReplaceAll(s, o, n) },
+		"contains":   func(sub, s string) bool { return strings.Contains(s, sub) },
+		"upper":      strings.ToUpper,
+		"toString":   func(v any) string { return fmt.Sprint(v) },
+		"int":        asInt,
+		"sha256sum":  func(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) },
+		"fail":       func(s string) (string, error) { return "", fmt.Errorf("%s", s) },
 		"include": func(name string, data any) (string, error) {
 			var b bytes.Buffer
 			err := root.ExecuteTemplate(&b, name, data)

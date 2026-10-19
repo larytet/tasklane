@@ -318,3 +318,101 @@ func TestIMP05_PermissionsAndWorkflow(t *testing.T) {
 		t.Fatalf("statuses in a custom workflow: %q %q", v.Issue.Status, w.Issue.Status)
 	}
 }
+
+const genericFile = `{"meta":{"total":5},"data":{"tickets":[
+ {"ref":"T-1","fields":{"title":"Printer jams","body":"Tray 2","kind":"Defect","state":"Working","prio":"P1","who":{"login":"ana"},"tags":["hw","urgent"],"opened":"2026-02-01T09:00:00Z","touched":1770000000},
+  "notes":[{"nid":"n1","by":"ana","text":"Looking","at":"2026-02-02T09:00:00Z"},{"nid":"n2","by":"nobody","text":"Fixed the tray","at":"2026-02-03T09:00:00Z"},{"by":"ana","text":"A note with no id","at":"2026-02-03T10:00:00Z"}]},
+ {"ref":"T-2","fields":{"title":"Replace toner","kind":"Chore","state":"Finished","prio":"P3","tags":"hw, supplies","opened":"2026-02-01T10:00:00Z","closed":"2026-02-04T10:00:00Z"},"parent":"T-1","notes":[]},
+ {"ref":"T-3","fields":{"title":"","state":"New"}},
+ {"fields":{"title":"No reference"}},
+ "not an object"],
+ "archive":[{"ref":"T-9","fields":{"title":"Old ticket","state":"Finished"}}]}}`
+
+var genericMap = domain.JSONMapping{
+	Items: "$.data.tickets", Comments: "notes",
+	Fields: map[string]string{"key": "ref", "summary": "fields.title", "description": "fields.body", "type": "fields.kind", "status": "fields.state", "priority": "fields.prio",
+		"assignee": "fields.who.login", "labels": "fields.tags", "created": "fields.opened", "updated": "fields.touched", "resolved": "fields.closed", "parent": "parent"},
+	CommentFields: map[string]string{"id": "nid", "author": "by", "body": "text", "created": "at"},
+}
+
+// IMP10: the generic JSON importer: any JSON through paths. Nested fields, a label list and a label string, dates as text and as Unix seconds,
+// a mapped type and status and priority, comments with authors through the user map, a parent by reference, bad items reported without
+// stopping the others, a second run updating in place, and the mapping itself checked.
+func TestIMP10_GenericJSONWithAPathMapping(t *testing.T) {
+	r := newImp(t)
+	m := genericMap
+	in := domain.ToolImportIn{Mapping: &m, UserMap: map[string]string{"ana": "ana@x.example"},
+		TypeMap: map[string]string{"Defect": "Bug", "Chore": "Task"}, StatusMap: map[string]string{"Working": "In Progress", "Finished": "Done"}, PriorityMap: map[string]string{"P1": "highest", "P3": "low"}}
+	dry := in
+	dry.DryRun = true
+	rep := r.run(t, "json", genericFile, dry)
+	if r.count(t) != 0 || !rep.DryRun {
+		t.Fatalf("a dry run made %d issues", r.count(t))
+	}
+	rep = r.run(t, "json", genericFile, in)
+	a := r.issue(t, rep, "json:T-1")
+	if a.Issue.Type != "Bug" || a.Issue.Status != "In Progress" || a.Issue.Priority != "highest" || a.Issue.Assignee.Email != "ana@x.example" || a.Issue.Summary != "Printer jams" {
+		t.Fatalf("T-1: %+v", a.Issue)
+	}
+	if strings.Join(a.Issue.Labels, ",") != "hw,urgent" || !strings.Contains(a.Issue.Description, "Tray 2") {
+		t.Fatalf("labels %v description %q", a.Issue.Labels, a.Issue.Description)
+	}
+	if a.Issue.Created.Year() != 2026 || a.Issue.Created.Month() != 2 || !a.Issue.Updated.After(a.Issue.Created) || a.Issue.Updated.Day() != 2 { // 1770000000 is Feb 2026 as Unix seconds
+		t.Fatalf("dates: %v %v", a.Issue.Created, a.Issue.Updated)
+	}
+	if len(a.Comments) != 3 || a.Comments[0].Body != "Looking" {
+		t.Fatalf("comments: %+v", a.Comments)
+	}
+	b := r.issue(t, rep, "json:T-2")
+	if b.Issue.Status != "Done" || b.Issue.Resolved == nil || b.Issue.Parent != a.Issue.Key || b.Issue.Type != "Subtask" || strings.Join(b.Issue.Labels, ",") != "hw,supplies" || b.Issue.Priority != "low" {
+		t.Fatalf("T-2: %+v", b.Issue)
+	}
+	all := strings.Join(append(append(append([]string{}, rep.Warnings...), rep.Gaps...), rep.Errors...), "\n")
+	for _, want := range []string{"item 3 (T-3): the summary is empty", "item 4: the key path found nothing", "item 5: not an object", `"nobody"`} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("the report lacks %q:\n%s", want, all)
+		}
+	}
+	if _, ok := rep.KeyMap["json:T-9"]; ok || r.count(t) != 2 {
+		t.Fatalf("the archive array was not part of the items path: %d issues", r.count(t))
+	}
+	// the same file again updates in place; a path to two arrays reads both
+	again := r.run(t, "json", genericFile, in)
+	if r.count(t) != 2 || again.KeyMap["json:T-1"] != rep.KeyMap["json:T-1"] {
+		t.Fatalf("a second run made %d issues", r.count(t))
+	}
+	if v := r.issue(t, again, "json:T-1"); len(v.Comments) != 3 {
+		t.Fatalf("a second run duplicated comments: %d", len(v.Comments))
+	}
+	m2 := m
+	m2.Items = "$..tickets"
+	in2 := in
+	in2.Mapping = &m2
+	if rep2 := r.run(t, "json", `{"a":{"tickets":[{"ref":"X1","fields":{"title":"deep"}}]},"b":{"tickets":[{"ref":"X2","fields":{"title":"deeper"}}]}}`, in2); len(rep2.KeyMap) != 2 {
+		t.Fatalf("a descendant path: %v", rep2.KeyMap)
+	}
+	// the mapping is checked before anything is read
+	bad := func(mut func(*domain.JSONMapping), data string) {
+		t.Helper()
+		x := m
+		x.Fields = map[string]string{}
+		for k, v := range m.Fields {
+			x.Fields[k] = v
+		}
+		mut(&x)
+		_, err := r.Svc.ImportTool(ctx, r.Admin, "json", []byte(data), domain.ToolImportIn{Project: "ABC", Mapping: &x})
+		if !isInvalid(err) {
+			t.Fatalf("a bad mapping was accepted: %v", err)
+		}
+	}
+	bad(func(x *domain.JSONMapping) { x.Items = "" }, genericFile)
+	bad(func(x *domain.JSONMapping) { delete(x.Fields, "key") }, genericFile)
+	bad(func(x *domain.JSONMapping) { x.Fields["summary"] = "fields[?(@.t)]" }, genericFile)
+	bad(func(x *domain.JSONMapping) { x.Fields["colour"] = "c" }, genericFile)
+	bad(func(x *domain.JSONMapping) { x.CommentFields = map[string]string{"id": "nid"} }, genericFile)
+	bad(func(x *domain.JSONMapping) {}, "{not json")
+	bad(func(x *domain.JSONMapping) { x.Items = "$.nothing" }, genericFile) // no issues found
+	if _, err := r.Svc.ImportTool(ctx, r.Admin, "json", []byte(genericFile), domain.ToolImportIn{Project: "ABC"}); !isInvalid(err) {
+		t.Fatalf("no mapping at all: %v", err)
+	}
+}

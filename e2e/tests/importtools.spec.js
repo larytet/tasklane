@@ -53,3 +53,46 @@ test('IMP: import an Asana export from the screen: a dry run changes nothing, th
   await page.getByRole('button', { name: 'Roll this import back' }).click();
   await expect.poll(countIssues).toBe(0);
 });
+
+test('IMP: import any JSON from the screen through a path mapping; a bad mapping is explained', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await page.getByLabel('Email').fill('admin@example.com');
+  await page.getByLabel('Password').fill('adminpass1');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  const call = async (method, path, data) => { const r = await ctx.request.fetch(path, { method, headers: H, data }); let b = null; try { b = await r.json(); } catch (e) { /* none */ } return { status: r.status(), body: b }; };
+  const pk = 'J' + uniq().toUpperCase();
+  expect((await call('POST', '/api/v1/projects', { key: pk, name: 'Json imports' })).status).toBe(201);
+  const countIssues = async () => (await call('GET', '/api/v1/issues?q=' + encodeURIComponent('project = ' + pk))).body.total;
+  await page.reload();
+  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await page.getByText('More', { exact: true }).click();
+  await page.getByRole('link', { name: 'Import', exact: true }).click();
+  await page.getByLabel('Project', { exact: true }).selectOption(pk);
+  await page.getByLabel('Import from').selectOption('json');
+  const box = page.getByLabel(/The mapping/);
+  await expect(box).toBeVisible();
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await page.getByLabel('The export file').setInputFiles({ name: 'tickets.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ rows: [
+    { ref: 'A1', t: 'First ticket', s: 'Finished' }, { ref: 'A2', t: 'Second ticket', s: 'Working' }] })) });
+  await box.fill('{ not json');
+  await page.getByRole('button', { name: 'Check and import' }).click();
+  await expect(page.getByRole('alert')).toContainText('not valid JSON');
+  await box.fill(JSON.stringify({ items: '$.rows', fields: { key: 'ref', summary: 't', status: 's' }, status_map: { Finished: 'Done', Working: 'In Progress' } }));
+  await page.getByRole('button', { name: 'Check and import' }).click();
+  await expect(page.getByRole('heading', { name: 'Dry run: nothing was changed' })).toBeVisible();
+  await expect(page.getByText(/issues created: 2/)).toBeVisible();
+  expect(await countIssues()).toBe(0);
+  await page.getByRole('button', { name: 'Import for real' }).click();
+  await expect(page.getByRole('heading', { name: 'Imported', exact: true })).toBeVisible();
+  expect(await countIssues()).toBe(2);
+  // a mapping the server refuses says why
+  await box.fill(JSON.stringify({ items: '$.rows', fields: { summary: 't' } }));
+  await page.getByLabel('Dry run first').check();
+  await page.getByRole('button', { name: 'Check and import' }).click();
+  await expect(page.getByRole('alert')).toContainText('key');
+});

@@ -29,3 +29,31 @@ The whole mapping is the defaults above plus what the request sends (`user_map`,
 ## Not built yet
 
 Fetching from the tools' live APIs (the file is the input), a generic JSON importer with a JSONPath mapping, file attachments, GitHub pull request links as development links, Linear cycles as sprints, Trello's board columns as a Tasklane board, and a screen to edit presets.
+
+## Any JSON, through a path mapping
+
+`POST /api/v1/import/json` (and the Import screen, "Generic JSON") reads any JSON file. The request carries the file as `data` and a `mapping`:
+
+```json
+{
+  "project": "ABC", "dry_run": true, "data": "...the file...",
+  "mapping": {
+    "items": "$.data.tickets",
+    "fields": {"key": "ref", "summary": "fields.title", "description": "fields.body", "type": "fields.kind", "status": "fields.state",
+               "priority": "fields.prio", "assignee": "fields.who.login", "labels": "fields.tags", "created": "fields.opened",
+               "updated": "fields.touched", "resolved": "fields.closed", "parent": "parent", "estimate": "fields.points"},
+    "comments": "notes",
+    "comment_fields": {"id": "nid", "author": "by", "body": "text", "created": "at"},
+    "label_sep": ",", "default_type": "Task"
+  },
+  "status_map": {"Working": "In Progress"}, "type_map": {"Defect": "Bug"}, "priority_map": {"P1": "highest"}, "user_map": {"ana": "ana@example.com"}
+}
+```
+
+`items` says where the issues are (an array, or several arrays: `$..tickets` reads every `tickets` array in the file); every other path is read
+inside one issue (comment paths inside one comment). `key` and `summary` are required, and a comment mapping needs `body`. A path is the
+small safe subset of JSONPath: `$`, `.name`, `['name']`, `[n]` (negative from the end), `[*]` and `.*`, and `..name`; no filters or scripts,
+at most 16 steps. A label path may select an array or a string (split on `label_sep`). Dates may be text (RFC 3339 and common forms) or numbers
+(Unix seconds or milliseconds). Everything else works as for the other importers: `user_map`, `status_map`, `type_map` and `priority_map`
+decide what the file's words become, an item that cannot be read is reported and the rest go in, importing the same file again updates in place
+(an issue is `json:KEY`; a comment without an `id` is identified by its position), a dry run changes nothing, and an import can be rolled back.

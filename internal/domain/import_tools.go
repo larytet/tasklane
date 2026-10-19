@@ -33,9 +33,10 @@ type ToolImportIn struct {
 	TypeMap     map[string]string `json:"type_map"`     // label (GitHub) -> issue type here
 	PriorityMap map[string]string `json:"priority_map"` // priority in the export -> lowest..highest
 	Epics       *bool             `json:"epics"`        // Linear: make an Epic of each project and put its issues under it (default true)
+	Mapping     *JSONMapping      `json:"mapping"`      // the generic JSON importer: where the issues are and the path of each field
 }
 
-var importTools = map[string]string{"github": "GitHub Issues", "trello": "Trello", "linear": "Linear", "asana": "Asana"}
+var importTools = map[string]string{"github": "GitHub Issues", "trello": "Trello", "linear": "Linear", "asana": "Asana", "json": "Generic JSON (JSONPath mapping)"}
 
 // ImportTools lists the tools, for screens.
 func ImportTools() map[string]string { return importTools }
@@ -210,7 +211,7 @@ func (b *toolBuild) comment(issue, id, author, body string, at time.Time) {
 // and the same file imported again updates what it made.
 func (s *Service) ImportTool(ctx context.Context, a Actor, tool string, data []byte, in ToolImportIn) (*ImportReport, error) {
 	if _, ok := importTools[tool]; !ok {
-		return nil, invalid("unknown tool %q (github, trello, linear, asana)", tool)
+		return nil, invalid("unknown tool %q (github, trello, linear, asana, json)", tool)
 	}
 	pid, err := s.projectID(ctx, in.Project)
 	if err != nil {
@@ -254,6 +255,8 @@ func (s *Service) ImportTool(ctx context.Context, a Actor, tool string, data []b
 		err = b.linear(data)
 	case "asana":
 		err = b.asana(data)
+	case "json":
+		err = b.generic(data)
 	}
 	if err != nil {
 		return nil, err
