@@ -69,3 +69,21 @@ func withinBus(t *testing.T, d time.Duration, what string, cond func() bool) {
 	}
 	t.Fatalf("%s: not within %s", what, d)
 }
+
+// A second factor reset on one node is seen by another at once: the person is held to the enrolment page there, not 5 s later.
+func TestUPG03_AnotherNodesSecondFactorResetIsHonoredAtOnce(t *testing.T) {
+	a, b, _, e, _ := busCluster(t)
+	root := domain.Actor{ID: e.Alice.ID, Label: "root", Admin: true}
+	if _, err := e.Store.Pool.Exec(ctx, `INSERT INTO user_mfa(user_id,secret_enc,enabled) VALUES($1,'\x00',true)`, e.Alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.SetSecurityPolicy(ctx, root, "", domain.SecurityPolicy{RequireSecondFactor: true}, ""); err != nil {
+		t.Fatal(err)
+	}
+	cookie := func() error { return b.svc.EnforcePolicy(ctx, e.Alice, "203.0.113.1", "", true, false) }
+	withinBus(t, 2*time.Second, "b lets a person with a second factor in", func() bool { return cookie() == nil })
+	if err := a.svc.ResetMFA(ctx, root, e.Alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	withinBus(t, 2*time.Second, "b holds the person to the enrolment page", func() bool { return cookie() == domain.ErrSecondFactorRequired })
+}
