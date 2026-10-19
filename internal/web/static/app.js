@@ -2,7 +2,7 @@
   'use strict';
   const L = window.TL;
   const $app = document.getElementById('app');
-  const S = { me: null, projects: [], users: [], q: '', view: null, timers: [] };
+  const S = { me: null, projects: [], users: [], q: '', view: null, timers: [], nav: { keys: [], q: null }, vcache: new Map() };
 
   // ---------- helpers ----------
   function h(tag, props, ...kids) {
@@ -205,6 +205,7 @@
     meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues';
     if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
     if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
+    S.nav = { keys: r.data.issues.map(i => i.key), q: S.q }; // the order the person is reading in: prev/next in a ticket follow it
     for (const i of r.data.issues) {
       const open = () => { location.hash = '#/issue/' + i.key; };
       out.append(h('div', { class: 'row', role: 'listitem', tabindex: 0, onclick: open, onkeydown: e => { if (e.key === 'Enter') open(); } },
@@ -391,6 +392,29 @@
   function localDraft(key, f) { try { return JSON.parse(localStorage.getItem(draftKey(key, f))); } catch (e) { return null; } }
   function setLocalDraft(key, f, v) { try { if (v) localStorage.setItem(draftKey(key, f), JSON.stringify(v)); else localStorage.removeItem(draftKey(key, f)); } catch (e) { /* storage unavailable */ } }
 
+  // Prev/next in a ticket (PERF-08): while a ticket is open the two neighbours in the list it was opened from are fetched in the background and kept
+  // for a short while, so moving to one shows it at once from the page's own memory; the page revalidates it as it does any open ticket. An entry is
+  // used once (a second visit asks the server again) and expires after a minute, so what is shown can only be a little behind, never invented.
+  const VCACHE_MS = 60000;
+  function prefetchView(key) {
+    const hit = S.vcache.get(key);
+    if (hit && (hit.data || Date.now() - hit.at < VCACHE_MS)) return;
+    S.vcache.set(key, { at: Date.now(), data: null });
+    api('GET', '/api/v1/issues/' + key + '/view').then(r => {
+      if (r.status === 200) S.vcache.set(key, { at: Date.now(), data: r.data }); else S.vcache.delete(key);
+      while (S.vcache.size > 12) S.vcache.delete(S.vcache.keys().next().value);
+    }).catch(() => S.vcache.delete(key));
+  }
+  function takeView(key) {
+    const hit = S.vcache.get(key);
+    S.vcache.delete(key);
+    return hit && hit.data && Date.now() - hit.at < VCACHE_MS ? hit.data : null;
+  }
+  function neighbours(key) {
+    const i = S.nav.keys.indexOf(key);
+    return i < 0 ? {} : { prev: S.nav.keys[i - 1], next: S.nav.keys[i + 1], at: i + 1, of: S.nav.keys.length };
+  }
+
   async function issueView(requestedKey) {
     let key = requestedKey;
     stopTimers();
@@ -398,6 +422,8 @@
     clear($app).append(topbar(), root);
     let v = await load();
     async function load() {
+      const cached = takeView(key);
+      if (cached) return cached;
       const r = await api('GET', '/api/v1/issues/' + key + '/view');
       if (r.status === 410) { clear(root).append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted. ', h('a', { href: '#/trash/' + key.split('-')[0] }, 'Open the trash'))); return null; }
       if (r.status === 404) { clear(root).append(h('p', {}, 'Issue not found, or you do not have access.')); return null; }
@@ -409,6 +435,17 @@
     S.view = st;
     render();
 
+    function pager(k) {
+      const n = neighbours(k);
+      if (n.of == null) return null;
+      for (const x of [n.prev, n.next]) if (x) prefetchView(x);
+      const go = to => { if (to) location.hash = '#/issue/' + to; };
+      return h('span', { class: 'chips', style: 'margin:0', role: 'group', 'aria-label': 'Previous and next in the list' },
+        h('button', { class: 'btn ghost', id: 'prev-issue', disabled: !n.prev, onclick: () => go(n.prev), 'aria-label': 'Previous issue in the list' }, '‹'),
+        h('span', { class: 'muted' }, n.at + ' of ' + n.of),
+        h('button', { class: 'btn ghost', id: 'next-issue', disabled: !n.next, onclick: () => go(n.next), 'aria-label': 'Next issue in the list' }, '›'));
+    }
+
     function canEdit() { return !v.mirror && (v.role === 'member' || v.role === 'admin'); } // a mirrored issue is edited in Jira
 
     function render() {
@@ -417,7 +454,7 @@
       // header: presence stack
       root.append(h('div', { class: 'chips' },
         h('button', { class: 'btn ghost', onclick: () => history.back(), 'aria-label': 'Back' }, '←'),
-        h('span', { class: 'key' }, is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' }),
+        h('span', { class: 'key' }, is.key), pager(is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' }),
         h('button', { class: 'btn', id: 'watch-btn', 'aria-pressed': 'false' }, 'Watch'),
         canEdit() ? h('button', { class: 'btn', 'aria-haspopup': 'dialog', onclick: actionsMenu }, 'Actions ▾') : null));
       if (st.deleted) root.append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted' + (st.deleted.by ? ' by ' + st.deleted.by : '') + '. Anything you were typing stays in your draft. ', h('a', { href: '#/trash/' + is.project }, 'Open the trash')));

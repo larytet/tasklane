@@ -78,3 +78,51 @@ test('PERF-09: typing in a 1 MB document on a throttled phone: the page\'s own h
   expect(opened).toBeLessThan(3000); // the browser's layout of the text, not met against 100 ms: a guard
   expect(r.gap).toBeLessThan(2500);  // idem against 16 ms
 });
+
+// PERF-08: moving to the next or previous ticket of the list one is reading is served from what the page already fetched: no request is made for it and
+// it is on the screen in under 100 ms, even when the server is slow; the neighbours of the new ticket are then fetched in turn.
+test('PERF-08: next and previous ticket in the list are served from the prefetch, under 100 ms', async ({ browser }) => {
+  const person = await newUser(browser, 'arkady@example.com');
+  const word = 'pfeight' + Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join(''); // letters only: the tokenizer splits at digits
+  const keys = [];
+  for (let i = 0; i < 4; i++) keys.push(await createIssue(person.page, `${word} ticket ${i}`, 'body ' + i));
+  const page = await person.ctx.newPage();
+  const views = [];
+  page.on('request', r => { const m = r.url().match(/\/api\/v1\/issues\/([A-Z]+-\d+)\/view/); if (m) views.push(m[1]); });
+  await page.goto('/#/?q=' + encodeURIComponent(`project = ABC`));
+  await expect(page.locator('.row').first()).toBeVisible();
+  const order = await page.locator('.row .key').allTextContents();
+  expect(order.length).toBeGreaterThanOrEqual(4);
+  await page.locator('.row').first().click();
+  await expect(page.locator('.chips .key', { hasText: order[0] })).toBeVisible();
+  await expect(page.locator('#prev-issue')).toBeDisabled();
+  await expect(page.getByText(`1 of ${order.length}`)).toBeVisible();
+  await expect.poll(() => views.includes(order[1])).toBe(true); // the neighbour was fetched in the background
+  await page.waitForTimeout(300);
+  // from here on the server is slow: anything that is not served from the page's memory would show it
+  await page.route(/\/api\/v1\/issues\/[A-Z]+-\d+\/view/, async route => { await new Promise(r => setTimeout(r, 1500)); route.continue(); });
+  const before = views.length;
+  await page.evaluate(() => {
+    window.__shown = undefined;
+    document.addEventListener('click', () => {
+      const t0 = performance.now();
+      const mo = new MutationObserver(() => {
+        const k = document.querySelector('.chips .key');
+        if (k && k.textContent !== window.__from) { mo.disconnect(); window.__shown = performance.now() - t0; }
+      });
+      window.__from = document.querySelector('.chips .key').textContent;
+      mo.observe(document.body, { childList: true, subtree: true });
+    }, true);
+  });
+  await page.locator('#next-issue').click();
+  await page.waitForFunction(() => window.__shown !== undefined, null, { timeout: 5000 });
+  const shown = await page.evaluate(() => window.__shown);
+  console.log(`PERF-08 next ticket on the screen in ${shown.toFixed(1)} ms; view requests while moving: ${views.slice(before).join(',') || 'none for it'}`);
+  await expect(page.locator('.chips .key', { hasText: order[1] })).toBeVisible();
+  expect(shown).toBeLessThan(100);
+  expect(views.slice(before)).not.toContain(order[1]);
+  await expect(page.getByText(`2 of ${order.length}`)).toBeVisible();
+  // and back
+  await page.locator('#prev-issue').click();
+  await expect(page.locator('.chips .key', { hasText: order[0] })).toBeVisible();
+});
