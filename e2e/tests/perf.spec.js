@@ -26,10 +26,9 @@ test('PERF-06: first visit, empty cache: under 1 s and under 200 KB of gzipped s
   expect(jsBytes).toBeLessThan(200 * 1024);
 });
 
-// PERF-09: typing in a 1 MB document with the CPU slowed down four times (a phone). What the page's own code does is held to the budget: every handler of
-// the input event takes under 16 ms. What the browser does is only bounded: laying out a 1 MB <textarea> of 20,000 lines costs about 0.8 s at this speed, once
-// when the editor opens and again after each edit (measured; see STATUS M5.55), so the spec's 100 ms to open and no block over 16 ms are NOT met for a document
-// of that size, and the bounds below are guards against it getting worse, not the budget.
+// PERF-09: typing in a 1 MB document with the CPU slowed down four times (a phone). The editor opens in under 100 ms and every handler of the input event
+// takes under 16 ms, because a text of that size is edited a window at a time (laying out one 1 MB text area costs about 0.8 s at this speed, once when the
+// editor opens and again after each edit). The longest stretch the main thread is busy is bounded by a guard, not met against 16 ms: see STATUS M5.60.
 test('PERF-09: typing in a 1 MB document on a throttled phone: the page\'s own handlers stay under 16 ms', async ({ browser }) => {
   test.setTimeout(120_000);
   const person = await newUser(browser, 'arkady@example.com');
@@ -75,8 +74,8 @@ test('PERF-09: typing in a 1 MB document on a throttled phone: the page\'s own h
   console.log(`PERF-09 (4x slower CPU): editor on the screen in ${opened.toFixed(0)} ms; ${r.n} input events, slowest handling ${r.worst.toFixed(1)} ms, longest block of the main thread ${r.gap.toFixed(1)} ms`);
   expect(r.n).toBeGreaterThan(50);
   expect(r.worst).toBeLessThan(16); // the page's own handling of a keystroke: within the budget
-  expect(opened).toBeLessThan(6000); // the browser's layout of the text, not met against 100 ms: a guard
-  expect(r.gap).toBeLessThan(6000);  // idem against 16 ms
+  expect(opened).toBeLessThan(100); // a large text is edited a window at a time (STATUS M5.60)
+  expect(r.gap).toBeLessThan(150);  // the longest block is the first autosave writing the part of the text outside the window (about 45 ms here); the budget is 16 ms, not met
 });
 
 // PERF-08: moving to the next or previous ticket of the list one is reading is served from what the page already fetched: no request is made for it and
@@ -202,4 +201,45 @@ test('PERF-02: a ticket opened cold, in a warm page, is on the screen in under 3
   const p95 = times[Math.ceil(times.length * 0.95) - 1];
   console.log(`PERF-02 cold ticket: median ${times[10].toFixed(0)} ms, p95 ${p95.toFixed(0)} ms, max ${times[times.length - 1].toFixed(0)} ms`);
   expect(p95).toBeLessThan(300);
+});
+
+
+// A large text is edited a window at a time, and nothing is lost by it: edits at both ends of 300 KB, a reload that is a crash, the draft that comes back
+// from its three parts, and the text that is saved is the original with exactly those insertions (a third made after the recovery).
+test('PERF-09: a large text edited in windows is saved whole, and its draft survives a reload', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const person = await newUser(browser, 'arkady@example.com');
+  const lines = [];
+  for (let i = 0; lines.join('\n').length < 300_000; i++) lines.push(`line ${i}: the quick brown fox jumps over the lazy dog`);
+  const original = lines.join('\n').slice(0, 300_000);
+  const key = await createIssue(person.page, 'Large text in windows', original);
+  const page = await person.ctx.newPage();
+  await page.goto(`/#/issue/${key}`);
+  await page.getByRole('button', { name: 'Edit' }).click();
+  const editor = page.getByLabel('Description editor');
+  await expect(page.getByText(/A large text/)).toBeVisible();
+  expect((await editor.inputValue()).length).toBeLessThan(20_000); // the text area holds a window, not the text
+  await editor.click();
+  await page.keyboard.press('Control+Home');
+  await editor.pressSequentially('AAA');
+  for (let i = 0; i < 100 && await page.locator('#later-text').isEnabled(); i++) await page.locator('#later-text').click();
+  await expect(page.locator('#later-text')).toBeDisabled();
+  await editor.click();
+  await page.keyboard.press('Control+End');
+  await editor.pressSequentially('ZZZ');
+  await page.waitForTimeout(2600); // the local draft is written
+  const parts = await page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('tl-draft')).length);
+  expect(parts).toBe(4); // the main key and the three parts
+  await page.reload(); // a crash
+  await expect(page.getByText(/Draft|Continue editing/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Continue editing' }).click();
+  const again = page.getByLabel('Description editor');
+  await expect(again).toBeVisible();
+  await again.click();
+  await page.keyboard.press('Control+Home');
+  await again.pressSequentially('Q'); // one more edit, in the first window of the recovered text
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible({ timeout: 30000 });
+  const got = await page.evaluate(async k => (await (await fetch(`/api/v1/issues/${k}/view`)).json()).issue.description, key);
+  expect(got).toBe('QAAA' + original + 'ZZZ');
 });

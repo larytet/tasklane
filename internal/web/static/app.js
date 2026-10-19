@@ -389,8 +389,33 @@
 
   // ---------- ticket thread ----------
   const draftKey = (key, f) => 'tl-draft:' + S.me.id + ':' + key + ':' + f;
-  function localDraft(key, f) { try { return JSON.parse(localStorage.getItem(draftKey(key, f))); } catch (e) { return null; } }
-  function setLocalDraft(key, f, v) { try { if (v) localStorage.setItem(draftKey(key, f), JSON.stringify(v)); else localStorage.removeItem(draftKey(key, f)); } catch (e) { /* storage unavailable */ } }
+  // A draft of a very large text is kept in three keys (the part before the window being edited, the window, the part after), so that typing rewrites only the
+  // small middle one; the main key says so. Anything else is one key holding the whole draft.
+  const partKey = (key, f, p) => draftKey(key, f) + ':' + p;
+  function localDraft(key, f) {
+    try {
+      const d = JSON.parse(localStorage.getItem(draftKey(key, f)));
+      if (d && d.parts) {
+        const hh = localStorage.getItem(partKey(key, f, 'h')), m = localStorage.getItem(partKey(key, f, 'm')), t = localStorage.getItem(partKey(key, f, 't'));
+        return hh == null || m == null || t == null ? null : { body: hh + m + t, base_seq: d.base_seq, at: d.at };
+      }
+      return d;
+    } catch (e) { return null; }
+  }
+  function setLocalDraft(key, f, v) {
+    try {
+      for (const p of ['h', 'm', 't']) localStorage.removeItem(partKey(key, f, p));
+      if (v) localStorage.setItem(draftKey(key, f), JSON.stringify(v)); else localStorage.removeItem(draftKey(key, f));
+    } catch (e) { /* storage unavailable */ }
+  }
+  function setLocalDraftParts(key, f, parts, meta, last) {
+    try {
+      if (parts.h !== last.h) { localStorage.setItem(partKey(key, f, 'h'), parts.h); last.h = parts.h; }
+      if (parts.t !== last.t) { localStorage.setItem(partKey(key, f, 't'), parts.t); last.t = parts.t; }
+      localStorage.setItem(partKey(key, f, 'm'), parts.m);
+      localStorage.setItem(draftKey(key, f), JSON.stringify({ parts: true, base_seq: meta.base_seq, at: meta.at }));
+    } catch (e) { /* storage unavailable */ }
+  }
 
   // Prev/next in a ticket (PERF-08): while a ticket is open the two neighbours in the list it was opened from are fetched in the background and kept
   // for a short while, so moving to one shows it at once from the page's own memory; the page revalidates it as it does any open ticket. An entry is
@@ -733,19 +758,51 @@
     function editorEl(box) {
       const ed = st.editing;
       clear(box);
-      const ta = h('textarea', { 'aria-label': 'Description editor', value: ed.body });
+      // A very large text is edited a window at a time (PERF-09): the browser lays out a text area of a megabyte so slowly that every key would stall the
+      // page, so the area holds about WIN characters and the rest waits in head and tail; ed.body is always the whole text.
+      const LARGE = 200000, WIN = 12000;
+      let head = '', tail = '';
+      const windowed = ed.body.length > LARGE;
+      const ta = h('textarea', { 'aria-label': 'Description editor', value: windowed ? '' : ed.body });
+      const bars = h('div', { class: 'chips', role: 'group', 'aria-label': 'Move through the text' });
+      const kb = n => Math.max(1, Math.round(n / 1024)) + ' KB';
+      function showWindow(full, at) {
+        let s0 = Math.max(0, Math.min(at, full.length - WIN)), e0 = Math.min(full.length, s0 + WIN);
+        if (s0 > 0) { const nl = full.indexOf('\n', s0); if (nl >= 0 && nl < e0) s0 = nl + 1; }
+        if (e0 < full.length) { const nl = full.lastIndexOf('\n', e0); if (nl >= s0) e0 = nl + 1; }
+        head = full.slice(0, s0); tail = full.slice(e0); ta.value = full.slice(s0, e0);
+        paintBars();
+      }
+      function paintBars() {
+        clear(bars);
+        bars.append(h('span', { class: 'muted' }, 'A large text (' + kb(head.length + ta.value.length + tail.length) + '): you are editing one part of it.'),
+          h('button', { class: 'btn ghost', id: 'earlier-text', disabled: !head.length, onclick: () => shift(-1) }, head.length ? 'Earlier (' + kb(head.length) + ')' : 'Start of the text'),
+          h('button', { class: 'btn ghost', id: 'later-text', disabled: !tail.length, onclick: () => shift(1) }, tail.length ? 'Later (' + kb(tail.length) + ')' : 'End of the text'));
+      }
+      function shift(dir) { const full = head + ta.value + tail; showWindow(full, head.length + (dir > 0 ? ta.value.length : -WIN)); }
+      const setFull = text => { if (windowed) showWindow(text, 0); else ta.value = text; };
+      if (windowed) showWindow(ed.body, 0);
       const state = h('span', { class: 'state', role: 'status' }, st.dirty ? 'Draft saved' : '');
       box.append(h('div', { class: 'chips' }, h('strong', {}, 'Description'), h('span', { class: 'grow' })), h('div', { id: 'editing-warning' }));
       if (ed.restored) box.append(h('div', { class: 'banner warn' }, 'Restored your unsaved draft from ' + L.relTime(ed.restored.at) + '.',
-        h('button', { class: 'btn', onclick: () => { ta.value = v.issue.description; ed.body = ta.value; ed.baseSeq = v.issue.description_seq; ed.restored = null; setLocalDraft(key, 'description', null); render(); } }, 'Discard')));
-      box.append(h('div', { id: 'changed-banner' }), ta);
+        h('button', { class: 'btn', onclick: () => { setFull(v.issue.description); ed.body = v.issue.description; ed.baseSeq = v.issue.description_seq; ed.restored = null; setLocalDraft(key, 'description', null); render(); } }, 'Discard')));
+      box.append(h('div', { id: 'changed-banner' }));
+      if (windowed) box.append(bars);
+      box.append(ta);
       showChanged();
       ta.addEventListener('input', () => {
-        ed.body = ta.value; st.dirty = true; state.textContent = 'Editing…';
+        ed.body = windowed ? head + ta.value + tail : ta.value; st.dirty = true; state.textContent = 'Editing…';
         // every 2 s while typing goes on, not 2 s after it stops: a timer restarted by each key would never fire for someone who does not pause (E3, SPEC 21)
         if (!st.localTimer) st.localTimer = setTimeout(flushLocal, 2000);
       });
-      const flushLocal = () => { st.localTimer = 0; if (st.editing && st.dirty) { setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); state.textContent = 'Draft saved'; } };
+      const lastParts = {};
+      const flushLocal = () => {
+        st.localTimer = 0;
+        if (!st.editing || !st.dirty) return;
+        if (windowed) setLocalDraftParts(key, 'description', { h: head, m: ta.value, t: tail }, { base_seq: ed.baseSeq, at: new Date().toISOString() }, lastParts);
+        else setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() });
+        state.textContent = 'Draft saved';
+      };
       // a tab that is hidden or going away writes what it has at once
       const leaving = () => { clearTimeout(st.localTimer); flushLocal(); };
       window.addEventListener('pagehide', leaving);
