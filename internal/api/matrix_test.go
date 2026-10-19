@@ -1141,6 +1141,9 @@ func rows() []row {
 		{"POST /api/v1/issues/{key}/lifecycle", writer, func(f *fixture) req {
 			return J("POST", "/api/v1/issues/"+f.issue()+"/lifecycle", map[string]any{"op": "clone"})
 		}},
+		{"POST /api/v1/richtext/convert", exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/richtext/convert", map[string]any{"from": "markdown", "to": "adf", "body": "**x**"})
+		}},
 		// a bulk job is accepted for issues the person can read (a stranger gets the "not found" of a missing issue); each change is checked as that person when it is reached; its status and cancel are the owner's
 		{"POST /api/v1/bulk/lifecycle", exp{anon: codes(401), outsider: codes(400), viewer: codes(202), member: codes(202), admin: codes(202)}, func(f *fixture) req {
 			return J("POST", "/api/v1/bulk/lifecycle", map[string]any{"keys": []string{f.issue()}, "op": map[string]any{"op": "delete"}})

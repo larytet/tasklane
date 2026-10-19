@@ -345,3 +345,20 @@ func TestHTTP_LIFE16_BulkJob(t *testing.T) {
 		t.Fatalf("purge in bulk: %d", code)
 	}
 }
+
+// LIVE-06 over HTTP: Markdown to ADF and back through the conversion endpoint.
+func TestHTTP_LIVE06_RichTextConversion(t *testing.T) {
+	_, alice, _, _ := setup(t)
+	const md = "# Title\n\nSome **bold** and _italic_ with a [link](https://example.com).\n\n- one\n- two\n"
+	code, out, _ := alice.do("POST", "/api/v1/richtext/convert", map[string]any{"from": "markdown", "to": "adf", "body": md})
+	if code != 200 || out["body"] == nil || out["body"].(map[string]any)["type"] != "doc" {
+		t.Fatalf("%d %v", code, out)
+	}
+	code, back, _ := alice.do("POST", "/api/v1/richtext/convert", map[string]any{"from": "adf", "to": "markdown", "body": out["body"]})
+	if code != 200 || back["body"] != md[:len(md)-1] && back["body"] != md {
+		t.Fatalf("%d %q", code, back["body"])
+	}
+	if code, _, _ := alice.do("POST", "/api/v1/richtext/convert", map[string]any{"from": "html", "to": "adf", "body": "x"}); code != 400 {
+		t.Fatalf("%d", code)
+	}
+}

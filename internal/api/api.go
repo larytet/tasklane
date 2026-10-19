@@ -19,6 +19,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/mcp"
+	"github.com/larytet/tasklane/internal/richtext"
 	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/web"
@@ -473,6 +474,45 @@ func (s *Server) Handler() http.Handler {
 		}
 		plan, err := s.Svc.Lifecycle(r.Context(), actorOf(r), r.PathValue("key"), in)
 		s.reply(w, plan, err)
+	}))
+	// converts rich text between Markdown and Atlassian Document Format (LIVE-06); nothing is stored
+	s.handle(mux, "POST /api/v1/richtext/convert", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			From string          `json:"from"`
+			To   string          `json:"to"`
+			Body json.RawMessage `json:"body"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		var doc richtext.Node
+		switch in.From {
+		case "markdown":
+			var md string
+			if json.Unmarshal(in.Body, &md) != nil {
+				s.fail(w, 400, "invalid", "body is a string of Markdown", nil)
+				return
+			}
+			doc = richtext.FromMarkdown(md)
+		case "adf":
+			var v any
+			if json.Unmarshal(in.Body, &v) != nil {
+				s.fail(w, 400, "invalid", "body is an Atlassian Document Format document", nil)
+				return
+			}
+			doc = richtext.FromADF(v)
+		default:
+			s.fail(w, 400, "invalid", "from is markdown or adf", nil)
+			return
+		}
+		switch in.To {
+		case "markdown":
+			s.reply(w, map[string]any{"body": richtext.ToMarkdown(doc)}, nil)
+		case "adf":
+			s.reply(w, map[string]any{"body": richtext.ToADF(doc)}, nil)
+		default:
+			s.fail(w, 400, "invalid", "to is markdown or adf", nil)
+		}
 	}))
 	s.handle(mux, "POST /api/v1/bulk/lifecycle", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in domain.BulkIn
