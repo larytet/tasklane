@@ -71,3 +71,26 @@ test('UPG-08: a client that is too old is told to reload and keeps its draft', a
   await adm.page.goto(`/#/issue/${issue}`);
   await expect(adm.page.getByText(/Restored your unsaved draft/)).toBeVisible();
 });
+
+// DUR-05: a save the server's validation refuses (a text over the size limit) says why and keeps what the person typed, in the editor and in the
+// draft; shortening the text lets the same editor save it.
+test('DUR-05: a refused save keeps the text, says why, and the corrected text saves', async ({ browser }) => {
+  const adm = await adminCtx(browser);
+  const pk = 'V' + uniq();
+  await adm.call('POST', '/api/v1/projects', { key: pk, name: 'Validation test' });
+  const issue = (await adm.call('POST', '/api/v1/issues', { project: pk, type: 'Task', summary: 'Validation target', description: 'before' })).body.key;
+  await adm.page.goto(`/#/issue/${issue}`);
+  await adm.page.getByRole('button', { name: 'Edit' }).click();
+  const ta = adm.page.getByLabel('Description editor');
+  const big = 'x'.repeat((1 << 20) + 10);
+  await ta.fill(big);
+  await adm.page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(adm.page.getByText(/too large/i)).toBeVisible({ timeout: 15000 });
+  await expect(ta).toHaveValue(big); // nothing was thrown away
+  const kept = await adm.call('GET', `/api/v1/issues/${issue}/view`);
+  expect(JSON.stringify(kept.body)).toContain('before'); // and the saved text is untouched
+  await ta.fill('short enough now');
+  await adm.page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(adm.page.getByText('short enough now')).toBeVisible({ timeout: 15000 });
+  expect(JSON.stringify((await adm.call('GET', `/api/v1/issues/${issue}/view`)).body)).toContain('short enough now');
+});
