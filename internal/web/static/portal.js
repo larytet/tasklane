@@ -160,8 +160,35 @@
           const x = await api('POST', '/api/v1/portal/' + key + '/requests/' + encodeURIComponent(k) + '/comments', { body: text.value });
           if (x.status === 201) detail(k); else msg.textContent = x.status === 429 ? 'Please wait a while before writing more.' : errText(x);
         } }, h('label', { for: 'cb' }, 'Add a reply'), text, h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Send')), msg),
+        filesEl(q, k),
         shareEl(q, k),
         h('p', {}, h('a', { href: '#/' }, 'Back to my requests')));
+    }
+
+    // files on a request: the ones shared with this customer, and (when the portal takes them) a way to add more
+    function filesEl(q, k) {
+      const rules = info && info.files;
+      const list = q.attachments || [];
+      if (!rules && !list.length) return null;
+      const msg = h('p', { role: 'alert', class: 'err' });
+      const input = h('input', { type: 'file', id: 'pf', 'aria-describedby': 'pf-help' });
+      const send = async () => {
+        msg.textContent = '';
+        const f = input.files[0];
+        if (!f) { msg.textContent = 'Choose a file first.'; return; }
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch('/api/v1/portal/' + key + '/requests/' + encodeURIComponent(k) + '/attachments', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane' } });
+        if (r.status === 201) { detail(k); return; }
+        let e = {}; try { e = await r.json(); } catch (x) { /* none */ }
+        msg.textContent = r.status === 429 ? 'Please wait a while before sending more files.' : (e.error || 'The file could not be added.');
+      };
+      return h('div', {}, h('h3', {}, 'Files'),
+        list.length ? h('ul', { class: 'list', 'aria-label': 'Files' }, list.map(a => h('li', { class: 'row' },
+          h('a', { href: '/api/v1/portal/' + key + '/attachments/' + a.id, download: a.name }, a.name), h('span', { class: 'muted' }, ' ' + Math.max(1, Math.round(a.size / 1024)) + ' KB' + (a.mine ? ' · yours' : '')),
+          a.mine ? h('button', { class: 'btn ghost', 'aria-label': 'Remove ' + a.name, onclick: async () => { const x = await api('DELETE', '/api/v1/portal/' + key + '/attachments/' + a.id); if (x.status === 200) detail(k); } }, 'Remove') : null))) : h('p', { class: 'muted' }, 'No files yet.'),
+        rules && !q.resolved ? h('div', {}, h('label', { for: 'pf' }, 'Add a file'), input,
+          h('p', { id: 'pf-help', class: 'muted' }, 'Up to ' + rules.max_mb + ' MB each, ' + rules.max_files + ' files per request. Accepted: ' + (rules.classes || []).map(c => ({ image: 'images', document: 'documents', log: 'text and logs' }[c] || c)).join(', ') + '.'),
+          h('div', { class: 'actions' }, h('button', { class: 'btn', type: 'button', onclick: send }, 'Upload')), msg) : null);
     }
 
     // who else sees this request: only the person who raised it can change that

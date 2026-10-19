@@ -377,19 +377,20 @@ const customerSees = `(pr.customer_id::text=$1 OR EXISTS (SELECT 1 FROM request_
 	OR (pr.shared_with_org AND EXISTS (SELECT 1 FROM customer r JOIN customer m ON m.customer_org_id=r.customer_org_id WHERE r.id=pr.customer_id AND m.id::text=$1)))`
 
 type PortalRequest struct {
-	Key         string          `json:"key"`
-	Summary     string          `json:"summary"`
-	Description string          `json:"description,omitempty"`
-	Status      string          `json:"status"`
-	Resolved    bool            `json:"resolved"`
-	Type        string          `json:"request_type,omitempty"`
-	Created     time.Time       `json:"created"`
-	Updated     time.Time       `json:"updated"`
-	Fields      []PortalField   `json:"fields,omitempty"`
-	Comments    []PortalComment `json:"comments,omitempty"`
-	RaisedBy    string          `json:"raised_by,omitempty"` // the colleague who raised it, when it is not the viewer's own
-	Mine        bool            `json:"mine"`
-	Sharing     *PortalSharing  `json:"sharing,omitempty"` // for the person who raised it
+	Key         string             `json:"key"`
+	Summary     string             `json:"summary"`
+	Description string             `json:"description,omitempty"`
+	Status      string             `json:"status"`
+	Resolved    bool               `json:"resolved"`
+	Type        string             `json:"request_type,omitempty"`
+	Created     time.Time          `json:"created"`
+	Updated     time.Time          `json:"updated"`
+	Fields      []PortalField      `json:"fields,omitempty"`
+	Comments    []PortalComment    `json:"comments,omitempty"`
+	RaisedBy    string             `json:"raised_by,omitempty"` // the colleague who raised it, when it is not the viewer's own
+	Mine        bool               `json:"mine"`
+	Sharing     *PortalSharing     `json:"sharing,omitempty"` // for the person who raised it
+	Attachments []PortalAttachment `json:"attachments"`
 }
 
 type PortalField struct {
@@ -535,6 +536,7 @@ func (s *Service) PortalGetRequest(ctx context.Context, c Customer, projectKey, 
 		return PortalRequest{}, ErrNotFound
 	}
 	pidIssue = id
+	r.Attachments = s.portalAttachments(ctx, c, id)
 	if !r.Mine {
 		r.RaisedBy = raisedName
 		if r.RaisedBy == "" {

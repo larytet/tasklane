@@ -103,3 +103,22 @@ A **canned response** is a saved reply, inserted from a menu in the ticket's rep
 ## Not built yet
 
 Still to build: attachments on requests, a warning before a goal is missed, SLA reports and a dashboard gadget, business-hours rules that differ by day of the week for a policy,   sign-in with a customer OIDC or SAML provider, CAPTCHA, and per-request-type step-up. A project key written as `me` (lower case) in the API path is read as the portal's own `me` route.
+
+## Files on requests
+
+Off by default. In the portal settings an administrator of the project turns on **Customers may add files to their requests** and sets the
+largest file (1 to 100 MB, default 10), the most files customers can add to one request (1 to 20, default 5) and the kinds accepted: images,
+documents, and text and logs. Archives and video are never accepted from customers.
+
+What is checked, on the bytes and not on the name: the real type is read from the file, so a page of script named `photo.png` is refused;
+anything the scanner flags is refused; the size and the kind are held to the portal's rules. A refused file is not stored at all. A resolved
+request takes no more files, and a customer is limited to 30 uploads an hour.
+
+Who sees a file: a customer sees the files they sent, and the files staff chose to share, on a request they can see (their own, or shared
+with them or their company). A file staff attach is internal until someone with write access to the request marks it shared (the lock/eye
+button on the file in the ticket, or `PUT /api/v1/attachments/{id}/customer-visible`); a file the scanner has not passed cannot be shared; a
+file a customer sent cannot be hidden from them. Customers download through their own session (`GET /api/v1/portal/{key}/attachments/{id}`),
+always as a download, never shown inline, and delete only what they sent (`DELETE` on the same address).
+
+Privacy: a customer's export lists the files they sent, and erasing a customer removes them (the references are dropped so the collector frees
+the bytes, and the file names are replaced in the history of those requests).

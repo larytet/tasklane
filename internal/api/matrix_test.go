@@ -717,6 +717,16 @@ func rows() []row {
 		{"POST /api/v1/portal/{key}/requests/{issue}/comments", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
 			return J("POST", "/api/v1/portal/ABC/requests/"+f.issue()+"/comments", map[string]any{"body": "x"})
 		}},
+		{"POST /api/v1/portal/{key}/requests/{issue}/attachments", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("POST", "/api/v1/portal/ABC/requests/"+f.issue()+"/attachments?name=x.txt", nil)
+		}},
+		{"GET /api/v1/portal/{key}/attachments/{id}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/attachments/"+f.attachment(f.issue()), nil) }},
+		{"DELETE /api/v1/portal/{key}/attachments/{id}", exp{anon: codes(401), outsider: codes(401), viewer: codes(401), member: codes(401), admin: codes(401)}, func(f *fixture) req {
+			return J("DELETE", "/api/v1/portal/ABC/attachments/"+f.attachment(f.issue()), nil)
+		}},
+		{"PUT /api/v1/attachments/{id}/customer-visible", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(400), admin: codes(400)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/attachments/"+f.attachment(f.issue())+"/customer-visible", map[string]any{"visible": true})
+		}},
 		{"GET /api/v1/projects/{key}/queues", exp{anon: codes(401), outsider: codes(404), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/queues", nil) }},
 		{"POST /api/v1/projects/{key}/queues", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(201)}, func(f *fixture) req {
 			f.n++

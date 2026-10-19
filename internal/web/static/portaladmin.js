@@ -24,13 +24,21 @@
     const consent = h('textarea', { id: 'pe-c', rows: 2, 'aria-label': 'Consent text' }); consent.value = p.consent_text;
     const allow = h('textarea', { id: 'pe-a', rows: 2, 'aria-label': 'Allowed addresses and domains' }); allow.value = (p.allow || []).join('\n');
     const block = h('textarea', { id: 'pe-b', rows: 2, 'aria-label': 'Blocked addresses and domains' }); block.value = (p.block || []).join('\n');
+    const af = h('input', { type: 'checkbox', id: 'pe-af', checked: p.attach_enabled });
+    const amb = h('input', { type: 'number', id: 'pe-amb', min: 1, max: 100, value: p.attach_max_mb, 'aria-label': 'Largest file in MB' });
+    const afn = h('input', { type: 'number', id: 'pe-afn', min: 1, max: 20, value: p.attach_max_files, 'aria-label': 'Most files per request' });
+    const acl = ['image', 'document', 'log'].map(c => h('label', {}, h('input', { type: 'checkbox', 'data-class': c, checked: (p.attach_classes || []).includes(c) }), ' ' + ({ image: 'Images', document: 'Documents', log: 'Text and logs' }[c])));
     body.append(h('h3', {}, 'Settings'),
       h('label', { for: 'pe-on' }, enabled, ' The portal is open'),
       h('label', { for: 'pe-w' }, 'Welcome text'), welcome, h('label', { for: 'pe-p' }, 'Privacy notice'), privacy, h('label', { for: 'pe-c' }, 'Consent text'), consent,
       h('label', { for: 'pe-a' }, 'Only these may sign in (addresses or @domains, one per line; empty allows everyone)'), allow,
       h('label', { for: 'pe-b' }, 'These may never sign in'), block,
+      h('h4', {}, 'Files from customers'),
+      h('label', { for: 'pe-af' }, af, ' Customers may add files to their requests'),
+      h('label', { for: 'pe-amb' }, 'Largest file (MB)'), amb, h('label', { for: 'pe-afn' }, 'Most files per request'), afn,
+      h('div', { class: 'chips' }, acl), h('p', { class: 'muted' }, 'Archives and video are never accepted. Every file is checked on what it really is, not on its name, and flagged files are refused.'),
       h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: async () => {
-        const x = await api('PUT', '/api/v1/projects/' + key + '/portal', { enabled: enabled.checked, welcome: welcome.value, privacy_notice: privacy.value, consent_text: consent.value, allow: lines(allow.value), block: lines(block.value) });
+        const x = await api('PUT', '/api/v1/projects/' + key + '/portal', { enabled: enabled.checked, welcome: welcome.value, privacy_notice: privacy.value, consent_text: consent.value, allow: lines(allow.value), block: lines(block.value), attach_enabled: af.checked, attach_max_mb: +amb.value, attach_max_files: +afn.value, attach_classes: acl.map(l => l.querySelector('input')).filter(i => i.checked).map(i => i.dataset.class) });
         msg.className = x.status === 200 ? 'muted' : 'err'; msg.textContent = x.status === 200 ? 'Saved.' : errText(x);
       } }, 'Save settings')));
     // customers as data subjects: find, export, erase, promote (administrators of the organization)

@@ -444,3 +444,68 @@ test('PORT-06: a customer downloads their data and erases themselves; an adminis
   await expect(sp.getByRole('list', { name: 'Customers' })).toContainText('erased');
   void k;
 });
+
+test('PORT-05: files on a request: off until the portal allows them, within its rules, shared both ways, removable', async ({ browser }) => {
+  const adm = await browser.newContext();
+  adm.on('page', watch);
+  expect((await adm.request.post('/api/v1/login', { headers: H, data: { email: 'admin@example.com', password: 'adminpass1' } })).status()).toBe(200);
+  const pk = 'F' + uniq().toUpperCase();
+  expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Files desk' } })).status()).toBe(201);
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true } })).status()).toBe(200);
+  expect((await adm.request.post(`/api/v1/projects/${pk}/request-types`, { headers: H, data: { name: 'Help' } })).status()).toBe(201);
+  const addr = `fay.${uniq()}@customer.example`;
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  const page = await ctx.newPage();
+  await page.goto('/portal/' + pk);
+  await page.getByLabel('Your email address').fill(addr);
+  await page.getByRole('button', { name: 'Email me a code' }).click();
+  const { code } = await sentTo(addr);
+  await page.getByLabel('The six digit code we sent you').fill(code);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+  await expect(page.getByText('Signed in as')).toContainText(addr);
+  await page.getByRole('link', { name: 'New request' }).click();
+  await page.getByLabel('Summary').fill('My screen is cracked');
+  await page.getByRole('button', { name: 'Send request' }).click();
+  await expect(page.getByRole('heading', { level: 2 })).toContainText('My screen is cracked');
+  const key = (await page.getByRole('heading', { level: 2 }).textContent()).split(' ')[0];
+  // off by default: no upload control
+  await expect(page.getByLabel('Add a file')).toHaveCount(0);
+  expect((await ctx.request.post(`/api/v1/portal/${pk}/requests/${key}/attachments?name=a.txt`, { headers: { 'X-Requested-With': 'tasklane', 'Content-Type': 'text/plain' }, data: 'hello' })).status()).toBe(400);
+  // the administrator allows files
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true, attach_enabled: true, attach_max_mb: 1, attach_max_files: 2 } })).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByLabel('Add a file')).toBeVisible();
+  await expect(page.getByText('Up to 1 MB each, 2 files per request')).toBeVisible();
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  // a flagged file is refused and says so; an allowed one appears
+  await page.getByLabel('Add a file').setInputFiles({ name: 'virus.txt', mimeType: 'text/plain', buffer: Buffer.from('X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*') });
+  await page.getByRole('button', { name: 'Upload' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'refused' })).toBeVisible();
+  await page.getByLabel('Add a file').setInputFiles({ name: 'crack.txt', mimeType: 'text/plain', buffer: Buffer.from('a photo would go here') });
+  await page.getByRole('button', { name: 'Upload' }).click();
+  await expect(page.getByRole('link', { name: 'crack.txt' })).toBeVisible();
+  await expect(page.getByText(/1 KB · yours/)).toBeVisible();
+  // downloading gives the bytes, as a download
+  const dl = await ctx.request.get(`/api/v1/portal/${pk}/attachments/` + (await page.getByRole('link', { name: 'crack.txt' }).getAttribute('href')).split('/').pop());
+  expect(dl.status()).toBe(200);
+  expect(dl.headers()['content-disposition']).toContain('attachment');
+  expect(await dl.text()).toBe('a photo would go here');
+  // staff see it as the customer's, and share a file of their own
+  const issue = await (await adm.request.get(`/api/v1/issues/${key}/view`)).json();
+  expect(issue.attachments.map(a => [a.name, a.from_customer, a.customer_visible])).toEqual([['crack.txt', true, true]]);
+  const up = await adm.request.post(`/api/v1/issues/${key}/attachments?name=guide.txt`, { headers: { 'X-Requested-With': 'tasklane', 'Content-Type': 'text/plain' }, data: 'how to fix it' });
+  expect(up.status()).toBe(201);
+  const gid = (await up.json()).id;
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'guide.txt' })).toHaveCount(0);
+  expect((await adm.request.put(`/api/v1/attachments/${gid}/customer-visible`, { headers: H, data: { visible: true } })).status()).toBe(200);
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'guide.txt' })).toBeVisible();
+  // she can remove her own file but not the staff's
+  await expect(page.getByRole('button', { name: 'Remove guide.txt' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Remove crack.txt' }).click();
+  await expect(page.getByRole('link', { name: 'crack.txt' })).toHaveCount(0);
+  expect((await ctx.request.delete(`/api/v1/portal/${pk}/attachments/${gid}`, { headers: H })).status()).toBe(403);
+});

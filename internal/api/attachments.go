@@ -131,6 +131,16 @@ func (s *Server) registerAttachments(mux *http.ServeMux) {
 		}
 		s.reply(w, map[string]any{"url": path, "expires": exp}, err)
 	}))
+	// staff share a file on a customer request with its customers, or take it back
+	s.handle(mux, "PUT /api/v1/attachments/{id}/customer-visible", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Visible bool `json:"visible"`
+		}
+		if !s.decode(w, r, &in) {
+			return
+		}
+		s.reply(w, map[string]bool{"customer_visible": in.Visible}, s.Svc.SetAttachmentCustomerVisible(r.Context(), actorOf(r), r.PathValue("id"), in.Visible))
+	}))
 	// authenticated download for the UI itself (checks the permission on every request)
 	s.handle(mux, "GET /api/v1/attachments/{id}/download", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		d, err := s.Svc.FileInfo(r.Context(), actorOf(r), r.PathValue("id"), r.URL.Query().Get("thumb") == "1")

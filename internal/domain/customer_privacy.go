@@ -134,6 +134,7 @@ func (s *Service) customerExport(ctx context.Context, id string) (map[string]any
 		{"requests", `SELECT i.key AS request, i.summary, COALESCE(t.body,'') AS description, st.name AS status, i.created_at, COALESCE(rt.name,'') AS request_type, pr.shared_with_org AS shared_with_company
 			FROM portal_request pr JOIN issue i ON i.id=pr.issue_id AND i.deleted_at IS NULL JOIN status st ON st.id=i.status_id LEFT JOIN request_type rt ON rt.id=pr.request_type_id
 			LEFT JOIN issue_text t ON t.issue_id=i.id AND t.field='description' WHERE pr.customer_id::text=$1 ORDER BY i.created_at`, []any{id}},
+		{"your_files", `SELECT i.key AS request, a.name, b.size, a.created_at FROM attachment a JOIN issue i ON i.id=a.issue_id JOIN blob b ON b.id=a.blob_id WHERE a.customer_id::text=$1 ORDER BY a.created_at`, []any{id}},
 		{"your_comments", `SELECT i.key AS request, cc.body, cc.created_at FROM customer_comment cc JOIN issue i ON i.id=cc.issue_id WHERE cc.customer_id::text=$1 ORDER BY cc.created_at`, []any{id}},
 		{"replies_to_your_requests", `SELECT i.key AS request, c.body, c.created_at FROM comment c JOIN issue i ON i.id=c.issue_id JOIN portal_request pr ON pr.issue_id=i.id WHERE pr.customer_id::text=$1 AND NOT c.internal ORDER BY c.created_at`, []any{id}},
 		{"shared_with_you", `SELECT i.key AS request, i.summary FROM request_participant rp JOIN issue i ON i.id=rp.issue_id WHERE rp.customer_id::text=$1 ORDER BY i.key`, []any{id}},
@@ -226,6 +227,9 @@ func (s *Service) eraseCustomer(ctx context.Context, a Actor, id string, o Erase
 			touched[r.key] = true
 		}
 		krows.Close()
+		if err := s.eraseCustomerFiles(ctx, tx, id, res.Counts); err != nil {
+			return err
+		}
 		if o.DeleteContent {
 			if err := exec("comments_deleted", `DELETE FROM customer_comment WHERE customer_id::text=$1`, id); err != nil {
 				return err

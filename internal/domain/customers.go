@@ -43,11 +43,19 @@ type Customer struct {
 }
 
 type PortalInfo struct {
-	Project string `json:"project"`
-	Name    string `json:"name"`
-	Welcome string `json:"welcome,omitempty"`
-	Privacy string `json:"privacy_notice,omitempty"`
-	Consent string `json:"consent_text,omitempty"`
+	Project string           `json:"project"`
+	Name    string           `json:"name"`
+	Welcome string           `json:"welcome,omitempty"`
+	Privacy string           `json:"privacy_notice,omitempty"`
+	Consent string           `json:"consent_text,omitempty"`
+	Files   *PortalFileRules `json:"files,omitempty"` // present when customers may add files
+}
+
+// PortalFileRules is what the portal tells a customer about the files it takes.
+type PortalFileRules struct {
+	MaxMB    int      `json:"max_mb"`
+	MaxFiles int      `json:"max_files"`
+	Classes  []string `json:"classes"`
 }
 
 type PortalPolicy struct {
@@ -57,6 +65,11 @@ type PortalPolicy struct {
 	Consent string   `json:"consent_text"`
 	Allow   []string `json:"allow"`
 	Block   []string `json:"block"`
+	// the rules for files customers add to their requests (off by default)
+	AttachEnabled  bool     `json:"attach_enabled"`
+	AttachMaxMB    int      `json:"attach_max_mb"`
+	AttachMaxFiles int      `json:"attach_max_files"` // customer files per request
+	AttachClasses  []string `json:"attach_classes"`   // image, document or log; archives and video are never accepted from customers
 }
 
 func randomToken(n int) string { return randURLToken(n) }
@@ -84,8 +97,8 @@ func normEmail(e string) (string, error) {
 // same: not found.
 func (s *Service) portalOf(ctx context.Context, projectKey string) (org, pid string, set PortalPolicy, name string, err error) {
 	var allow, block []string
-	err = s.DB.QueryRow(ctx, `SELECT p.org_id::text,p.id::text,p.name,ps.enabled,ps.welcome,ps.privacy_notice,ps.consent_text,ps.allow,ps.block FROM project p JOIN portal_setting ps ON ps.project_id=p.id
-		WHERE p.key=$1 AND NOT p.archived`, strings.ToUpper(projectKey)).Scan(&org, &pid, &name, &set.Enabled, &set.Welcome, &set.Privacy, &set.Consent, &allow, &block)
+	err = s.DB.QueryRow(ctx, `SELECT p.org_id::text,p.id::text,p.name,ps.enabled,ps.welcome,ps.privacy_notice,ps.consent_text,ps.allow,ps.block,ps.attach_enabled,ps.attach_max_mb,ps.attach_max_files,ps.attach_classes FROM project p JOIN portal_setting ps ON ps.project_id=p.id
+		WHERE p.key=$1 AND NOT p.archived`, strings.ToUpper(projectKey)).Scan(&org, &pid, &name, &set.Enabled, &set.Welcome, &set.Privacy, &set.Consent, &allow, &block, &set.AttachEnabled, &set.AttachMaxMB, &set.AttachMaxFiles, &set.AttachClasses)
 	if err != nil || !set.Enabled {
 		return "", "", set, "", ErrNotFound
 	}
@@ -99,7 +112,11 @@ func (s *Service) PortalInfoFor(ctx context.Context, projectKey string) (PortalI
 	if err != nil {
 		return PortalInfo{}, err
 	}
-	return PortalInfo{Project: strings.ToUpper(projectKey), Name: name, Welcome: set.Welcome, Privacy: set.Privacy, Consent: set.Consent}, nil
+	info := PortalInfo{Project: strings.ToUpper(projectKey), Name: name, Welcome: set.Welcome, Privacy: set.Privacy, Consent: set.Consent}
+	if set.AttachEnabled {
+		info.Files = &PortalFileRules{MaxMB: set.AttachMaxMB, MaxFiles: set.AttachMaxFiles, Classes: set.AttachClasses}
+	}
+	return info, nil
 }
 
 func listed(list []string, email string) bool {
@@ -158,8 +175,9 @@ func (s *Service) GetPortalPolicy(ctx context.Context, a Actor, projectKey strin
 	default:
 		return PortalPolicy{}, ErrForbidden
 	}
-	p := PortalPolicy{Allow: []string{}, Block: []string{}}
-	err = s.DB.QueryRow(ctx, `SELECT enabled,welcome,privacy_notice,consent_text,allow,block FROM portal_setting WHERE project_id=$1`, pid).Scan(&p.Enabled, &p.Welcome, &p.Privacy, &p.Consent, &p.Allow, &p.Block)
+	p := PortalPolicy{Allow: []string{}, Block: []string{}, AttachMaxMB: 10, AttachMaxFiles: 5, AttachClasses: []string{"image", "document", "log"}}
+	err = s.DB.QueryRow(ctx, `SELECT enabled,welcome,privacy_notice,consent_text,allow,block,attach_enabled,attach_max_mb,attach_max_files,attach_classes FROM portal_setting WHERE project_id=$1`, pid).
+		Scan(&p.Enabled, &p.Welcome, &p.Privacy, &p.Consent, &p.Allow, &p.Block, &p.AttachEnabled, &p.AttachMaxMB, &p.AttachMaxFiles, &p.AttachClasses)
 	if err != nil && err != pgx.ErrNoRows {
 		return p, err
 	}
@@ -183,8 +201,29 @@ func (s *Service) SetPortalPolicy(ctx context.Context, a Actor, projectKey strin
 			return PortalPolicy{}, invalid("a portal text is at most 5000 characters")
 		}
 	}
-	_, err = s.DB.Exec(ctx, `INSERT INTO portal_setting(project_id,enabled,welcome,privacy_notice,consent_text,allow,block) VALUES($1,$2,$3,$4,$5,$6,$7)
-		ON CONFLICT (project_id) DO UPDATE SET enabled=$2,welcome=$3,privacy_notice=$4,consent_text=$5,allow=$6,block=$7`, pid, in.Enabled, in.Welcome, in.Privacy, in.Consent, in.Allow, in.Block)
+	if in.AttachMaxMB == 0 {
+		in.AttachMaxMB = 10
+	}
+	if in.AttachMaxFiles == 0 {
+		in.AttachMaxFiles = 5
+	}
+	if in.AttachClasses == nil {
+		in.AttachClasses = []string{"image", "document", "log"}
+	}
+	if in.AttachMaxMB < 1 || in.AttachMaxMB > 100 {
+		return PortalPolicy{}, invalid("the file size limit is between 1 and 100 MB")
+	}
+	if in.AttachMaxFiles < 1 || in.AttachMaxFiles > 20 {
+		return PortalPolicy{}, invalid("the number of files per request is between 1 and 20")
+	}
+	for _, c := range in.AttachClasses {
+		if c != "image" && c != "document" && c != "log" {
+			return PortalPolicy{}, invalid("customers may be allowed images, documents and logs; %q is not one of them", c)
+		}
+	}
+	_, err = s.DB.Exec(ctx, `INSERT INTO portal_setting(project_id,enabled,welcome,privacy_notice,consent_text,allow,block,attach_enabled,attach_max_mb,attach_max_files,attach_classes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (project_id) DO UPDATE SET enabled=$2,welcome=$3,privacy_notice=$4,consent_text=$5,allow=$6,block=$7,attach_enabled=$8,attach_max_mb=$9,attach_max_files=$10,attach_classes=$11`,
+		pid, in.Enabled, in.Welcome, in.Privacy, in.Consent, in.Allow, in.Block, in.AttachEnabled, in.AttachMaxMB, in.AttachMaxFiles, in.AttachClasses)
 	return in, err
 }
 

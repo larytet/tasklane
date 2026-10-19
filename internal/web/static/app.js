@@ -811,6 +811,8 @@
         }
         chip.append(h('div', {}, h('div', { class: 'nm' }, a.name), h('div', { class: 'muted' }, a.scan_state === 'blocked' ? 'Blocked: malware signature' : L.bytes(a.size) + (a.type_flag ? ' · type mismatch' : ''))));
         if (a.scan_state === 'clean') chip.append(h('button', { class: 'btn ghost', 'aria-label': 'Download ' + a.name, onclick: async () => { const r = await api('POST', '/api/v1/attachments/' + a.id + '/link'); if (r.status === 200) window.open(r.data.url, '_blank', 'noopener'); } }, '⬇'));
+        if (v.request && canEdit() && !a.from_customer && a.scan_state === 'clean') chip.append(h('button', { class: 'btn ghost', 'aria-pressed': String(!!a.customer_visible), 'aria-label': (a.customer_visible ? 'Hide ' : 'Share ') + a.name + (a.customer_visible ? ' from the customer' : ' with the customer'), title: a.customer_visible ? 'Visible to the customer' : 'Internal: click to share with the customer', onclick: async () => { const r = await api('PUT', '/api/v1/attachments/' + a.id + '/customer-visible', { visible: !a.customer_visible }); if (r.status === 200) reloadAll(); else toast((r.data && r.data.error) || 'Could not change that'); } }, a.customer_visible ? '👁' : '🔒'));
+        if (v.request && a.from_customer) chip.append(h('span', { class: 'muted', title: 'Sent by the customer' }, 'customer'));
         if (canEdit()) chip.append(h('button', { class: 'btn ghost', 'aria-label': 'Remove ' + a.name, onclick: async () => { await api('DELETE', '/api/v1/issues/' + key + '/attachments/' + a.id); reloadAll(); } }, '×'));
         strip.append(chip);
       }

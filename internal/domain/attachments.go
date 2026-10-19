@@ -31,6 +31,9 @@ type Attachment struct {
 	TypeFlag  string    `json:"type_flag,omitempty"`
 	Thumb     string    `json:"thumb_state"`
 	SHA256    string    `json:"sha256"`
+	// CustomerVisible: customers of a request see this file; FromCustomer: a customer uploaded it
+	CustomerVisible bool `json:"customer_visible"`
+	FromCustomer    bool `json:"from_customer"`
 }
 
 // Blobs configures the attachment subsystem.
@@ -48,7 +51,7 @@ type Blobs struct {
 var ErrBusy = errors.New("too many uploads in progress")
 
 func (s *Service) listAttachments(ctx context.Context, issueID string) ([]Attachment, error) {
-	rows, err := s.DB.Query(ctx, `SELECT a.id,a.name,b.size,b.mime,b.class,COALESCE(u.name,''),a.created_at,b.scan_state,a.type_flag,a.thumb_state,b.sha256
+	rows, err := s.DB.Query(ctx, `SELECT a.id,a.name,b.size,b.mime,b.class,COALESCE(u.name,''),a.created_at,b.scan_state,a.type_flag,a.thumb_state,b.sha256,a.customer_visible,a.customer_id IS NOT NULL
 		FROM attachment a JOIN blob b ON b.id=a.blob_id LEFT JOIN app_user u ON u.id=a.uploader_id WHERE a.issue_id=$1 ORDER BY a.created_at,a.id`, issueID)
 	if err != nil {
 		return nil, err
@@ -57,7 +60,7 @@ func (s *Service) listAttachments(ctx context.Context, issueID string) ([]Attach
 	out := []Attachment{}
 	for rows.Next() {
 		var a Attachment
-		rows.Scan(&a.ID, &a.Name, &a.Size, &a.MIME, &a.Class, &a.Uploader, &a.Created, &a.ScanState, &a.TypeFlag, &a.Thumb, &a.SHA256)
+		rows.Scan(&a.ID, &a.Name, &a.Size, &a.MIME, &a.Class, &a.Uploader, &a.Created, &a.ScanState, &a.TypeFlag, &a.Thumb, &a.SHA256, &a.CustomerVisible, &a.FromCustomer)
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -347,6 +350,13 @@ func (s *Service) AttachStream(ctx context.Context, a Actor, key, name, declared
 // commitStaged hashes, sniffs, enforces class limits, refuses bombs, scans, then commits the object and
 // the attachment row together. Every refusal removes the staging file, so nothing orphaned stays visible.
 func (s *Service) commitStaged(ctx context.Context, a Actor, is Issue, issueID, stagingID, path, name, declaredMIME string) (Attachment, error) {
+	return s.commitStagedChecked(ctx, a, is, issueID, stagingID, path, name, declaredMIME, nil)
+}
+
+// stagedCheck lets a caller with stricter rules than staff (the customer portal) refuse a file once its real type, size and scan result are known.
+type stagedCheck func(mime string, class blob.Class, size int64, scanState, typeFlag string) error
+
+func (s *Service) commitStagedChecked(ctx context.Context, a Actor, is Issue, issueID, stagingID, path, name, declaredMIME string, check stagedCheck) (Attachment, error) {
 	fail := func(err error) (Attachment, error) { os.Remove(path); return Attachment{}, err }
 	sha, size, err := blob.HashFile(path)
 	if err != nil {
@@ -388,6 +398,11 @@ func (s *Service) commitStaged(ctx context.Context, a Actor, is Issue, issueID, 
 		scanState, detail = "blocked", sig
 	}
 	flag := blob.TypeFlag(declaredMIME, mime)
+	if check != nil {
+		if err := check(mime, class, size, scanState, flag); err != nil {
+			return fail(err)
+		}
+	}
 	return s.registerAttachment(ctx, a, is, issueID, name, declaredMIME, sha, size, mime, class, scanState, detail, flag,
 		func() error { _, err := s.Blobs.Store.Commit(stagingID, sha); return err }, func() { os.Remove(path) })
 }

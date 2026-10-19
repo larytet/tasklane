@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
+	"mime"
 	"net/http"
 	"strconv"
 
@@ -240,6 +242,48 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 			return
 		}
 		s.replyStatus(w, 201, v, err)
+	}))
+	// files: a customer adds a file to a request they can see (multipart, or a raw body with ?name=), downloads the ones shared with them, and deletes their own
+	s.handle(mux, "POST /api/v1/portal/{key}/requests/{issue}/attachments", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		var name, ctype string
+		var body io.Reader = http.MaxBytesReader(w, r.Body, 101<<20)
+		if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mt == "multipart/form-data" {
+			mr, err := r.MultipartReader()
+			if err != nil {
+				s.fail(w, 400, "bad_request", "invalid multipart body", nil)
+				return
+			}
+			for {
+				p, err := mr.NextPart()
+				if err != nil {
+					s.fail(w, 400, "bad_request", "no file part", nil)
+					return
+				}
+				if p.FileName() != "" {
+					name, ctype, body = p.FileName(), p.Header.Get("Content-Type"), p
+					break
+				}
+			}
+		} else {
+			name, ctype = r.URL.Query().Get("name"), r.Header.Get("Content-Type")
+			if name == "" {
+				name = "file"
+			}
+		}
+		v, err := s.Svc.PortalAttach(r.Context(), customerOf(r), r.PathValue("key"), r.PathValue("issue"), name, ctype, body)
+		var locked *domain.LockedError
+		if errors.As(err, &locked) {
+			s.portalFailed(w, err)
+			return
+		}
+		s.replyStatus(w, 201, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/portal/{key}/attachments/{id}", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		d, err := s.Svc.PortalFileInfo(r.Context(), customerOf(r), r.PathValue("key"), r.PathValue("id"))
+		s.serveFile(w, r, d, err)
+	}))
+	s.handle(mux, "DELETE /api/v1/portal/{key}/attachments/{id}", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.PortalDeleteAttachment(r.Context(), customerOf(r), r.PathValue("key"), r.PathValue("id")))
 	}))
 	s.handle(mux, "POST /api/v1/portal/{key}/requests/{issue}/share", s.portalAuth(func(w http.ResponseWriter, r *http.Request) {
 		var in domain.PortalShareIn
