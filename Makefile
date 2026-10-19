@@ -1,7 +1,7 @@
 GO ?= go
 export TASKLANE_TEST_DATABASE_URL ?= postgres://tl:tl@localhost:55432/tasklane
 
-.PHONY: build test vet db notice dist perf e2e e2e-update interop interop-matrix upgrade upgrade-bus
+.PHONY: build test vet db notice dist perf e2e e2e-update interop interop-matrix upgrade upgrade-bus chaos
 build:
 	$(GO) build -o bin/tasklane ./cmd/tasklane
 vet:
@@ -47,3 +47,7 @@ upgrade:
 # the same with the previous release that has the cluster event bus, a shared Redis, 50 people and a node killed (UPG-02, UPG-03)
 upgrade-bus:
 	./scripts/upgrade.sh --bus
+
+# the campaign through a bad network with a node killed, Redis stopped and PostgreSQL restarted (needs Docker)
+chaos:
+	./scripts/chaos.sh

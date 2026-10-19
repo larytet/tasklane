@@ -1,4 +1,4 @@
-//go:build upgrade
+//go:build upgrade || chaos
 
 package upgrade
 

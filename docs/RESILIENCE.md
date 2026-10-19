@@ -22,3 +22,12 @@ Every node compares its own clock with the database's every ten seconds and corr
 
 ## The live-update layer switched off
 With `realtime=false` the server answers `404` `realtime_disabled` on the ticket and socket endpoints; the page asks once and stops. People still appear as present (periodic requests), saves go through REST, and a save based on an old version still opens the conflict dialog. Presence that missed its heartbeats is still removed.
+
+## The campaign through a bad network, on the real binaries
+
+`make chaos` (`scripts/chaos.sh`, Docker required) runs two nodes of the current release with Redis and PostgreSQL, and twelve people appending to three shared
+texts with compare-and-set through a network that delays every request and every answer by about 300 ms, loses some requests before they arrive, loses some
+answers after the work was committed, and delivers some requests twice. While they work a node is killed with saves in flight and brought back, Redis stops
+and returns, and PostgreSQL restarts. At the end the reconciler of SPEC 21 judges each text: no acknowledged save missing (E1), none that replaced a newer
+change (E2), none duplicated (E4), and no gap in the sequence. A client that does not reuse its save id on a retry fails it (E4 and gaps), which is how the
+measurement is known to be able to fail.

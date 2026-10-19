@@ -1,4 +1,4 @@
-//go:build upgrade
+//go:build upgrade || chaos
 
 // Package upgrade is the rolling-upgrade test (TESTPLAN UPG-02): two nodes of the previous release behind a load balancer, a crowd of simulated
 // people working through it, and the nodes replaced one at a time by the current release while they work. It runs the real binaries from
@@ -1064,6 +1064,9 @@ func (a *appender) run(stop <-chan struct{}, rng *rand.Rand) {
 			if !ok {
 				body, seq, ok = a.current()
 				continue
+			}
+			if os.Getenv("CHAOS_NO_IDEMPOTENCY") == "1" { // a deliberately broken client, to show the measurement can fail
+				saveID = fmt.Sprintf("camp-%d-%d-%d", a.n, i, rng.Int63())
 			}
 			st, b, err := a.u.do("PUT", "/api/v1/issues/"+a.key+"/text/description", map[string]any{"body": body + "\n\n" + token, "base_seq": seq, "save_id": saveID}, false)
 			switch {
