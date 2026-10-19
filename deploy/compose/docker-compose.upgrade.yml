@@ -1,0 +1,39 @@
+# The rolling-upgrade profile (TESTPLAN UPG-02): one PostgreSQL, two nodes of the old release (old1, old2) and two of the new (new1, new2), plus a
+# one-shot migration with the new release. The test starts the old nodes, runs a simulated crowd through a load balancer, and replaces the nodes one at
+# a time while it works. Started by `make upgrade` (scripts/upgrade.sh), which builds both images; published ports are random and on the loopback address.
+name: tl-upgrade
+
+x-env: &env
+  TASKLANE_DATABASE_URL: postgres://tl:tl@postgres:5432/tasklane?sslmode=disable
+  TASKLANE_ADMIN_EMAIL: admin@example.com
+  TASKLANE_ADMIN_PASSWORD: adminpass1
+  TASKLANE_BASE_URL: http://localhost
+  TASKLANE_SHUTDOWN_DRAIN_DELAY: ${UPGRADE_DRAIN:-3s}
+
+x-node: &node
+  environment: *env
+  depends_on:
+    postgres: {condition: service_healthy}
+  stop_grace_period: 30s
+  ports: ["127.0.0.1::8080"]
+
+services:
+  postgres:
+    image: postgres:16@sha256:2586e2a95d1c9b31cb2967feb562948f7d364854453d703039b6efa45fe48417
+    environment: {POSTGRES_USER: tl, POSTGRES_PASSWORD: tl, POSTGRES_DB: tasklane}
+    ports: ["127.0.0.1::5432"]
+    command: ["postgres", "-c", "fsync=off", "-c", "max_connections=300"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U tl -d tasklane"], interval: 2s, timeout: 3s, retries: 30}
+
+  old1: {<<: *node, image: "${UPGRADE_OLD_IMAGE:?set by scripts/upgrade.sh}"}
+  old2: {<<: *node, image: "${UPGRADE_OLD_IMAGE}"}
+  new1: {<<: *node, image: "${UPGRADE_NEW_IMAGE:?set by scripts/upgrade.sh}"}
+  new2: {<<: *node, image: "${UPGRADE_NEW_IMAGE}"}
+  migrate-new:
+    image: "${UPGRADE_NEW_IMAGE}"
+    command: ["migrate"]
+    environment: *env
+    restart: "no"
+    profiles: ["tools"]
+    depends_on:
+      postgres: {condition: service_healthy}

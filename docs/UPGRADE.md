@@ -83,3 +83,14 @@ node that never answers makes the pause abort at its drain deadline (the scope r
 During a rolling upgrade, while any live node is older than the release that acknowledges, this behaviour is a gate (`pause_barrier`) that stays
 off: the pause then gives the other nodes the fixed moment it always gave them to see the lease. The gate turns on by itself once every live node
 is new enough (see the cluster version gate above); `GET /api/v1/admin/cluster` shows it.
+
+## Rolling upgrades, tested
+
+`make upgrade` (`scripts/upgrade.sh`, Docker required) proves the procedure on the real binaries: it builds the previous release from a throwaway checkout
+(`scripts/upgrade-from`, or `UPGRADE_FROM=<commit or tag>`) and the current tree, starts two old nodes behind a small load balancer that routes only to nodes
+passing `/readyz`, runs twelve simulated people (saves with idempotent save ids, reads, searches, comments, and sockets that reconnect with jitter), and
+then does what an operator does: `tasklane migrate` with the new release while the old nodes serve (the expand step), replaces the first node (the new
+one joins, the old one is stopped and drains), checks the mixed cluster (two versions live, the behaviour that needs the new release still off, a pause
+still works), replaces the second, and checks that the gate turned on by itself and that a pause now waits for the acknowledgements of both nodes.
+It fails if fewer than 99.5% of requests succeed after one retry, if the 95th percentile latency passes one second, if any change a person was told was
+saved is missing at the end, or if a socket stays down for more than 15 seconds.

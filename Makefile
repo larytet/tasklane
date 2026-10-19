@@ -1,7 +1,7 @@
 GO ?= go
 export TASKLANE_TEST_DATABASE_URL ?= postgres://tl:tl@localhost:55432/tasklane
 
-.PHONY: build test vet db notice dist perf e2e e2e-update interop interop-matrix
+.PHONY: build test vet db notice dist perf e2e e2e-update interop interop-matrix upgrade
 build:
 	$(GO) build -o bin/tasklane ./cmd/tasklane
 vet:
@@ -39,3 +39,7 @@ interop:
 # every supported Redis or Valkey and OpenSearch combination (nightly)
 interop-matrix:
 	./scripts/interop-matrix.sh
+
+# rolling upgrade from the previous release to this one under simulated load, two nodes behind a load balancer (needs Docker)
+upgrade:
+	./scripts/upgrade.sh
