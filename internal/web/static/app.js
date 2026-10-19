@@ -389,32 +389,47 @@
 
   // ---------- ticket thread ----------
   const draftKey = (key, f) => 'tl-draft:' + S.me.id + ':' + key + ':' + f;
-  // A draft of a very large text is kept in three keys (the part before the window being edited, the window, the part after), so that typing rewrites only the
-  // small middle one; the main key says so. Anything else is one key holding the whole draft.
+  // A draft of a very large text is kept in pieces (PERF-09): the part before the window being edited and the part after it in chunks of 64 KB, and the window
+  // in one key of its own, so that typing rewrites only the small one; the main key says how many chunks there are. Anything else is one key with the whole draft.
+  const CHUNK = 65536;
   const partKey = (key, f, p) => draftKey(key, f) + ':' + p;
   function localDraft(key, f) {
     try {
       const d = JSON.parse(localStorage.getItem(draftKey(key, f)));
       if (d && d.parts) {
-        const hh = localStorage.getItem(partKey(key, f, 'h')), m = localStorage.getItem(partKey(key, f, 'm')), t = localStorage.getItem(partKey(key, f, 't'));
-        return hh == null || m == null || t == null ? null : { body: hh + m + t, base_seq: d.base_seq, at: d.at };
+        const read = (name, n) => { let out = ''; for (let i = 0; i < n; i++) { const x = localStorage.getItem(partKey(key, f, name + i)); if (x == null) return null; out += x; } return out; };
+        const hh = read('h', d.hn), t = read('t', d.tn), m = localStorage.getItem(partKey(key, f, 'm'));
+        return hh == null || t == null || m == null ? null : { body: hh + m + t, base_seq: d.base_seq, at: d.at };
       }
       return d;
     } catch (e) { return null; }
   }
   function setLocalDraft(key, f, v) {
     try {
-      for (const p of ['h', 'm', 't']) localStorage.removeItem(partKey(key, f, p));
+      const prefix = draftKey(key, f) + ':';
+      for (const k of Object.keys(localStorage)) if (k.startsWith(prefix)) localStorage.removeItem(k);
       if (v) localStorage.setItem(draftKey(key, f), JSON.stringify(v)); else localStorage.removeItem(draftKey(key, f));
     } catch (e) { /* storage unavailable */ }
   }
-  function setLocalDraftParts(key, f, parts, meta, last) {
-    try {
-      if (parts.h !== last.h) { localStorage.setItem(partKey(key, f, 'h'), parts.h); last.h = parts.h; }
-      if (parts.t !== last.t) { localStorage.setItem(partKey(key, f, 't'), parts.t); last.t = parts.t; }
-      localStorage.setItem(partKey(key, f, 'm'), parts.m);
-      localStorage.setItem(draftKey(key, f), JSON.stringify({ parts: true, base_seq: meta.base_seq, at: meta.at }));
-    } catch (e) { /* storage unavailable */ }
+  // The writer of a windowed draft: stage() queues the chunks of the outside parts that differ from what is stored, pump() writes one per timer tick (each a
+  // couple of milliseconds, not one block of a megabyte), drain() writes what is left at once, and commit() writes the window and the main key.
+  function draftWriter(key, f) {
+    const w = { last: {}, queue: [], counts: { h: 0, t: 0 }, timer: 0 };
+    const put = ([k, c]) => { try { if (c === null) { localStorage.removeItem(k); delete w.last[k]; } else { localStorage.setItem(k, c); w.last[k] = c; } } catch (e) { /* storage unavailable */ } };
+    w.stage = (name, str) => {
+      const n = Math.max(1, Math.ceil(str.length / CHUNK));
+      for (let i = 0; i < n; i++) { const c = str.slice(i * CHUNK, (i + 1) * CHUNK), k = partKey(key, f, name + i); if (w.last[k] !== c) w.queue.push([k, c]); }
+      for (let i = n; i < w.counts[name]; i++) w.queue.push([partKey(key, f, name + i), null]);
+      w.counts[name] = n;
+      w.pump();
+    };
+    w.pump = () => { if (w.timer || !w.queue.length) return; w.timer = setTimeout(() => { w.timer = 0; if (w.queue.length) put(w.queue.shift()); w.pump(); }, 0); };
+    w.drain = () => { clearTimeout(w.timer); w.timer = 0; while (w.queue.length) put(w.queue.shift()); };
+    w.commit = (mid, meta) => {
+      w.drain();
+      try { localStorage.setItem(partKey(key, f, 'm'), mid); localStorage.setItem(draftKey(key, f), JSON.stringify({ parts: true, hn: w.counts.h, tn: w.counts.t, base_seq: meta.base_seq, at: meta.at })); } catch (e) { /* storage unavailable */ }
+    };
+    return w;
   }
 
   // Prev/next in a ticket (PERF-08): while a ticket is open the two neighbours in the list it was opened from are fetched in the background and kept
@@ -763,6 +778,7 @@
       const LARGE = 200000, WIN = 12000;
       let head = '', tail = '';
       const windowed = ed.body.length > LARGE;
+      const writer = windowed ? draftWriter(key, 'description') : null;
       const ta = h('textarea', { 'aria-label': 'Description editor', value: windowed ? '' : ed.body });
       const bars = h('div', { class: 'chips', role: 'group', 'aria-label': 'Move through the text' });
       const kb = n => Math.max(1, Math.round(n / 1024)) + ' KB';
@@ -771,6 +787,7 @@
         if (s0 > 0) { const nl = full.indexOf('\n', s0); if (nl >= 0 && nl < e0) s0 = nl + 1; }
         if (e0 < full.length) { const nl = full.lastIndexOf('\n', e0); if (nl >= s0) e0 = nl + 1; }
         head = full.slice(0, s0); tail = full.slice(e0); ta.value = full.slice(s0, e0);
+        if (writer) { writer.stage('h', head); writer.stage('t', tail); } // written in the background, a chunk at a time
         paintBars();
       }
       function paintBars() {
@@ -795,11 +812,10 @@
         // every 2 s while typing goes on, not 2 s after it stops: a timer restarted by each key would never fire for someone who does not pause (E3, SPEC 21)
         if (!st.localTimer) st.localTimer = setTimeout(flushLocal, 2000);
       });
-      const lastParts = {};
       const flushLocal = () => {
         st.localTimer = 0;
         if (!st.editing || !st.dirty) return;
-        if (windowed) setLocalDraftParts(key, 'description', { h: head, m: ta.value, t: tail }, { base_seq: ed.baseSeq, at: new Date().toISOString() }, lastParts);
+        if (windowed) writer.commit(ta.value, { base_seq: ed.baseSeq, at: new Date().toISOString() });
         else setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() });
         state.textContent = 'Draft saved';
       };

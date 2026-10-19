@@ -75,7 +75,7 @@ test('PERF-09: typing in a 1 MB document on a throttled phone: the page\'s own h
   expect(r.n).toBeGreaterThan(50);
   expect(r.worst).toBeLessThan(16); // the page's own handling of a keystroke: within the budget
   expect(opened).toBeLessThan(100); // a large text is edited a window at a time (STATUS M5.60)
-  expect(r.gap).toBeLessThan(150);  // the longest block is the first autosave writing the part of the text outside the window (about 45 ms here); the budget is 16 ms, not met
+  expect(r.gap).toBeLessThan(16 + 4);   // the budget: nothing blocks the main thread for more than a frame (the 4 ms is the timer measuring it)
 });
 
 // PERF-08: moving to the next or previous ticket of the list one is reading is served from what the page already fetched: no request is made for it and
@@ -229,7 +229,7 @@ test('PERF-09: a large text edited in windows is saved whole, and its draft surv
   await editor.pressSequentially('ZZZ');
   await page.waitForTimeout(2600); // the local draft is written
   const parts = await page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('tl-draft')).length);
-  expect(parts).toBe(4); // the main key and the three parts
+  expect(parts).toBeGreaterThanOrEqual(4); // the main key, the window and the chunks outside it
   await page.reload(); // a crash
   await expect(page.getByText(/Draft|Continue editing/).first()).toBeVisible();
   await page.getByRole('button', { name: 'Continue editing' }).click();
