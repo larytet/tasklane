@@ -139,6 +139,9 @@ func (s *Service) AutoArchive(ctx context.Context, limit int) (int, error) {
 	sys := Actor{Label: "auto-archive", Admin: true}
 	n := 0
 	for _, r := range todo {
+		if i := strings.LastIndex(r.key, "-"); i > 0 && s.blockedBy(ctx, r.key[:i]) != nil {
+			continue // a pause covers the project: stand still instead of waiting out the admission time for every issue; the next pass archives it
+		}
 		if _, err := s.ArchiveIssue(ctx, sys, r.key); err == nil {
 			n++
 		}

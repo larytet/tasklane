@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/egress"
+	"github.com/larytet/tasklane/internal/testutil/gitmock"
 )
 
 // PAUSE-13 (SPEC 18.2): background workers in a paused scope stand still. An automation rule whose trigger happened before the pause does
@@ -197,5 +199,74 @@ func TestPAUSE13_InboundMailIsDeferredNotQuarantined(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	if r := e.ingest(true, raw); r.Outcome != "accepted" || len(e.comments()) != 1 {
 		t.Fatalf("after the pause: %+v, %d comment(s)", r, len(e.comments()))
+	}
+}
+
+// A code event (a push with a smart commit) for a repository mapped to a paused project stays queued, and its commands run after the pause
+// instead of being recorded as skipped for good.
+func TestPAUSE13_GitEventsWaitForThePause(t *testing.T) {
+	r := newCodeRig(t)
+	e := r.e
+	is := e.Issue("redirect", "")
+	start, _ := trans(t, e, e.Alice, is.Key, "Start progress")
+	e.Svc.Transition(ctx, e.Alice, is.Key, start, nil)
+	r.link(t, "octo", e.Alice)
+	r.smart(t, "default_branch")
+	lease, err := e.Svc.RequestPause(ctx, e.Admin, domain.PauseIn{Scope: "project:ABC", Owner: "import:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := is.Key + " #comment fixed the redirect"
+	r.push(t, "main", "e1e1e1e1", gitmock.GHCommitBy("e1e1e1e1", msg, "octo", "octo@example.com", t0))
+	if len(r.comments(is.Key)) != 0 || len(r.smartRuns(is.Key)) != 0 {
+		t.Fatalf("a smart commit ran in a paused project: %q", r.smartRuns(is.Key))
+	}
+	var queued int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM git_inbox WHERE processed_at IS NULL AND attempts=0`).Scan(&queued)
+	if queued != 1 {
+		t.Fatalf("%d delivery(ies) queued with no attempt spent, want 1", queued)
+	}
+	if err := e.Svc.ReleasePause(ctx, e.Admin, lease.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if n, err := e.Svc.ProcessGitInbox(ctx, 10); err != nil || n != 1 {
+		t.Fatalf("after the pause: %d %v", n, err)
+	}
+	if got := r.smartRuns(is.Key); len(got) != 1 || !strings.HasPrefix(got[0], "#comment applied") {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Auto-archive leaves a paused project alone without waiting out the admission time for every issue, and archives after the pause.
+func TestPAUSE13_AutoArchiveWaitsForThePause(t *testing.T) {
+	r := newFields(t)
+	e := r.e
+	old := mk(t, e, e.Alice, "Task", "resolved long ago", "")
+	resolveIssue(t, r, old)
+	e.Store.Pool.Exec(ctx, `UPDATE issue SET resolved_at=$2 WHERE key=$1`, old, e.Svc.Now().AddDate(0, 0, -40))
+	days := 30
+	if err := e.Svc.SetArchivePolicy(ctx, e.Admin, "ABC", &days); err != nil {
+		t.Fatal(err)
+	}
+	domain.PauseAdmitWait = 2 * time.Second
+	defer func() { domain.PauseAdmitWait = 150 * time.Millisecond }()
+	lease, err := e.Svc.RequestPause(ctx, e.Admin, domain.PauseIn{Scope: "project:ABC", Owner: "restore:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if n, err := e.Svc.AutoArchive(ctx, 100); err != nil || n != 0 {
+		t.Fatalf("archived %d issue(s) in a paused project: %v", n, err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("waited %s for the pause instead of standing still", d)
+	}
+	if err := e.Svc.ReleasePause(ctx, e.Admin, lease.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if n, err := e.Svc.AutoArchive(ctx, 100); err != nil || n != 1 {
+		t.Fatalf("after the pause: %d %v", n, err)
 	}
 }

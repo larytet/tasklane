@@ -404,6 +404,9 @@ func (s *Service) ProcessGitInbox(ctx context.Context, limit int) (int, error) {
 	for _, it := range items {
 		p, _ := git.ByName(it.prov)
 		evs, perr := p.Parse(it.e, it.payload)
+		if perr == nil && s.gitEventsPaused(ctx, it.conn, evs) {
+			continue // a pause covers a project the events belong to: workers stand still (SPEC 18.2); the delivery stays queued and no attempt is spent
+		}
 		if perr == nil {
 			perr = s.applyGitEvents(ctx, it.conn, evs, true)
 		}
@@ -416,6 +419,28 @@ func (s *Service) ProcessGitInbox(ctx context.Context, limit int) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// gitEventsPaused reports whether a pause covers any project mapped to a repository the events are about.
+func (s *Service) gitEventsPaused(ctx context.Context, connID string, evs []git.Event) bool {
+	seen := map[string]bool{}
+	for _, e := range evs {
+		name := strings.ToLower(e.Repo)
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		ri, err := s.repoFor(ctx, connID, e.Repo)
+		if err != nil || ri == nil {
+			continue
+		}
+		for key := range ri.projects {
+			if s.blockedBy(ctx, key) != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func trimErr(err error) string {
