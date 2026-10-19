@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/larytet/tasklane/internal/config"
 	"github.com/larytet/tasklane/internal/domain"
@@ -132,5 +133,63 @@ func upgradePreflightCmd(ctx context.Context, cfg config.Config) {
 	if blockers > 0 {
 		fmt.Printf("%d blocker(s)\n", blockers)
 		os.Exit(1)
+	}
+}
+
+// upgradeWaitCmd is `tasklane upgrade wait [--timeout DURATION]`: the step after the nodes are replaced. It waits until no live node of
+// an older release is left and at least one live node runs this one, then says whether `migrate finalize` has anything to apply. Exit 1
+// on the time-out, naming the nodes still on the old release.
+func upgradeWaitCmd(ctx context.Context, cfg config.Config) {
+	timeout := 10 * time.Minute
+	if len(os.Args) == 5 && os.Args[3] == "--timeout" {
+		d, err := time.ParseDuration(os.Args[4])
+		if err != nil {
+			log.Fatalf("--timeout: %v", err)
+		}
+		timeout = d
+	} else if len(os.Args) != 3 {
+		log.Fatal("usage: tasklane upgrade wait [--timeout DURATION]")
+	}
+	st := mustOpen(ctx, cfg)
+	defer st.Close()
+	svc := domain.New(st.Pool)
+	mine := releaseVersion()
+	end := time.Now().Add(timeout)
+	for {
+		old, err := olderLiveNodes(ctx, svc, mine)
+		ns, _ := svc.ClusterNodes(ctx)
+		current := 0
+		for _, n := range ns {
+			if n.Live && domain.CompareVersions(n.Version, mine) >= 0 {
+				current++
+			}
+		}
+		if err == nil && len(old) == 0 && current > 0 {
+			plan, _ := st.Plan(ctx)
+			held := 0
+			for _, p := range plan {
+				if p.Held {
+					held++
+				}
+			}
+			fmt.Printf("every live node (%d) runs %s or newer; %d held migration(s) wait for `tasklane migrate finalize`\n", current, mine, held)
+			return
+		}
+		if time.Now().After(end) {
+			var b strings.Builder
+			for _, n := range old {
+				fmt.Fprintf(&b, " %s (%s)", n.ID, n.Version)
+			}
+			if b.Len() == 0 {
+				b.WriteString(" (no live node runs this release yet)")
+			}
+			fmt.Printf("timed out after %s; still waiting for:%s\n", timeout, b.String())
+			os.Exit(1)
+		}
+		select {
+		case <-ctx.Done():
+			os.Exit(1)
+		case <-time.After(time.Second):
+		}
 	}
 }

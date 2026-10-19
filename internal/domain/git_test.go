@@ -484,7 +484,7 @@ func TestGIT_BackfillGitHubReadsOnlyAndRespectsRateLimitsAndETags(t *testing.T) 
 	}
 	// a primary rate limit that resets at once is waited out; the sync completes
 	api.SetETag(`"v2"`)
-	api.RateLimit(1, 403, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": fmt.Sprint(time.Now().Add(-time.Minute).Unix())})
+	api.RateLimit(1, 403, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": fmt.Sprint(e.Clock.Now().Add(-time.Minute).Unix())})
 	if _, err := e.Svc.SyncGitRepo(ctx, e.Admin, r.repo.ID); err != nil {
 		t.Fatalf("a rate limit that has already reset stopped the sync: %v", err)
 	}

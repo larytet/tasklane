@@ -419,8 +419,8 @@ func (s *Service) queueAccountMail(ctx context.Context, u User) {
 	link := strings.TrimRight(s.Mail.BaseURL, "/") + "/"
 	text := "-- Reply above this line --\r\n\r\nAn account was created for you on Tasklane.\r\nSign in at " + link + " with this email address.\r\nAsk the person who invited you for your initial password.\r\n"
 	htm := `<div style="font-family:system-ui,sans-serif;font-size:14px"><p>An account was created for you on Tasklane.</p><p><a href="` + html.EscapeString(link) + `">Sign in</a> with this email address. Ask the person who invited you for your initial password.</p></div>`
-	s.DB.Exec(ctx, `INSERT INTO mail_message(idempotency_key,recipient_id,recipient,subject,message_id,body_text,body_html) VALUES($1,$2,$3,'Your Tasklane account',$4,$5,$6) ON CONFLICT DO NOTHING`,
-		"account:"+u.ID, u.ID, (&netmail.Address{Name: u.Name, Address: u.Email}).String(), fmt.Sprintf("<account.%s@%s>", u.ID, s.Mail.Domain), text, htm)
+	s.DB.Exec(ctx, `INSERT INTO mail_message(idempotency_key,recipient_id,recipient,subject,message_id,body_text,body_html,next_attempt_at) VALUES($1,$2,$3,'Your Tasklane account',$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+		"account:"+u.ID, u.ID, (&netmail.Address{Name: u.Name, Address: u.Email}).String(), fmt.Sprintf("<account.%s@%s>", u.ID, s.Mail.Domain), text, htm, s.Now())
 }
 
 // SendMailOnce sends due mail. A row is leased before sending (so two nodes never send the same one), the

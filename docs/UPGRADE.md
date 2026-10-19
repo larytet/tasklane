@@ -120,3 +120,5 @@ that was acknowledged must be stored and applied exactly once and its commit lin
 ## Preflight
 
 `tasklane upgrade preflight [--backup DIR]` changes nothing. It prints the migrations the new binary would apply now and the ones held for `finalize`, every live node with its version (older: to replace; newer than this binary: blocker), whether the schema is inside the range the binary runs on, and the procedure in order (backup, `migrate`, replace nodes one at a time, `migrate finalize`). It exits 1 when something blocks.
+
+`tasklane upgrade wait [--timeout 10m]` is the step after the nodes are replaced: it waits until no live node of an older release is left and at least one runs this one, then says how many held migrations wait for `migrate finalize`. On the time-out it exits 1 and names the nodes still on the old release, so a script can run `migrate`, replace the nodes, `upgrade wait`, and only then `migrate finalize`.

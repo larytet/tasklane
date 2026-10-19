@@ -305,8 +305,8 @@ func (s *Service) PortalRequestCodeChecked(ctx context.Context, projectKey, emai
 	url := strings.TrimRight(s.Mail.BaseURL, "/") + "/portal/" + strings.ToUpper(projectKey) + "?token=" + link
 	text := fmt.Sprintf("-- Reply above this line --\r\n\r\nYour code for the %s portal is %s\r\nIt works once and expires in 10 minutes.\r\nOr open this link: %s\r\n\r\nIf you did not ask for this, ignore this message.\r\n", name, code, url)
 	htm := `<div style="font-family:system-ui,sans-serif;font-size:14px"><p>Your code for the ` + html.EscapeString(name) + ` portal is <b>` + code + `</b>. It works once and expires in 10 minutes.</p><p><a href="` + html.EscapeString(url) + `">Sign in with this link</a></p><p>If you did not ask for this, ignore this message.</p></div>`
-	if _, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,recipient,subject,message_id,body_text,body_html,kind) VALUES($1,$2,$3,$4,$5,$6,'portal-code') ON CONFLICT DO NOTHING`,
-		fmt.Sprintf("portal-code:%d", id), addr, "Your sign-in code", fmt.Sprintf("<portal-code.%d@%s>", id, s.Mail.Domain), text, htm); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,recipient,subject,message_id,body_text,body_html,kind,next_attempt_at) VALUES($1,$2,$3,$4,$5,$6,'portal-code',$7) ON CONFLICT DO NOTHING`,
+		fmt.Sprintf("portal-code:%d", id), addr, "Your sign-in code", fmt.Sprintf("<portal-code.%d@%s>", id, s.Mail.Domain), text, htm, s.Now()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

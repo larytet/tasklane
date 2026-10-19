@@ -90,4 +90,16 @@ func TestUPG07_PreflightAndTheFinalizeGuard(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "NEWER than this binary") {
 		t.Fatalf("newer node: exit %d\n%s", code, out)
 	}
+	// wait: an older live node holds it until the time-out; once that node is gone and one of this release is there, it finishes
+	pool.Exec(ctx, `UPDATE cluster_node SET version='0.0.1', seen_at=now()`)
+	pool.Exec(ctx, `INSERT INTO cluster_node(id,version) VALUES('new-1','99.0.0')`) // a node of this release is already up: the older one still holds the wait
+	out, code = run("upgrade", "wait", "--timeout", "2s")
+	if code != 1 || !strings.Contains(out, "old-1 (0.0.1)") {
+		t.Fatalf("wait beside an older node: exit %d\n%s", code, out)
+	}
+	pool.Exec(ctx, `DELETE FROM cluster_node WHERE id='old-1'`)
+	out, code = run("upgrade", "wait", "--timeout", "5s")
+	if code != 0 || !strings.Contains(out, "every live node (1) runs") {
+		t.Fatalf("wait after the replacement: exit %d\n%s", code, out)
+	}
 }

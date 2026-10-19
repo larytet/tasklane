@@ -101,9 +101,9 @@ func (s *Service) queueCustomerMail(ctx context.Context, tx pgx.Tx, e notifyEven
 			continue // the confirmation is for the person who made it
 		}
 		m := s.composeCustomer(ctx, tx, id, e, e.Payload.Key, pkey, summary, what, body, r)
-		tag, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,issue_id,recipient_id,customer_id,recipient,internal,subject,message_id,in_reply_to,refs,body_text,body_html,kind,reply_to)
-			VALUES($1,$2,NULL,$3,$4,false,$5,$6,$7,$8,$9,$10,'customer',$11) ON CONFLICT (idempotency_key) DO NOTHING`,
-			fmt.Sprintf("cust:%d:%s", e.ID, r.id), id, r.id, (&netmail.Address{Name: r.name, Address: r.email}).String(), m.Subject, m.MessageID, m.InReplyTo, m.Refs, m.Text, m.HTML, m.ReplyTo)
+		tag, err := tx.Exec(ctx, `INSERT INTO mail_message(idempotency_key,issue_id,recipient_id,customer_id,recipient,internal,subject,message_id,in_reply_to,refs,body_text,body_html,kind,reply_to,next_attempt_at)
+			VALUES($1,$2,NULL,$3,$4,false,$5,$6,$7,$8,$9,$10,'customer',$11,$12) ON CONFLICT (idempotency_key) DO NOTHING`,
+			fmt.Sprintf("cust:%d:%s", e.ID, r.id), id, r.id, (&netmail.Address{Name: r.name, Address: r.email}).String(), m.Subject, m.MessageID, m.InReplyTo, m.Refs, m.Text, m.HTML, m.ReplyTo, s.Now())
 		if err != nil {
 			return n, err
 		}

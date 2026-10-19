@@ -102,10 +102,14 @@ func main() {
 	case "serve":
 		serve(ctx, cfg)
 	case "upgrade":
-		if len(os.Args) < 3 || os.Args[2] != "preflight" {
-			log.Fatal("usage: tasklane upgrade preflight [--backup DIR]")
+		switch {
+		case len(os.Args) >= 3 && os.Args[2] == "preflight":
+			upgradePreflightCmd(ctx, cfg)
+		case len(os.Args) >= 3 && os.Args[2] == "wait":
+			upgradeWaitCmd(ctx, cfg)
+		default:
+			log.Fatal("usage: tasklane upgrade preflight [--backup DIR] | tasklane upgrade wait [--timeout DURATION]")
 		}
-		upgradePreflightCmd(ctx, cfg)
 	case "migrate":
 		st := mustOpen(ctx, cfg)
 		defer st.Close()
