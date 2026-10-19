@@ -85,6 +85,26 @@ func TestPAUSE02_TheCommandsBackUpAndRestoreARealDatabase(t *testing.T) {
 	if out, err := run(dbB, "restore", bk); err == nil || !strings.Contains(out, "not empty") {
 		t.Fatalf("a restore over data: %v\n%s", err, out)
 	}
+	// over a running instance, on purpose: the current state is written next to the backup first, and the data becomes the backup's
+	pool.Exec(ctx, `INSERT INTO app_user(email,name) VALUES('later@example.com','Later')`)
+	out, err = run(dbB, "restore", "--replace", bk)
+	if err != nil || !strings.Contains(out, "writing a backup of the current state to") || !strings.Contains(out, "restart the servers") {
+		t.Fatalf("restore --replace: %v\n%s", err, out)
+	}
+	pool.QueryRow(ctx, `SELECT count(*) FROM app_user WHERE email='later@example.com'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("a person made after the backup survived --replace")
+	}
+	before, _ := filepath.Glob(bk + ".before-restore-*")
+	if len(before) != 1 {
+		t.Fatalf("the backup of the replaced state: %v", before)
+	}
+	if out, err := run("nonexistent_db", "verify-backup", before[0]); err != nil || !strings.HasPrefix(out, "ok:") {
+		t.Fatalf("the backup of the replaced state does not verify: %v\n%s", err, out)
+	}
+	if out, err := run(dbB, "restore", "--no-safety-backup", bk); err == nil || !strings.Contains(out, "usage") {
+		t.Fatalf("--no-safety-backup without --replace: %v\n%s", err, out)
+	}
 	// a damaged backup is refused before a database is touched, with a nonzero exit
 	f, _ := os.OpenFile(filepath.Join(bk, "data", "app_user.copy"), os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString("x\n")

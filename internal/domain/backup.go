@@ -428,6 +428,10 @@ func fkOrder(ctx context.Context, db *pgxpool.Pool, tables []string) ([]string, 
 // Restore loads a backup into an EMPTY database (the schema must be migrated: the command does that first). The backup's schema may be
 // older than this release's (added columns take their defaults) but not newer.
 func (s *Service) Restore(ctx context.Context, dir string) (*RestoreReport, error) {
+	return s.restore(ctx, dir, false)
+}
+
+func (s *Service) restore(ctx context.Context, dir string, replace bool) (*RestoreReport, error) {
 	man, err := VerifyBackup(dir)
 	if err != nil {
 		return nil, err
@@ -440,7 +444,7 @@ func (s *Service) Restore(ctx context.Context, dir string) (*RestoreReport, erro
 	}
 	var users, issues int
 	s.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM issue)`).Scan(&users, &issues)
-	if users > 0 || issues > 0 {
+	if !replace && (users > 0 || issues > 0) {
 		return nil, invalid("this database is not empty (%d people, %d issues): restore into a new, empty database and switch to it", users, issues)
 	}
 	have, err := s.backupTables(ctx, s.DB)
@@ -597,6 +601,66 @@ func (s *Service) Restore(ctx context.Context, dir string) (*RestoreReport, erro
 	// outbox consumers continue from their stored cursors, so derived data (notifications, search) catches up from the log; the search
 	// index is rebuilt with `tasklane reindex`
 	rep.Warnings = append(rep.Warnings, "people must sign in again, and `tasklane reindex` rebuilds the search index if you use OpenSearch")
+	return rep, nil
+}
+
+// RestoreOverOpts says how a restore over a live instance protects what it replaces.
+type RestoreOverOpts struct {
+	SafetyDir string        // a new directory that receives a backup of the current state first, so the restore can itself be undone; empty: none
+	Hold      time.Duration // how long writers may be held for the whole job (default 30 minutes)
+	Drain     time.Duration // how long in-flight writes may take to finish (default 60 seconds)
+}
+
+// RestoreOver replaces the data of a running instance with a backup (SPEC 17.4: "a restore runs in pause mode"). The instance is paused first
+// (writers wait, then get 503 with Retry-After; reads and drafts continue), a backup of the current state is taken when asked, the backup is
+// loaded in one transaction, so a failure leaves the data exactly as it was, and the pause ends whatever happens. Everyone is signed out
+// (sessions are not part of a backup), and the audit log records that the restore started, ended, and what it replaced.
+func (s *Service) RestoreOver(ctx context.Context, a Actor, dir string, o RestoreOverOpts) (*RestoreReport, error) {
+	if !a.Admin {
+		return nil, ErrForbidden
+	}
+	if _, err := VerifyBackup(dir); err != nil { // a damaged backup is refused before anything is paused or touched
+		return nil, err
+	}
+	if o.Hold <= 0 {
+		o.Hold = 30 * time.Minute
+	}
+	if o.Drain <= 0 {
+		o.Drain = 60 * time.Second
+	}
+	lease, err := s.RequestPause(ctx, a, PauseIn{Scope: "instance", Owner: "restore", Mode: "pause", DrainWaitMS: int(o.Drain / time.Millisecond), HoldMS: int(o.Hold / time.Millisecond)})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		s.DB.Exec(context.WithoutCancel(ctx), `DELETE FROM pause_lease WHERE id=$1`, lease.ID)
+		s.leases(context.WithoutCancel(ctx), true)
+	}()
+	// other nodes learn of the pause from the database within a moment; give them that moment before the data moves
+	select {
+	case <-time.After(2 * pauseCacheTTL):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	audit := func(action string, detail map[string]any) {
+		s.DB.Exec(context.WithoutCancel(ctx), `INSERT INTO audit_event(actor_label,action,target,detail) VALUES($1,$2,'instance',$3)`, a.Label, action, jsonMarshal(detail))
+	}
+	var issues, users int
+	s.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM app_user),(SELECT count(*) FROM issue)`).Scan(&users, &issues)
+	audit("restore.started", map[string]any{"backup": filepath.Base(dir), "replacing_people": users, "replacing_issues": issues, "safety_backup": o.SafetyDir != ""})
+	if o.SafetyDir != "" {
+		if _, err := s.Backup(ctx, o.SafetyDir, BackupOpts{}); err != nil {
+			audit("restore.aborted", map[string]any{"reason": "the safety backup failed: " + err.Error()})
+			return nil, fmt.Errorf("the backup of the current state failed, so nothing was replaced: %w", err)
+		}
+	}
+	rep, err := s.restore(ctx, dir, true)
+	if err != nil {
+		audit("restore.aborted", map[string]any{"reason": err.Error()})
+		return rep, err
+	}
+	audit("restore.completed", map[string]any{"backup": filepath.Base(dir), "tables": rep.Tables, "rows": rep.Rows, "attachments": rep.Blobs})
+	rep.Warnings = append(rep.Warnings, "restart the servers that use this database: they may hold settings and caches from the data that was replaced")
 	return rep, nil
 }
 

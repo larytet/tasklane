@@ -39,3 +39,22 @@ A backup holds password hashes, the credentials Tasklane stores sealed with the 
 ## Compatibility
 
 `BackupVersion` is raised when a later release could not be read by an earlier reader. The tests keep a backup of every released version (`internal/domain/testdata/backups/vN`) and restore it into the current schema; raising the version without adding a fixture fails them (see UPGRADE.md, Data formats).
+
+## Restoring over a running instance
+
+`tasklane restore DIR` goes into an empty database. To replace the data of an instance that is running, say so:
+
+```
+tasklane restore --replace DIR
+```
+
+What it does, in order: verifies the backup (a damaged one is refused before anything else); takes an instance-wide pause, so writers wait
+a moment and then get `503` with `Retry-After` while reads, drafts and presence carry on (the Admin page shows who holds the pause); writes a
+backup of the current state to `DIR.before-restore-<time>` (skip with `--no-safety-backup`; with it, a restore is itself undoable by restoring
+that directory the same way); loads the backup in one transaction, so a failure leaves the data exactly as it was; and ends the pause whatever
+happened. Everyone is signed out (sessions are not part of a backup). The audit log records `restore.completed` (and `restore.aborted` with the
+reason when it fails); the restored log carries on from the backup's last entry.
+
+Another job's pause (an import into a project, a migration) blocks it: the restore refuses rather than overlap. Servers that were running keep
+settings and caches from the data that was replaced: restart them afterwards. The command does not migrate the database (a running instance
+already has its schema); a backup from a newer release than the running schema is refused.

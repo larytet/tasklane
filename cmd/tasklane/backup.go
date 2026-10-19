@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/larytet/tasklane/internal/blob"
 	"github.com/larytet/tasklane/internal/config"
@@ -83,15 +85,42 @@ func verifyBackupCmd() {
 // restoreCmd is `tasklane restore DIR`: into an empty database (it is migrated first). To replace a running instance, restore into a
 // new database and point the servers at it.
 func restoreCmd(ctx context.Context, cfg config.Config) {
-	if len(os.Args) != 3 {
-		log.Fatal("usage: tasklane restore DIR   (into the empty database named by database_url; stop the servers that use it)")
+	args := os.Args[2:]
+	replace, safety := false, true
+	var dir string
+	for _, a := range args {
+		switch a {
+		case "--replace":
+			replace = true
+		case "--no-safety-backup":
+			safety = false
+		default:
+			if strings.HasPrefix(a, "-") || dir != "" {
+				log.Fatal("usage: tasklane restore [--replace [--no-safety-backup]] DIR")
+			}
+			dir = a
+		}
 	}
-	if _, err := domain.VerifyBackup(os.Args[2]); err != nil { // before the database is touched
+	if dir == "" || (!replace && !safety) {
+		log.Fatal("usage: tasklane restore DIR   (into the empty database named by database_url; stop the servers that use it)\n       tasklane restore --replace [--no-safety-backup] DIR   (over a running instance: writers are paused, a backup of the current state is written next to DIR first, everyone is signed out)")
+	}
+	if _, err := domain.VerifyBackup(dir); err != nil { // before the database is touched
 		log.Fatalf("restore: %v", err)
 	}
-	st, svc := cliService(ctx, cfg, true)
+	st, svc := cliService(ctx, cfg, !replace) // a restore target is a new database, which needs its schema; a live instance already has it
 	defer st.Close()
-	rep, err := svc.Restore(ctx, os.Args[2])
+	var rep *domain.RestoreReport
+	var err error
+	if replace {
+		o := domain.RestoreOverOpts{}
+		if safety {
+			o.SafetyDir = strings.TrimRight(dir, "/") + ".before-restore-" + time.Now().UTC().Format("20060102T150405Z")
+			fmt.Printf("writing a backup of the current state to %s first\n", o.SafetyDir)
+		}
+		rep, err = svc.RestoreOver(ctx, domain.Actor{Admin: true, Label: "tasklane restore"}, dir, o)
+	} else {
+		rep, err = svc.Restore(ctx, dir)
+	}
 	if err != nil {
 		log.Fatalf("restore: %v", err)
 	}
