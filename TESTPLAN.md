@@ -939,6 +939,8 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | LIVE-09 (E3 at scale, M5.42) | partial | `E3_SESSIONS=120 npx playwright test drafts_e3`: 120 browser sessions (close, crash, reload), none lost more than the 3.5 s allowance, none lost the draft; rule of three: under 2.5 % per session at 95 %. The SPEC 21 sample (3x10^6 sessions) is not run |
 | LIVE-09 (soak, M5.43) | partial | `make soak DURATION=60m`: 1,045,440 saves, 589,765 editing sessions, zero E1/E2/E3/E4 errors and no gaps; below 2.87e-6 (saves) and 5.09e-6 (sessions) at 95 %; 0.35 % of the saves and 19.7 % of the sessions SPEC 21 asks for |
 | LIVE-12 | done (reconciler) | `TestLIVE12_ReconcilerDetectsInjectedErrors`: injected lost save (E1), stale overwrite (E2), duplicate application (E4), sequence gap and extra application are all detected, with no false positive on a clean history. The injection into a live system with production counters is pending |
+| PERF-06 (M5.55) | done | e2e `perf.spec.js`: 109 ms to the sign-in form, 13 scripts, 75.7 KB gzipped over the wire |
+| PERF-09 (M5.55) | partial | e2e `perf.spec.js`: handlers 1.2 ms at 4x (met); editor on the screen in 1.3 s and the main thread blocked 1.3 s in a 1 MB document (browser layout of the text area; budget 100 ms and 16 ms not met, guards only) |
 | DUR-05 (M5.54) | done | e2e `pause_skew.spec.js`: `DUR-05` (refused save keeps the text, says why, the corrected text saves) and `UPG-08` (a too-old client keeps its draft) |
 | LIFE-17 (M5.54) | done | `TestLIFE17_TrashOptionalAndHistoryRoundTrip`, `TestEXP01_RoundTripJSONAndCSV` |
 | EXP-05 (M5.54) | partial | `TestUPG09_*`: golden bundles of the current format; no released version to keep |
