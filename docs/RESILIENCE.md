@@ -31,3 +31,9 @@ answers after the work was committed, and delivers some requests twice. While th
 and returns, and PostgreSQL restarts. At the end the reconciler of SPEC 21 judges each text: no acknowledged save missing (E1), none that replaced a newer
 change (E2), none duplicated (E4), and no gap in the sequence. A client that does not reuse its save id on a retry fails it (E4 and gaps), which is how the
 measurement is known to be able to fail.
+
+### Packet-level faults
+
+`make chaos` also runs the same campaign with the faults made by [toxiproxy](https://github.com/Shopify/toxiproxy) between the people and each node, at the TCP level and not
+in an HTTP wrapper: every packet delayed with jitter in both directions, the answer stream cut into small pieces, 5% of connections reset as they open, and 5% of
+answers cut off after 40 bytes. The node kill, the Redis stop and the PostgreSQL restart are in the same run, and the reconciler judges the shared texts the same way.

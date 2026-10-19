@@ -35,6 +35,12 @@ services:
     image: redis:7@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
     healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 2s, timeout: 3s, retries: 30}
 
+  # TCP-level faults between the people and the nodes (scripts/chaos.sh): proxies to new1 and new2 whose toxics the test sets through the REST port
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    ports: ["127.0.0.1::8474", "127.0.0.1::8081", "127.0.0.1::8082"]
+    profiles: ["tools"]
+
   old1: {<<: *node, image: "${UPGRADE_OLD_IMAGE:?set by scripts/upgrade.sh}"}
   old2: {<<: *node, image: "${UPGRADE_OLD_IMAGE}"}
   new1: {<<: *node, image: "${UPGRADE_NEW_IMAGE:?set by scripts/upgrade.sh}"}

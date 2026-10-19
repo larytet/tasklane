@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -92,7 +93,13 @@ func (c *chaosNet) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // TestCHAOS03_NetworkFaultsAndNodeFailures: the LIVE-09 campaign through a network with 300 ms of latency, lost requests, lost answers and
 // duplicated requests, while a node is killed, Redis stops, and PostgreSQL restarts. The reconciler judges every shared text at the end.
-func TestCHAOS03_NetworkFaultsAndNodeFailures(t *testing.T) {
+func TestCHAOS03_NetworkFaultsAndNodeFailures(t *testing.T) { campaign(t, false) }
+
+// TestCHAOS05_PacketLevelFaults: the same campaign with the faults made by toxiproxy between the people and each node: TCP connections reset as they open,
+// answers cut off after a few bytes, every packet delayed with jitter, and the stream sliced into small pieces.
+func TestCHAOS05_PacketLevelFaults(t *testing.T) { campaign(t, true) }
+
+func campaign(t *testing.T, tcp bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	compose(t, "up -d --wait postgres redis")
@@ -112,20 +119,79 @@ func TestCHAOS03_NetworkFaultsAndNodeFailures(t *testing.T) {
 	defer func() { pool.Close() }()
 
 	l := newLB()
-	l.add(new1)
-	l.add(new2)
+	var workURL1, workURL2 string
+	noKeepAlive = tcp
+	defer func() { noKeepAlive = false }()
+	if tcp {
+		compose(t, "up -d toxiproxy")
+		api := "http://127.0.0.1:" + port(t, "toxiproxy", 8474)
+		eventually(t, "toxiproxy", 30*time.Second, func() bool {
+			r, err := http.Get(api + "/version")
+			if err == nil {
+				r.Body.Close()
+			}
+			return err == nil
+		})
+		post := func(path string, body map[string]any) {
+			b, _ := json.Marshal(body)
+			r, err := http.Post(api+path, "application/json", strings.NewReader(string(b)))
+			if err != nil || r.StatusCode/100 != 2 {
+				t.Fatalf("toxiproxy %s: %v %v", path, err, r)
+			}
+			r.Body.Close()
+		}
+		for i, up := range []string{"new1:8080", "new2:8080"} {
+			name := fmt.Sprintf("n%d", i+1)
+			post("/proxies", map[string]any{"name": name, "listen": fmt.Sprintf("0.0.0.0:808%d", i+1), "upstream": up})
+			post("/proxies/"+name+"/toxics", map[string]any{"name": "delay-down", "type": "latency", "stream": "downstream", "toxicity": 1.0, "attributes": map[string]any{"latency": 120, "jitter": 100}})
+			post("/proxies/"+name+"/toxics", map[string]any{"name": "delay-up", "type": "latency", "stream": "upstream", "toxicity": 1.0, "attributes": map[string]any{"latency": 120, "jitter": 100}})
+			post("/proxies/"+name+"/toxics", map[string]any{"name": "slice", "type": "slicer", "stream": "downstream", "toxicity": 1.0, "attributes": map[string]any{"average_size": 64, "size_variation": 32, "delay": 200}})
+			post("/proxies/"+name+"/toxics", map[string]any{"name": "reset", "type": "reset_peer", "stream": "upstream", "toxicity": 0.05, "attributes": map[string]any{"timeout": 0}})
+			post("/proxies/"+name+"/toxics", map[string]any{"name": "cut", "type": "limit_data", "stream": "downstream", "toxicity": 0.05, "attributes": map[string]any{"bytes": 40}})
+		}
+		workURL1 = "http://127.0.0.1:" + port(t, "toxiproxy", 8081)
+		workURL2 = "http://127.0.0.1:" + port(t, "toxiproxy", 8082)
+		l.addVia(workURL1, new1)
+		l.addVia(workURL2, new2)
+	} else {
+		l.add(new1)
+		l.add(new2)
+	}
 	go l.check(ctx)
 	lnr, err := newListener()
 	if err != nil {
 		t.Fatal(err)
 	}
 	net_ := &chaosNet{next: l, delay: 300 * time.Millisecond, pDropReq: 0.05, pDropResp: 0.05, pDup: 0.03, rng: rand.New(rand.NewSource(11))}
+	if tcp { // the faults are in the proxies
+		net_ = &chaosNet{next: l, delay: time.Millisecond, rng: rand.New(rand.NewSource(11))}
+	}
 	srv := &http.Server{Handler: net_}
 	go srv.Serve(lnr)
 	defer srv.Close()
 	front := "http://" + lnr.Addr().String()
 	direct := adminClient(t, new1) // setup is made directly: the chaos is for the people
-	eventually(t, "the balancer to see both nodes", 20*time.Second, func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.backends[new1].ok && l.backends[new2].ok })
+	b1, b2 := new1, new2
+	if tcp {
+		b1, b2 = workURL1, workURL2
+	}
+	eventually(t, "the balancer to see both nodes", 20*time.Second, func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.backends[b1].ok && l.backends[b2].ok })
+	if tcp { // the faults are real: ordinary requests through the proxies fail some of the time
+		failed := 0
+		for i := 0; i < 200; i++ {
+			c := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
+			if r, err := c.Get(workURL1 + "/api/v1/system/status"); err != nil {
+				failed++
+			} else {
+				io.Copy(io.Discard, r.Body)
+				r.Body.Close()
+			}
+		}
+		t.Logf("%d of 200 plain requests through the proxy failed", failed)
+		if failed == 0 {
+			t.Fatal("toxiproxy injected no failures")
+		}
+	}
 
 	direct.mustJSON(t, "POST", "/api/v1/projects", map[string]string{"key": "CHS", "name": "Chaos"}, 201)
 	const people, texts = 12, 3
@@ -162,23 +228,33 @@ func TestCHAOS03_NetworkFaultsAndNodeFailures(t *testing.T) {
 	phase("a bad network", 15*time.Second)
 	// a node dies with saves in flight, and comes back
 	compose(t, "kill new1")
-	l.remove(new1)
+	if !tcp {
+		l.remove(new1)
+	}
 	phase("one node down", 10*time.Second)
 	compose(t, "up -d new1")
 	new1 = "http://127.0.0.1:" + port(t, "new1", 8080)
 	waitReady(t, new1, 90*time.Second)
-	l.add(new1)
+	if tcp {
+		l.mu.Lock()
+		l.backends[workURL1].health = new1 // the work still goes by the proxy, whose upstream is the service name
+		l.mu.Unlock()
+	} else {
+		l.add(new1)
+	}
 	phase("both nodes again", 8*time.Second)
 	compose(t, "stop redis")
 	phase("Redis down", 6*time.Second)
 	compose(t, "start redis")
 	phase("Redis back", 6*time.Second)
+	restartAt := time.Now()
 	compose(t, "restart postgres")
 	pool.Close()
 	pool, _ = pgxpool.New(ctx, dbURL())
 	for _, n := range []string{new1, new2} {
 		waitReady(t, n, 120*time.Second)
 	}
+	t.Logf("PostgreSQL was away for %s; the balancer had nowhere to send work for %s in all", time.Since(restartAt).Round(time.Second), l.noneTotal.Round(time.Second))
 	phase("after the database restart", 12*time.Second)
 
 	close(stop)
@@ -215,7 +291,7 @@ func TestCHAOS03_NetworkFaultsAndNodeFailures(t *testing.T) {
 	if total < 200 {
 		t.Errorf("only %d appends were acknowledged in the whole run", total)
 	}
-	if net_.droppedResp.Load() == 0 || net_.droppedReq.Load() == 0 || net_.dups.Load() == 0 {
+	if !tcp && (net_.droppedResp.Load() == 0 || net_.droppedReq.Load() == 0 || net_.dups.Load() == 0) {
 		t.Errorf("the network did not inject every fault it was asked to")
 	}
 }

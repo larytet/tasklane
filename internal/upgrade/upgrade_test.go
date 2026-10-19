@@ -76,15 +76,18 @@ func waitReady(t testing.TB, base string, within time.Duration) {
 // ---- the load balancer: round robin over the nodes that pass /readyz, as a real one does; a node that begins to stop fails it at once
 
 type lb struct {
-	mu       sync.Mutex
-	backends map[string]*backend
-	rr       int
+	noneSince time.Time     // when the last backend went unready, while none is
+	noneTotal time.Duration // how long in all the balancer had nowhere to send work
+	mu        sync.Mutex
+	backends  map[string]*backend
+	rr        int
 }
 
 type backend struct {
-	u     *url.URL
-	proxy *httputil.ReverseProxy
-	ok    bool
+	u      *url.URL
+	proxy  *httputil.ReverseProxy
+	ok     bool
+	health string // where readiness is asked when it differs from where the work goes (a faulty path to the node is not an unready node)
 }
 
 func newLB() *lb { return &lb{backends: map[string]*backend{}} }
@@ -93,8 +96,19 @@ func (l *lb) add(base string) {
 	u, _ := url.Parse(base)
 	p := httputil.NewSingleHostReverseProxy(u)
 	p.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) { w.WriteHeader(http.StatusBadGateway) }
+	if noKeepAlive {
+		p.Transport = &http.Transport{DisableKeepAlives: true}
+	}
 	l.mu.Lock()
 	l.backends[base] = &backend{u: u, proxy: p}
+	l.mu.Unlock()
+}
+
+// addVia sends the work through a proxy and asks readiness of the node itself.
+func (l *lb) addVia(workURL, healthURL string) {
+	l.add(workURL)
+	l.mu.Lock()
+	l.backends[workURL].health = healthURL
 	l.mu.Unlock()
 }
 
@@ -111,7 +125,13 @@ func (l *lb) check(ctx context.Context) {
 		l.mu.Unlock()
 		for _, n := range names {
 			ok := false
-			if r, err := hc.Get(n + "/readyz"); err == nil {
+			target := n
+			l.mu.Lock()
+			if b := l.backends[n]; b != nil && b.health != "" {
+				target = b.health
+			}
+			l.mu.Unlock()
+			if r, err := hc.Get(target + "/readyz"); err == nil {
 				ok = r.StatusCode == 200
 				r.Body.Close()
 			}
@@ -135,7 +155,14 @@ func (l *lb) pick() *backend {
 		}
 	}
 	if len(ok) == 0 {
+		if l.noneSince.IsZero() {
+			l.noneSince = time.Now()
+		}
 		return nil
+	}
+	if !l.noneSince.IsZero() {
+		l.noneTotal += time.Since(l.noneSince)
+		l.noneSince = time.Time{}
 	}
 	sort.Strings(ok)
 	l.rr++
@@ -195,9 +222,16 @@ type user struct {
 	st         *stats
 }
 
+// noKeepAlive makes every request open its own connection: faults injected per connection (toxiproxy) are then rolled for every request.
+var noKeepAlive bool
+
 func newClient(base string) *http.Client {
 	jar, _ := cookiejar.New(nil)
-	return &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	c := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	if noKeepAlive {
+		c.Transport = &http.Transport{DisableKeepAlives: true}
+	}
+	return c
 }
 
 func (u *user) do(method, path string, body any, retry bool) (int, []byte, error) {
@@ -614,6 +648,7 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	}
 	// PostgreSQL restarts under the working crowd: failures in that window are expected and counted apart; the nodes recover by themselves and no acknowledged change is lost
 	st.excluded.Store(true)
+	restartAt := time.Now()
 	compose(t, "restart postgres")
 	pool.Close()
 	pool, err = pgxpool.New(ctx, "postgres://tl:tl@127.0.0.1:"+port(t, "postgres", 5432)+"/tasklane?sslmode=disable") // the published port is new after a restart
@@ -623,6 +658,7 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	for _, n := range []string{new1, new2} {
 		waitReady(t, n, 90*time.Second)
 	}
+	t.Logf("PostgreSQL was away for %s (until both nodes were ready again); the balancer had nowhere to send work for %s in all", time.Since(restartAt).Round(time.Second), l.noneTotal.Round(time.Second))
 	time.Sleep(3 * time.Second)
 	st.excluded.Store(false)
 	okBefore := st.ok.Load()
@@ -1057,7 +1093,7 @@ func (a *appender) run(stop <-chan struct{}, rng *rand.Rand) {
 		body, seq, ok := a.current()
 		saveID := fmt.Sprintf("camp-%d-%d-%d", a.n, i, rng.Int63())
 		done := false
-		for attempt := 0; attempt < 600 && !done; attempt++ {
+		for attempt, giveUp := 0, time.Now().Add(4*time.Minute); time.Now().Before(giveUp) && !done; attempt++ { // a database restart can take longer than any fixed number of attempts
 			if attempt > 0 {
 				time.Sleep(time.Duration(50+rng.Intn(200)) * time.Millisecond)
 			}
