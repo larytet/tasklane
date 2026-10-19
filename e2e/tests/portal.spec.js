@@ -509,3 +509,28 @@ test('PORT-05: files on a request: off until the portal allows them, within its 
   await expect(page.getByRole('link', { name: 'crack.txt' })).toHaveCount(0);
   expect((await ctx.request.delete(`/api/v1/portal/${pk}/attachments/${gid}`, { headers: H })).status()).toBe(403);
 });
+
+test('PORT-05: the sign-in check: a code is mailed only after the browser does the work; a direct call without it is refused', async ({ browser }) => {
+  const adm = await browser.newContext();
+  adm.on('page', watch);
+  expect((await adm.request.post('/api/v1/login', { headers: H, data: { email: 'admin@example.com', password: 'adminpass1' } })).status()).toBe(200);
+  const pk = 'K' + uniq().toUpperCase();
+  expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Checked desk' } })).status()).toBe(201);
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true, captcha_bits: 12 } })).status()).toBe(200);
+  const addr = `kim.${uniq()}@customer.example`;
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  // a script that skips the check gets nothing
+  const raw = await ctx.request.post(`/api/v1/portal/${pk}/code`, { headers: H, data: { email: addr } });
+  expect(raw.status()).toBe(400);
+  expect((await raw.json()).error).toContain('check');
+  const page = await ctx.newPage();
+  await page.goto('/portal/' + pk);
+  await page.getByLabel('Your email address').fill(addr);
+  await page.getByRole('button', { name: 'Email me a code' }).click();
+  await expect(page.getByText('a code is on its way')).toBeVisible();
+  const { code } = await sentTo(addr);
+  await page.getByLabel('The six digit code we sent you').fill(code);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
+  await expect(page.getByText('Signed in as')).toContainText(addr);
+});

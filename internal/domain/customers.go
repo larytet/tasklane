@@ -49,6 +49,7 @@ type PortalInfo struct {
 	Privacy string           `json:"privacy_notice,omitempty"`
 	Consent string           `json:"consent_text,omitempty"`
 	Files   *PortalFileRules `json:"files,omitempty"` // present when customers may add files
+	Check   bool             `json:"check,omitempty"` // the sign-in asks for a proof of work first
 }
 
 // PortalFileRules is what the portal tells a customer about the files it takes.
@@ -70,6 +71,8 @@ type PortalPolicy struct {
 	AttachMaxMB    int      `json:"attach_max_mb"`
 	AttachMaxFiles int      `json:"attach_max_files"` // customer files per request
 	AttachClasses  []string `json:"attach_classes"`   // image, document or log; archives and video are never accepted from customers
+	// CaptchaBits is the difficulty of the proof of work asked before a sign-in code is mailed: 0 off, otherwise 8 to 24 leading zero bits
+	CaptchaBits int `json:"captcha_bits"`
 }
 
 func randomToken(n int) string { return randURLToken(n) }
@@ -97,8 +100,8 @@ func normEmail(e string) (string, error) {
 // same: not found.
 func (s *Service) portalOf(ctx context.Context, projectKey string) (org, pid string, set PortalPolicy, name string, err error) {
 	var allow, block []string
-	err = s.DB.QueryRow(ctx, `SELECT p.org_id::text,p.id::text,p.name,ps.enabled,ps.welcome,ps.privacy_notice,ps.consent_text,ps.allow,ps.block,ps.attach_enabled,ps.attach_max_mb,ps.attach_max_files,ps.attach_classes FROM project p JOIN portal_setting ps ON ps.project_id=p.id
-		WHERE p.key=$1 AND NOT p.archived`, strings.ToUpper(projectKey)).Scan(&org, &pid, &name, &set.Enabled, &set.Welcome, &set.Privacy, &set.Consent, &allow, &block, &set.AttachEnabled, &set.AttachMaxMB, &set.AttachMaxFiles, &set.AttachClasses)
+	err = s.DB.QueryRow(ctx, `SELECT p.org_id::text,p.id::text,p.name,ps.enabled,ps.welcome,ps.privacy_notice,ps.consent_text,ps.allow,ps.block,ps.attach_enabled,ps.attach_max_mb,ps.attach_max_files,ps.attach_classes,ps.captcha_bits FROM project p JOIN portal_setting ps ON ps.project_id=p.id
+		WHERE p.key=$1 AND NOT p.archived`, strings.ToUpper(projectKey)).Scan(&org, &pid, &name, &set.Enabled, &set.Welcome, &set.Privacy, &set.Consent, &allow, &block, &set.AttachEnabled, &set.AttachMaxMB, &set.AttachMaxFiles, &set.AttachClasses, &set.CaptchaBits)
 	if err != nil || !set.Enabled {
 		return "", "", set, "", ErrNotFound
 	}
@@ -113,6 +116,7 @@ func (s *Service) PortalInfoFor(ctx context.Context, projectKey string) (PortalI
 		return PortalInfo{}, err
 	}
 	info := PortalInfo{Project: strings.ToUpper(projectKey), Name: name, Welcome: set.Welcome, Privacy: set.Privacy, Consent: set.Consent}
+	info.Check = set.CaptchaBits > 0
 	if set.AttachEnabled {
 		info.Files = &PortalFileRules{MaxMB: set.AttachMaxMB, MaxFiles: set.AttachMaxFiles, Classes: set.AttachClasses}
 	}
@@ -176,8 +180,8 @@ func (s *Service) GetPortalPolicy(ctx context.Context, a Actor, projectKey strin
 		return PortalPolicy{}, ErrForbidden
 	}
 	p := PortalPolicy{Allow: []string{}, Block: []string{}, AttachMaxMB: 10, AttachMaxFiles: 5, AttachClasses: []string{"image", "document", "log"}}
-	err = s.DB.QueryRow(ctx, `SELECT enabled,welcome,privacy_notice,consent_text,allow,block,attach_enabled,attach_max_mb,attach_max_files,attach_classes FROM portal_setting WHERE project_id=$1`, pid).
-		Scan(&p.Enabled, &p.Welcome, &p.Privacy, &p.Consent, &p.Allow, &p.Block, &p.AttachEnabled, &p.AttachMaxMB, &p.AttachMaxFiles, &p.AttachClasses)
+	err = s.DB.QueryRow(ctx, `SELECT enabled,welcome,privacy_notice,consent_text,allow,block,attach_enabled,attach_max_mb,attach_max_files,attach_classes,captcha_bits FROM portal_setting WHERE project_id=$1`, pid).
+		Scan(&p.Enabled, &p.Welcome, &p.Privacy, &p.Consent, &p.Allow, &p.Block, &p.AttachEnabled, &p.AttachMaxMB, &p.AttachMaxFiles, &p.AttachClasses, &p.CaptchaBits)
 	if err != nil && err != pgx.ErrNoRows {
 		return p, err
 	}
@@ -216,14 +220,17 @@ func (s *Service) SetPortalPolicy(ctx context.Context, a Actor, projectKey strin
 	if in.AttachMaxFiles < 1 || in.AttachMaxFiles > 20 {
 		return PortalPolicy{}, invalid("the number of files per request is between 1 and 20")
 	}
+	if in.CaptchaBits != 0 && (in.CaptchaBits < 8 || in.CaptchaBits > 24) {
+		return PortalPolicy{}, invalid("the sign-in check is off (0) or between 8 and 24 bits; 16 is a good start")
+	}
 	for _, c := range in.AttachClasses {
 		if c != "image" && c != "document" && c != "log" {
 			return PortalPolicy{}, invalid("customers may be allowed images, documents and logs; %q is not one of them", c)
 		}
 	}
-	_, err = s.DB.Exec(ctx, `INSERT INTO portal_setting(project_id,enabled,welcome,privacy_notice,consent_text,allow,block,attach_enabled,attach_max_mb,attach_max_files,attach_classes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (project_id) DO UPDATE SET enabled=$2,welcome=$3,privacy_notice=$4,consent_text=$5,allow=$6,block=$7,attach_enabled=$8,attach_max_mb=$9,attach_max_files=$10,attach_classes=$11`,
-		pid, in.Enabled, in.Welcome, in.Privacy, in.Consent, in.Allow, in.Block, in.AttachEnabled, in.AttachMaxMB, in.AttachMaxFiles, in.AttachClasses)
+	_, err = s.DB.Exec(ctx, `INSERT INTO portal_setting(project_id,enabled,welcome,privacy_notice,consent_text,allow,block,attach_enabled,attach_max_mb,attach_max_files,attach_classes,captcha_bits) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		ON CONFLICT (project_id) DO UPDATE SET enabled=$2,welcome=$3,privacy_notice=$4,consent_text=$5,allow=$6,block=$7,attach_enabled=$8,attach_max_mb=$9,attach_max_files=$10,attach_classes=$11,captcha_bits=$12`,
+		pid, in.Enabled, in.Welcome, in.Privacy, in.Consent, in.Allow, in.Block, in.AttachEnabled, in.AttachMaxMB, in.AttachMaxFiles, in.AttachClasses, in.CaptchaBits)
 	return in, err
 }
 
@@ -241,6 +248,11 @@ func (s *Service) portalNote(ctx context.Context, kind, subject string) {
 // PortalRequestCode mails a sign-in code and link to the address. The answer is the same whether or not the address is known or allowed;
 // only a limit says so (429), and a filled honeypot gets the same answer as success and sends nothing.
 func (s *Service) PortalRequestCode(ctx context.Context, projectKey, email, honeypot string, meta ClientMeta) error {
+	return s.PortalRequestCodeChecked(ctx, projectKey, email, honeypot, nil, meta)
+}
+
+// PortalRequestCodeChecked is PortalRequestCode with the solved sign-in check, when the portal asks for one.
+func (s *Service) PortalRequestCodeChecked(ctx context.Context, projectKey, email, honeypot string, captcha *CaptchaIn, meta ClientMeta) error {
 	org, _, set, name, err := s.portalOf(ctx, projectKey)
 	if err != nil {
 		return err
@@ -251,6 +263,9 @@ func (s *Service) PortalRequestCode(ctx context.Context, projectKey, email, hone
 	}
 	if honeypot != "" {
 		return nil
+	}
+	if err := s.verifyCaptcha(ctx, projectKey, set, captcha); err != nil {
+		return err
 	}
 	if s.portalCount(ctx, "code", addr, time.Hour) >= portalCodesPerHour || (meta.IP != "" && s.portalCount(ctx, "code-ip", meta.IP, time.Hour) >= portalCodesPerIP) {
 		return &LockedError{Until: s.Now().Add(time.Hour)}

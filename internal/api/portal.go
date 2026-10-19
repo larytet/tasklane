@@ -74,15 +74,21 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 		v, err := s.Svc.PortalInfoFor(r.Context(), r.PathValue("key"))
 		s.reply(w, v, err)
 	})
+	s.handle(mux, "GET /api/v1/portal/{key}/challenge", func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.NewPortalChallenge(r.Context(), r.PathValue("key"))
+		w.Header().Set("Cache-Control", "no-store")
+		s.reply(w, v, err)
+	})
 	s.handle(mux, "POST /api/v1/portal/{key}/code", s.portalPublic(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Email   string `json:"email"`
-			Website string `json:"website"` // the honeypot: a field people never see
+			Email   string            `json:"email"`
+			Website string            `json:"website"` // the honeypot: a field people never see
+			Check   *domain.CaptchaIn `json:"check"`
 		}
 		if !s.decode(w, r, &in) {
 			return
 		}
-		if err := s.Svc.PortalRequestCode(r.Context(), r.PathValue("key"), in.Email, in.Website, s.clientMeta(r)); err != nil {
+		if err := s.Svc.PortalRequestCodeChecked(r.Context(), r.PathValue("key"), in.Email, in.Website, in.Check, s.clientMeta(r)); err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				s.reply(w, ok, err)
 				return

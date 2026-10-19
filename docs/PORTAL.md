@@ -122,3 +122,13 @@ always as a download, never shown inline, and delete only what they sent (`DELET
 
 Privacy: a customer's export lists the files they sent, and erasing a customer removes them (the references are dropped so the collector frees
 the bytes, and the file names are replaced in the history of those requests).
+
+## The sign-in check
+
+An optional check before the portal mails a sign-in code, set with **Sign-in check** in the portal settings (`captcha_bits`: 0 is off, 8 to 24;
+16 costs a visitor's browser about a second). It is a proof of work rather than a picture puzzle, because the portal runs no third-party scripts
+and sends nothing about its visitors anywhere: the browser asks `GET /api/v1/portal/{key}/challenge`, searches for a counter that makes the
+SHA-256 of `challenge:counter` start with that many zero bits, and sends both with the request for a code (`check`). The server accepts a
+challenge it signed itself, for this portal, unexpired (5 minutes), made at the portal's current difficulty or harder, solved, and not used
+before. A failed check says so (400) and costs the address nothing against its hourly allowance; the honeypot still answers as if all were
+well. Scripts that call the API directly must do the same work.

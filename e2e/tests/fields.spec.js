@@ -42,8 +42,12 @@ test('custom fields: set in the create dialog, edited on the ticket, validated, 
   await dlg.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByLabel(sev)).toHaveValue('High');
   // edit on the ticket
-  await page.waitForLoadState('networkidle'); // the ticket re-renders as its panels load; edit once it is still
-  await page.getByLabel(sev).selectOption('Low');
+  // the ticket re-renders as its panels load: change the value and wait for the save itself before reloading (a reload that races the save loses it)
+  await expect(async () => {
+    const saved = page.waitForResponse(r => r.request().method() === 'PATCH' && /\/api\/v1\/issues\//.test(r.url()), { timeout: 3000 });
+    await page.getByLabel(sev).selectOption('Low');
+    expect((await saved).status()).toBe(200);
+  }).toPass({ timeout: 15000 });
   await expect(page.getByLabel(sev)).toHaveValue('Low');
   await page.reload();
   await expect(page.getByLabel(sev)).toHaveValue('Low');
