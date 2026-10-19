@@ -20,14 +20,14 @@ test('IMP: import an Asana export from the screen: a dry run changes nothing, th
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const call = async (method, path, data) => { const r = await ctx.request.fetch(path, { method, headers: H, data }); let b = null; try { b = await r.json(); } catch (e) { /* none */ } return { status: r.status(), body: b }; };
   const pk = 'I' + uniq().toUpperCase();
   expect((await call('POST', '/api/v1/projects', { key: pk, name: 'Imports' })).status).toBe(201);
   const countIssues = async () => (await call('GET', '/api/v1/issues?q=' + encodeURIComponent('project = ' + pk))).body.total;
 
   await page.reload(); // the page learns of the new project
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.getByText('More', { exact: true }).click();
   await page.getByRole('link', { name: 'Import', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Import from another tool' })).toBeVisible();
@@ -62,13 +62,13 @@ test('IMP: import any JSON from the screen through a path mapping; a bad mapping
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const call = async (method, path, data) => { const r = await ctx.request.fetch(path, { method, headers: H, data }); let b = null; try { b = await r.json(); } catch (e) { /* none */ } return { status: r.status(), body: b }; };
   const pk = 'J' + uniq().toUpperCase();
   expect((await call('POST', '/api/v1/projects', { key: pk, name: 'Json imports' })).status).toBe(201);
   const countIssues = async () => (await call('GET', '/api/v1/issues?q=' + encodeURIComponent('project = ' + pk))).body.total;
   await page.reload();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.getByText('More', { exact: true }).click();
   await page.getByRole('link', { name: 'Import', exact: true }).click();
   await page.getByLabel('Project', { exact: true }).selectOption(pk);

@@ -19,7 +19,7 @@ test('LIFE-09/10: delete shows a plan first, goes to the trash, is restorable fr
   await expect(dlg).toContainText('Warnings');
   expect((await jana.page.request.get(`/api/v1/issues/${key}/view`)).status()).toBe(200); // still there while the plan is shown
   await dlg.getByRole('button', { name: 'Apply' }).click();
-  await expect(jana.page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(jana.page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await expect(jana.page.getByText('Moved to the trash')).toBeVisible();
   // gone from lists and search, gone (410) when opened directly
   await (await tqlBox(jana.page)).fill(`key = ${key}`);

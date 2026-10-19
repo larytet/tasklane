@@ -543,7 +543,7 @@ test('PORT-01 (identity provider): a portal offers sign-in through its customers
   await ap.getByLabel('Email').fill('admin@example.com');
   await ap.getByLabel('Password').fill('adminpass1');
   await ap.getByRole('button', { name: 'Sign in' }).click();
-  await expect(ap.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(ap.getByRole('button', { name: 'Create new' })).toBeVisible();
   const pk = 'S' + uniq().toUpperCase();
   expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Sso desk' } })).status()).toBe(201);
   expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true } })).status()).toBe(200);

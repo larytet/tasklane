@@ -139,7 +139,7 @@ test('PERF-04: a board of 500 issues is usable in under 300 ms', async ({ browse
   const board = (await call('POST', `/api/v1/projects/${pk}/boards`, { name: 'Flow', kind: 'kanban' })).body;
   const page = await ctx.newPage();
   await page.goto('/');
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.evaluate(async ({ pk }) => { // 500 issues, twenty at a time
     const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
     for (let b = 0; b < 25; b++) {
@@ -150,7 +150,7 @@ test('PERF-04: a board of 500 issues is usable in under 300 ms', async ({ browse
   for (let run = 0; run < 3; run++) {
     await page.goto('about:blank');
     await page.goto('/');
-    await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
     // from the route change to the last card on the screen, measured inside the page
     await page.evaluate(() => { window.__board = undefined; });
     await page.evaluate(id => {

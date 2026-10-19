@@ -113,7 +113,7 @@ test('BACKLOG: plan with the move control, start and complete a sprint with a pr
   await bp.getByLabel('Email').fill('admin@example.com');
   await bp.getByLabel('Password').fill('adminpass1');
   await bp.getByRole('button', { name: 'Sign in' }).click();
-  await expect(bp.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(bp.getByRole('button', { name: 'Create new' })).toBeVisible();
   await bp.goto(`/#/backlog/${board.id}`);
   await bp.getByRole('button', { name: 'Start sprint' }).first().click();
   await expect(bp.getByRole('button', { name: 'Complete sprint' })).toBeVisible();
@@ -287,7 +287,7 @@ test('JIRA: a mirrored issue is read-only in the UI with an Edit in Jira link', 
     await p.getByLabel('Email').fill('admin@example.com');
     await p.getByLabel('Password').fill('adminpass1');
     await p.getByRole('button', { name: 'Sign in' }).click();
-    await expect(p.getByRole('button', { name: '+ Create' })).toBeVisible();
+    await expect(p.getByRole('button', { name: 'Create new' })).toBeVisible();
     await p.goto(`/#/issue/${key}-7`);
     await expect(p.getByLabel('Summary')).toHaveValue('Mirrored from the site');
     const banner = p.getByRole('status').filter({ hasText: 'Mirrored from Jira' });

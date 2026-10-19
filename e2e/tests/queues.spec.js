@@ -16,7 +16,7 @@ test('PORT: an administrator makes a queue and a canned response; an agent works
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const call = async (method, path, data) => { const r = await ctx.request.fetch(path, { method, headers: H, data }); let b = null; try { b = await r.json(); } catch (e) { /* none */ } return { status: r.status(), body: b }; };
   const pk = 'Q' + uniq().toUpperCase();
   expect((await call('POST', '/api/v1/projects', { key: pk, name: 'Queues' })).status).toBe(201);

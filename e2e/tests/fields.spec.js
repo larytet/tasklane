@@ -29,7 +29,8 @@ test('custom fields: set in the create dialog, edited on the ticket, validated, 
   await call('POST', `/api/v1/fields/${f2.id}/contexts`, { projects: ['ABC'], types: ['Story'] });
 
   const { page } = await newUser(browser, 'jana@example.com');
-  await page.getByRole('button', { name: '+ Create' }).click();
+  await page.getByRole('button', { name: 'Create new' }).click();
+  await page.getByRole('menuitem', { name: 'New issue' }).click();
   const dlg = page.getByRole('dialog');
   await dlg.getByLabel('Type').selectOption('Story');
   await dlg.getByLabel('Summary').fill('Has fields ' + uniq());
@@ -70,7 +71,8 @@ test('behavior rules: a field becomes required and another is hidden as the valu
   await call('POST', '/api/v1/behavior-rules', { name: 'note', project: 'ABC', type: 'Epic', when_field: 'priority', when_op: 'in', when_value: ['low', 'lowest'], action: 'hide', target: f2.key });
 
   const { page } = await newUser(browser, 'jana@example.com');
-  await page.getByRole('button', { name: '+ Create' }).click();
+  await page.getByRole('button', { name: 'Create new' }).click();
+  await page.getByRole('menuitem', { name: 'New issue' }).click();
   const dlg = page.getByRole('dialog');
   await dlg.getByLabel('Type').selectOption('Epic');
   await dlg.getByLabel('Summary').fill('Rules ' + uniq());

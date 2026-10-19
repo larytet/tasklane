@@ -40,7 +40,7 @@ async function newAccount(browser) {
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill('first-password-1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   return { page, email, ctx };
 }
 
@@ -74,7 +74,7 @@ test('SEC-04: two-factor enrolment, a second step at sign-in, and recovery codes
   // the next time step's code is accepted (clock drift is tolerated) and was never used
   await page.getByLabel('Authentication code').fill(totp(secret, Date.now() + 30000));
   await page.getByRole('button', { name: 'Verify' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   // a recovery code works once
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await page.getByLabel('Email').fill(email);
@@ -82,7 +82,7 @@ test('SEC-04: two-factor enrolment, a second step at sign-in, and recovery codes
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.getByLabel('Authentication code').fill(recovery[0]);
   await page.getByRole('button', { name: 'Verify' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.goto('/#/account');
   await expect(page.getByText('9 recovery codes are left.')).toBeVisible();
   // turning it off needs the password
@@ -106,7 +106,7 @@ test('SEC-04: sessions, API tokens and the password on the account page', async 
   await op.getByLabel('Email').fill(email);
   await op.getByLabel('Password').fill('first-password-1');
   await op.getByRole('button', { name: 'Sign in' }).click();
-  await expect(op.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(op.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.goto('/#/account');
   await expect(page.getByText('(this session)')).toBeVisible();
   const rows = page.getByRole('region', { name: 'Sessions' }).getByRole('listitem');
@@ -150,7 +150,7 @@ test('SEC-04: administrators set up single sign-on and SCIM tokens; the sign-in 
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.goto('/#/admin/identity');
   await expect(page.getByRole('heading', { name: 'Single sign-on (OpenID Connect, SAML and LDAP)' })).toBeVisible();
   const name = 'idp' + uniq();
@@ -204,7 +204,7 @@ test('SEC-04: an administrator sets up an LDAP directory; it is checked, listed 
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.goto('/#/admin/identity');
   await page.getByRole('button', { name: 'Add a provider' }).click();
   const dlg = page.getByRole('dialog');

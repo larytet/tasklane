@@ -24,9 +24,10 @@ for (const theme of ['dark', 'light']) {
       const u = await newUser(browser, 'jana@example.com');
       await u.page.addInitScript(t => localStorage.setItem('tl-theme', t), theme);
       await u.page.reload();
-      await expect(u.page.getByRole('button', { name: '+ Create' })).toBeVisible();
+      await expect(u.page.getByRole('button', { name: 'Create new' })).toBeVisible();
       await axe(u.page, 'issue list');
-      await u.page.getByRole('button', { name: '+ Create' }).click();
+      await u.page.getByRole('button', { name: 'Create new' }).click();
+      await u.page.getByRole('menuitem', { name: 'New issue' }).click();
       await expect(u.page.getByRole('dialog')).toBeVisible();
       await axe(u.page, 'create dialog');
       await u.page.keyboard.press('Escape');
@@ -73,7 +74,7 @@ test('UI-03: dark is the default, the stored choice wins, and a light user never
     obs.observe(document, { childList: true, subtree: true });
   });
   await page.reload();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   expect(await page.evaluate(() => window.__atBody), 'the theme when <body> appears (before first paint)').toBe('light');
   expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('light');
   // and the head script is what does it: it is a blocking script in <head>, before the stylesheet
@@ -89,11 +90,11 @@ for (const [name, w, h] of [['phone', 390, 800], ['tablet', 768, 1000], ['deskto
     const overflow = async () => u.page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
     for (const route of ['/', '/#/issue/ABC-1']) {
       await u.page.goto(route);
-      await expect(u.page.getByRole('button', { name: '+ Create' })).toBeVisible();
+      await expect(u.page.getByRole('button', { name: 'Create new' })).toBeVisible();
       const o = await overflow();
       expect(o.sw, `${route} overflows at ${w}px: ${o.sw} > ${o.cw}`).toBeLessThanOrEqual(o.cw);
     }
-    await expect(u.page.getByRole('button', { name: '+ Create' })).toBeInViewport();
+    await expect(u.page.getByRole('button', { name: 'Create new' })).toBeInViewport();
     await expect(u.page.getByRole('button', { name: 'Sign out' })).toBeInViewport();
     await u.page.getByRole('button', { name: 'Edit' }).click();
     await expect(u.page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport();
@@ -112,9 +113,10 @@ test('A11Y-02: create, open, comment and transition with the keyboard only', asy
   await page.keyboard.press('Tab');
   await page.keyboard.type(PASSWORD);
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
-  await page.getByRole('button', { name: '+ Create' }).focus();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create new' }).focus();
   await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter'); // the menu opens on its first item, New issue
   await expect(page.getByRole('dialog')).toBeVisible();
   // the dialog opens with focus inside it
   expect(await page.evaluate(() => !!document.activeElement.closest('[role=dialog]'))).toBe(true);
@@ -210,7 +212,7 @@ test('SEARCH: a list of 230 issues is shown in pages of 100', async ({ browser }
   expect((await ctx.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Paging' } })).status()).toBe(201);
   const page = await ctx.newPage();
   await page.goto('/');
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.evaluate(async ({ pk }) => {
     const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
     for (let b = 0; b < 23; b++) await Promise.all(Array.from({ length: 10 }, (_, i) => fetch('/api/v1/issues', { method: 'POST', headers: H, body: JSON.stringify({ project: pk, type: 'Task', summary: `paged ${b * 10 + i}` }) })));

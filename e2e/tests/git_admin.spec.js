@@ -18,7 +18,7 @@ test('GIT: the Git tab manages connections, visibility, linked accounts and rule
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const pk = 'G' + uniq();
   const r = await ctx.request.fetch('/api/v1/projects', { method: 'POST', headers: H, data: { key: pk, name: 'Git admin test' } });
   expect(r.status()).toBe(201);

@@ -149,7 +149,7 @@
     return h('div', { class: 'bar' },
       h('span', { class: 'brand', tabindex: 0, role: 'link', onclick: () => { location.hash = '#/'; }, onkeydown: e => { if (e.key === 'Enter') location.hash = '#/'; } }, 'Tasklane'),
       h('span', { class: 'search grow' }, q, seg),
-      h('button', { class: 'btn primary', onclick: createDialog }, '+ Create'),
+      plusMenu(),
       h('button', { class: 'btn ghost', id: 'bell', 'aria-label': 'Inbox', onclick: () => { location.hash = '#/inbox/unread'; } }, 'Inbox', h('span', { id: 'bell-n', class: 'badge', hidden: true })),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
       moreMenu(),
@@ -311,12 +311,187 @@
     return h('label', { class: 'cf-row' }, star, ctl.el, f.help_text ? h('span', { class: 'muted' }, f.help_text) : null);
   }
 
+  // The "+" menu (as on GitHub): everything a person can create, in one place. An item is shown only to people the server would
+  // let do it (the server stays the check); "c" opens New issue from anywhere that is not a text field.
+  function plusMenu() {
+    const me = S.me || {}, staff = !!(me.admin || me.org_admin);
+    const wrap = h('div', { class: 'topmore topplus' });
+    const btn = h('button', { class: 'btn primary', 'aria-label': 'Create new', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Create new (c for a new issue)' }, '+ ▾');
+    const list = h('div', { class: 'topmore-list', role: 'menu', 'aria-label': 'Create new', hidden: true });
+    const shut = (back) => { list.hidden = true; btn.setAttribute('aria-expanded', 'false'); if (back) btn.focus(); };
+    const item = (label, fn) => h('button', { class: 'topmore-item', role: 'menuitem', onclick: () => { shut(false); fn(); } }, label);
+    list.append(item('New issue', createDialog), staff ? item('New project', projectDialog) : null, item('New dashboard', dashboardDialog),
+      staff ? item('New user', userDialog) : null, me.admin ? item('New organization', organizationDialog) : null);
+    btn.addEventListener('click', () => {
+      const open = list.hidden; list.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+      if (open) list.querySelector('[role=menuitem]').focus();
+    });
+    wrap.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !list.hidden) { e.preventDefault(); shut(true); return; }
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !list.hidden) {
+        e.preventDefault();
+        const its = [...list.querySelectorAll('[role=menuitem]')], at = its.indexOf(document.activeElement);
+        its[(at + (e.key === 'ArrowDown' ? 1 : its.length - 1)) % its.length].focus();
+      }
+    });
+    wrap.addEventListener('focusout', e => { if (!wrap.contains(e.relatedTarget)) shut(false); });
+    wrap.append(btn, list);
+    return wrap;
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'c' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !S.me || !S.projects.length) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (document.querySelector('.scrim')) return; // a dialog is open already
+    e.preventDefault(); createDialog();
+  });
+  // a small dialog: a title, labelled fields, an error line, Cancel and a submit that returns the response; done runs on success
+  function formDialog(title, fields, submitLabel, submit, done) {
+    const msg = h('div', { class: 'err', role: 'alert' });
+    const go = h('button', { class: 'btn primary', onclick: async () => {
+      msg.textContent = ''; go.disabled = true;
+      try { const r = await submit(); if (r.status === 201 || r.status === 200) { close(); done(r.data); } else msg.textContent = (r.data && r.data.error) || 'Failed'; } finally { go.disabled = false; }
+    } }, submitLabel);
+    const close = modal(h('div', {}, h('h2', {}, title), h('div', { class: 'form-stack' }, fields), msg, h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), go)));
+    fields.forEach(f => f.addEventListener && f.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT' && ev.target.type !== 'checkbox') go.click(); }));
+    return close;
+  }
+  const field = (label, ctl) => h('label', { class: 'cf-row' }, h('span', { class: 'cf-name' }, label), ctl);
+  async function reloadProjects() { const b = await api('GET', '/api/v1/bootstrap'); if (b.status === 200) S.projects = b.data.projects; }
+
+  function projectDialog() {
+    const key = h('input', { type: 'text', 'aria-label': 'Project key', placeholder: 'ABC', maxlength: 10, autocapitalize: 'characters', style: 'text-transform:uppercase' });
+    const name = h('input', { type: 'text', 'aria-label': 'Project name', placeholder: 'My project', maxlength: 100 });
+    formDialog('New project', [field('Key (2 to 10 letters and digits; the prefix of its issues, such as ABC-1)', key), field('Name', name)], 'Create project',
+      () => api('POST', '/api/v1/projects', { key: key.value, name: name.value }),
+      async p => { await reloadProjects(); toast('Project ' + p.key + ' created'); location.hash = '#/?q=' + encodeURIComponent('project = ' + p.key) + '&syntax=tql'; route(); });
+  }
+  function dashboardDialog() {
+    const name = h('input', { type: 'text', 'aria-label': 'Dashboard name', placeholder: 'Team overview', maxlength: 100 });
+    const cols = h('select', { 'aria-label': 'Columns' }, [1, 2, 3].map(n => h('option', { value: n }, n + (n === 1 ? ' column' : ' columns'))));
+    cols.value = 2;
+    const shared = h('input', { type: 'checkbox', 'aria-label': 'Share with the organization' });
+    formDialog('New dashboard', [field('Name', name), field('Columns', cols), h('label', { class: 'cf-row' }, shared, ' Share with the organization')], 'Create dashboard',
+      () => api('POST', '/api/v1/dashboards', { name: name.value, columns: Number(cols.value), shared: shared.checked ? 'org' : 'private' }),
+      d => { location.hash = '#/dashboards/' + d.id; });
+  }
+  async function userDialog() {
+    const email = h('input', { type: 'email', 'aria-label': 'Email', placeholder: 'name@example.com' });
+    const name = h('input', { type: 'text', 'aria-label': 'Full name' });
+    const pw = h('input', { type: 'password', 'aria-label': 'Initial password', autocomplete: 'new-password' });
+    const admin = h('input', { type: 'checkbox', 'aria-label': 'Administrator' });
+    const org = h('select', { 'aria-label': 'Organization' });
+    const fields = [field('Email', email), field('Full name', name), field('Initial password', pw)];
+    if (S.me && S.me.admin) { // the instance administrator picks the organization; an organization administrator adds to their own
+      const r = await api('GET', '/api/v1/orgs');
+      for (const o of (r.status === 200 && r.data) || []) org.append(h('option', { value: o.id }, o.name));
+      if (org.children.length) fields.push(field('Organization', org));
+    }
+    fields.push(h('label', { class: 'cf-row' }, admin, ' Administrator'));
+    formDialog('New user', fields, 'Create user',
+      () => api('POST', '/api/v1/users', { email: email.value, name: name.value, password: pw.value, admin: admin.checked, org: org.value || '' }),
+      u => toast('User ' + (u.email || email.value) + ' created'));
+  }
+  function organizationDialog() {
+    const name = h('input', { type: 'text', 'aria-label': 'Organization name', placeholder: 'Acme Ltd', maxlength: 120 });
+    const email = h('input', { type: 'email', 'aria-label': 'Administrator email' });
+    const aname = h('input', { type: 'text', 'aria-label': 'Administrator name' });
+    const pw = h('input', { type: 'password', 'aria-label': 'Administrator initial password', autocomplete: 'new-password' });
+    formDialog('New organization', [field('Name', name), field('Administrator email', email), field('Administrator name', aname), field('Administrator initial password', pw)], 'Create organization',
+      () => api('POST', '/api/v1/orgs', { name: name.value, admin_email: email.value, admin_name: aname.value, admin_password: pw.value }),
+      o => toast('Organization ' + (o.name || name.value) + ' created'));
+  }
+
+  // One file to an issue: the ordinary request up to 8 MB; above that straight to the object store when the installation has one
+  // (direct returns null when it has not), else in resumable chunks. Reports why it failed with a toast and returns false.
+  async function uploadOne(key, f) {
+    if (f.size <= 8 << 20) {
+      const fd = new FormData(); fd.append('file', f, f.name || 'pasted.png');
+      const r = await fetch('/api/v1/issues/' + key + '/attachments', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane' } });
+      if (r.status === 201) return true;
+      toast((await r.json().catch(() => ({}))).error || 'Upload failed'); return false;
+    }
+    const d = await uploadDirect(key, f);
+    return d === null ? uploadResumable(key, f) : d;
+  }
+  // Direct upload (S3 backend): presigned PUTs, three parts at a time, each retried; the server verifies at completion.
+  async function uploadDirect(key, f) {
+    const s = await api('POST', '/api/v1/issues/' + key + '/uploads/direct', { name: f.name, size: f.size, type: f.type });
+    if (s.status === 400 && /ordinary upload/.test((s.data && s.data.error) || '')) return null;
+    if (s.status !== 201) { toast((s.data && s.data.error) || 'Upload failed'); return false; }
+    const du = s.data;
+    const put = async (url, body) => {
+      for (let i = 0; i < 3; i++) {
+        try { const r = await fetch(url, { method: 'PUT', body }); if (r.ok) return r; } catch (e) { /* retry */ }
+        await new Promise(r => setTimeout(r, 500 * (i + 1)));
+      }
+      throw new Error('the store did not accept the upload');
+    };
+    let parts = [];
+    try {
+      if (du.mode === 'single') await put(du.url, f);
+      else {
+        const queue = du.parts.slice(); parts = [];
+        const worker = async () => {
+          for (let p = queue.shift(); p; p = queue.shift()) {
+            const r = await put(p.url, f.slice((p.n - 1) * du.part_size, p.n * du.part_size));
+            const etag = r.headers.get('ETag');
+            if (!etag) throw new Error('the bucket must expose the ETag header to browsers (CORS)');
+            parts.push({ n: p.n, etag });
+          }
+        };
+        await Promise.all([worker(), worker(), worker()]);
+      }
+    } catch (e) {
+      await api('DELETE', '/api/v1/uploads/direct/' + du.id);
+      toast('Upload interrupted: ' + e.message);
+      return false;
+    }
+    const c = await api('POST', '/api/v1/uploads/direct/' + du.id + '/complete', { parts });
+    if (c.status !== 201) { toast((c.data && c.data.error) || 'Upload failed'); return false; }
+    return true;
+  }
+  async function uploadResumable(key, f) {
+    const s = await api('POST', '/api/v1/issues/' + key + '/uploads', { name: f.name, size: f.size, type: f.type });
+    if (s.status !== 201) { toast(s.data.error || 'Upload failed'); return false; }
+    const id = s.data.id, CH = 8 << 20; let off = 0, fails = 0;
+    while (off < f.size) {
+      try {
+        const r = await fetch('/api/v1/uploads/' + id, { method: 'PATCH', credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane', 'Upload-Offset': String(off) }, body: f.slice(off, off + CH) });
+        if (r.status === 409) off = Number(r.headers.get('Upload-Offset')); else if (r.ok) off = Number(r.headers.get('Upload-Offset')); else throw new Error('bad');
+        fails = 0;
+      } catch (e) { // connection dropped: ask where the server stopped and resume from there
+        if (++fails > 5) { toast('Upload interrupted; try again'); return false; }
+        const hd = await fetch('/api/v1/uploads/' + id, { method: 'HEAD', credentials: 'same-origin' }).catch(() => null);
+        if (hd && hd.ok) off = Number(hd.headers.get('Upload-Offset')); else await new Promise(r => setTimeout(r, 1000 * fails));
+      }
+    }
+    const c = await api('POST', '/api/v1/uploads/' + id + '/commit');
+    if (c.status !== 201) { toast(c.data.error || 'Upload failed'); return false; }
+    return true;
+  }
+
   function createDialog() {
     const proj = h('select', { 'aria-label': 'Project' }, S.projects.map(p => h('option', { value: p.key }, p.key + ' · ' + p.name)));
     const type = h('select', { 'aria-label': 'Type' }, ['Task', 'Bug', 'Story', 'Epic'].map(t => h('option', {}, t)));
     const sum = h('input', { type: 'text', placeholder: 'Summary', 'aria-label': 'Summary', style: 'width:100%' });
     const desc = h('textarea', { placeholder: 'Description', 'aria-label': 'Description' }), msg = h('div', { class: 'err', role: 'alert' });
     const cfBox = h('div', { class: 'cf-box' });
+    // files to attach: chosen with the button, dropped anywhere on the dialog, or pasted; uploaded to the issue once it exists
+    const files = [], chips = h('div', { class: 'att-pending', role: 'list', 'aria-label': 'Files to attach' });
+    const size = n => n < 1024 ? n + ' B' : n < 1 << 20 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB' : n < 1 << 30 ? (n / (1 << 20)).toFixed(1) + ' MB' : (n / (1 << 30)).toFixed(1) + ' GB';
+    function showFiles() {
+      clear(chips);
+      for (const f of files) chips.append(h('span', { class: 'chip', role: 'listitem' }, h('span', { class: 'att-name' }, f.name || 'pasted file'), ' ', h('span', { class: 'muted' }, size(f.size)),
+        h('button', { class: 'btn ghost', type: 'button', 'aria-label': 'Remove ' + (f.name || 'pasted file'), onclick: () => { files.splice(files.indexOf(f), 1); showFiles(); } }, '×')));
+    }
+    function addFiles(list) {
+      for (const f of list) if (!files.some(g => g.name === f.name && g.size === f.size && g.lastModified === f.lastModified)) files.push(f);
+      showFiles();
+    }
+    const pick = h('input', { type: 'file', multiple: true, class: 'sr', id: 'create-files', 'aria-label': 'Attach files' });
+    pick.addEventListener('change', () => { addFiles([...pick.files]); pick.value = ''; });
+    const attach = h('div', { class: 'attach-row' }, pick, h('label', { for: 'create-files', class: 'btn' }, '📎 Attach files'), h('span', { class: 'muted' }, ' or drop files here'), chips);
     let cfCtl = [], form = { rules: [], role: 'member' };
     const descCtl = { el: desc, get: () => desc.value.trim() || null, star: null };
     const values = () => { const vals = { summary: sum.value }; for (const [f, c] of cfCtl) vals[f.key] = c.get(); return vals; };
@@ -351,9 +526,9 @@
     }
     proj.addEventListener('change', loadFields); type.addEventListener('change', loadFields); sum.addEventListener('input', applyRules);
     loadFields();
-    const close = modal(h('div', {}, h('h2', {}, 'Create issue'), h('div', { class: 'chips' }, proj, type), sum, h('div', { style: 'height:8px' }), desc, cfBox, msg,
+    const close = modal(h('div', {}, h('h2', {}, 'Create issue'), h('div', { class: 'chips' }, proj, type), sum, h('div', { style: 'height:8px' }), desc, cfBox, attach, msg,
       h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'),
-        h('button', { class: 'btn primary', onclick: async () => {
+        h('button', { class: 'btn primary', id: 'create-go', onclick: async () => {
           const body = { project: proj.value, type: type.value, summary: sum.value, description: desc.value, custom: {} };
           const vals = values();
           for (const [f, c] of cfCtl) {
@@ -361,9 +536,19 @@
             const x = c.get(); if (x == null) continue;
             if (f.key === 'priority' || f.key === 'assignee' || f.key === 'labels') body[f.key] = x; else if (!f.builtin) body.custom[f.key] = x;
           }
+          const go = document.getElementById('create-go'); go.disabled = true;
           const r = await api('POST', '/api/v1/issues', body);
-          if (r.status === 201) { close(); location.hash = '#/issue/' + r.data.key; } else msg.textContent = r.data.error;
+          if (r.status !== 201) { msg.textContent = r.data.error; go.disabled = false; return; }
+          const failed = [];
+          for (const [i, f] of files.entries()) { msg.textContent = 'Uploading ' + (i + 1) + ' of ' + files.length + ': ' + f.name; if (!await uploadOne(r.data.key, f)) failed.push(f.name); }
+          close(); location.hash = '#/issue/' + r.data.key;
+          if (failed.length) toast(r.data.key + ' was created, but these files did not upload: ' + failed.join(', ') + '. Attach them on the issue.');
         } }, 'Create'))));
+    const dlg = close.scrim.firstChild, hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    close.scrim.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); dlg.classList.add('dropping'); } });
+    close.scrim.addEventListener('dragleave', e => { if (!close.scrim.contains(e.relatedTarget)) dlg.classList.remove('dropping'); });
+    close.scrim.addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); dlg.classList.remove('dropping'); addFiles([...e.dataTransfer.files]); });
+    close.scrim.addEventListener('paste', e => { const fs = [...(e.clipboardData ? e.clipboardData.files : [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } });
     sum.focus();
   }
 
@@ -975,73 +1160,8 @@
     async function uploadFiles(files) {
       for (const f of files) {
         toast('Uploading ' + f.name + '…');
-        let ok = false;
-        if (f.size <= 8 << 20) {
-          const fd = new FormData(); fd.append('file', f, f.name || 'pasted.png');
-          const r = await fetch('/api/v1/issues/' + key + '/attachments', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane' } });
-          ok = r.status === 201; if (!ok) toast((await r.json().catch(() => ({}))).error || 'Upload failed');
-        } else {
-          const d = await direct(f); // straight to the object store when the installation has one; null means use the server
-          ok = d === null ? await resumable(f) : d;
-        }
-        if (ok) await reloadAll();
+        if (await uploadOne(key, f)) await reloadAll();
       }
-    }
-    // Direct upload (S3 backend): presigned PUTs, three parts at a time, each retried; the server verifies at completion.
-    async function direct(f) {
-      const s = await api('POST', '/api/v1/issues/' + key + '/uploads/direct', { name: f.name, size: f.size, type: f.type });
-      if (s.status === 400 && /ordinary upload/.test((s.data && s.data.error) || '')) return null;
-      if (s.status !== 201) { toast((s.data && s.data.error) || 'Upload failed'); return false; }
-      const du = s.data;
-      const put = async (url, body) => {
-        for (let i = 0; i < 3; i++) {
-          try { const r = await fetch(url, { method: 'PUT', body }); if (r.ok) return r; } catch (e) { /* retry */ }
-          await new Promise(r => setTimeout(r, 500 * (i + 1)));
-        }
-        throw new Error('the store did not accept the upload');
-      };
-      let parts = [];
-      try {
-        if (du.mode === 'single') await put(du.url, f);
-        else {
-          const queue = du.parts.slice(); parts = [];
-          const worker = async () => {
-            for (let p = queue.shift(); p; p = queue.shift()) {
-              const r = await put(p.url, f.slice((p.n - 1) * du.part_size, p.n * du.part_size));
-              const etag = r.headers.get('ETag');
-              if (!etag) throw new Error('the bucket must expose the ETag header to browsers (CORS)');
-              parts.push({ n: p.n, etag });
-            }
-          };
-          await Promise.all([worker(), worker(), worker()]);
-        }
-      } catch (e) {
-        await api('DELETE', '/api/v1/uploads/direct/' + du.id);
-        toast('Upload interrupted: ' + e.message);
-        return false;
-      }
-      const c = await api('POST', '/api/v1/uploads/direct/' + du.id + '/complete', { parts });
-      if (c.status !== 201) { toast((c.data && c.data.error) || 'Upload failed'); return false; }
-      return true;
-    }
-    async function resumable(f) {
-      const s = await api('POST', '/api/v1/issues/' + key + '/uploads', { name: f.name, size: f.size, type: f.type });
-      if (s.status !== 201) { toast(s.data.error || 'Upload failed'); return false; }
-      const id = s.data.id, CH = 8 << 20; let off = 0, fails = 0;
-      while (off < f.size) {
-        try {
-          const r = await fetch('/api/v1/uploads/' + id, { method: 'PATCH', credentials: 'same-origin', headers: { 'X-Requested-With': 'tasklane', 'Upload-Offset': String(off) }, body: f.slice(off, off + CH) });
-          if (r.status === 409) off = Number(r.headers.get('Upload-Offset')); else if (r.ok) off = Number(r.headers.get('Upload-Offset')); else throw new Error('bad');
-          fails = 0;
-        } catch (e) { // connection dropped: ask where the server stopped and resume from there
-          if (++fails > 5) { toast('Upload interrupted; try again'); return false; }
-          const hd = await fetch('/api/v1/uploads/' + id, { method: 'HEAD', credentials: 'same-origin' }).catch(() => null);
-          if (hd && hd.ok) off = Number(hd.headers.get('Upload-Offset')); else await new Promise(r => setTimeout(r, 1000 * fails));
-        }
-      }
-      const c = await api('POST', '/api/v1/uploads/' + id + '/commit');
-      if (c.status !== 201) { toast(c.data.error || 'Upload failed'); return false; }
-      return true;
     }
     root.addEventListener('paste', e => { const fs = [...(e.clipboardData ? e.clipboardData.files : [])]; if (fs.length && canEdit()) { e.preventDefault(); uploadFiles(fs); } });
     root.addEventListener('dragover', e => e.preventDefault());

@@ -16,7 +16,7 @@ test('SEC-04: an administrator sets up a SAML provider from its metadata; the si
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.goto('/#/admin/identity');
   const name = 'saml' + uniq();
   await page.getByRole('button', { name: 'Add a provider' }).click();

@@ -36,12 +36,12 @@ async function signIn(browser, email, password) {
 test('SEC-04: requiring a second factor holds members of the organization to the enrolment page until they set one up', async ({ browser }) => {
   const tag = uniq();
   const adm = await signIn(browser, 'admin@example.com', 'adminpass1');
-  await expect(adm.page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(adm.page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const org = await adm.ctx.request.fetch('/api/v1/orgs', { method: 'POST', headers: H, data: { name: 'Org ' + tag, admin_email: `boss${tag}@org.example`, admin_name: 'Org Boss', admin_password: 'password123' } });
   expect(org.status()).toBe(201);
 
   const boss = await signIn(browser, `boss${tag}@org.example`, 'password123');
-  await expect(boss.page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(boss.page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const mk = await boss.ctx.request.fetch('/api/v1/users', { method: 'POST', headers: H, data: { email: `member${tag}@org.example`, name: 'Org Member', password: 'password123' } });
   expect(mk.status()).toBe(201);
 

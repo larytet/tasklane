@@ -18,7 +18,7 @@ test('PERM-02: a custom role is made in the Roles tab and gives exactly what it 
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const call = async (method, path, data) => {
     const res = await ctx.request.fetch(path, { method, headers: H, data });
     let body = null; try { body = await res.json(); } catch (e) { /* none */ }

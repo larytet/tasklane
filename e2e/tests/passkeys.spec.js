@@ -19,7 +19,7 @@ test('SEC-04: a passkey is added on the account page, finishes a sign-in after t
   await ap.getByLabel('Email').fill('admin@example.com');
   await ap.getByLabel('Password').fill('adminpass1');
   await ap.getByRole('button', { name: 'Sign in' }).click();
-  await expect(ap.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(ap.getByRole('button', { name: 'Create new' })).toBeVisible();
   const email = `pk${uniq()}@example.com`;
   const mk = await adm.request.fetch('/api/v1/users', { method: 'POST', headers: H, data: { email, name: 'Passkey P.', password: 'password123' } });
   expect(mk.status()).toBe(201);
@@ -37,7 +37,7 @@ test('SEC-04: a passkey is added on the account page, finishes a sign-in after t
     await page.getByRole('button', { name: 'Sign in' }).click();
   };
   await signIn();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible(); // no key yet: the password is enough
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible(); // no key yet: the password is enough
 
   await page.goto(LOCAL + '/#/account');
   await expect(page.getByRole('heading', { name: 'Passkeys and security keys' })).toBeVisible();
@@ -59,9 +59,9 @@ test('SEC-04: a passkey is added on the account page, finishes a sign-in after t
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await signIn();
   await expect(page.getByText('Use your passkey or security key to finish signing in.')).toBeVisible();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeHidden();
   await page.getByRole('button', { name: 'Use passkey or security key' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const creds = (await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials;
   expect(creds[0].signCount).toBeGreaterThan(0); // the key counted the sign-in
 
@@ -71,12 +71,12 @@ test('SEC-04: a passkey is added on the account page, finishes a sign-in after t
   await signIn();
   await page.getByRole('button', { name: 'Use passkey or security key' }).click();
   await expect(page.getByText(/The key was not used|could not sign you in/)).toBeVisible();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeHidden();
 
   // an administrator removes the second factor of a person who lost the key; then the password signs in again
   const users = await (await adm.request.fetch('/api/v1/users', { headers: H })).json();
   const me = users.find(u => u.email === email);
   expect((await adm.request.fetch(`/api/v1/users/${me.id}/2fa/reset`, { method: 'POST', headers: H })).status()).toBe(200);
   await signIn();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
 });

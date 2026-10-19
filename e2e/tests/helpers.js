@@ -7,7 +7,7 @@ export async function login(page, email) {
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
 }
 
 // Any uncaught error in the page is a test failure: it is collected here and asserted in afterEach (see ui.spec and conflict.spec).

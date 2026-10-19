@@ -19,7 +19,7 @@ test('MAIL-21: review and release a quarantined email in the Email tab', async (
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   const call = async (method, path, data) => {
     const res = await ctx.request.fetch(path, { method, headers: H, data });
     let body = null; try { body = await res.json(); } catch (e) { /* none */ }
@@ -60,7 +60,7 @@ test('MAIL-09: add an IMAP mailbox in the Email tab, see its state, remove it', 
   await page.getByLabel('Email').fill('admin@example.com');
   await page.getByLabel('Password').fill('adminpass1');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.goto('/#/admin/email');
   const name = 'Box ' + uniq();
   await page.getByLabel('Mailbox name').fill(name);
