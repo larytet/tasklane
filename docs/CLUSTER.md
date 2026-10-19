@@ -46,3 +46,7 @@ The suite fails, it does not skip, if a service is missing or if a scenario was 
 
 Starting both nodes at the same moment against a new database is safe: a node that finds the schema only partly applied because another node
 is migrating waits for it (up to five minutes) instead of refusing to start.
+
+## What a node remembers
+
+A node keeps an organization's security policy (network list, second-factor rule, session limit) and whether a person has a second factor for up to 5 seconds. A change made on one node is announced on the event bus and the other nodes drop their copy at once. Without the bus (not configured, down, or the other node an older release, which ignores the message) the 5-second time-out is the bound: a changed network list is in force on every node within 5 seconds. The pause leases have their own 1-second cache and the barrier of the pause (see above).

@@ -57,7 +57,14 @@ func (s *Service) pc() *policyCache {
 	return s.policies
 }
 
+// forgetPolicy drops the remembered policy of an organization on this node and tells the others to do the same; a node that does not
+// hear (no bus, or an older release) keeps its copy for policyCacheFor at most.
 func (s *Service) forgetPolicy(org string) {
+	s.forgetPolicyHere(org)
+	s.busSend(busMsg{Kind: "forget", Forget: &forgetBusIn{Org: org}})
+}
+
+func (s *Service) forgetPolicyHere(org string) {
 	c := s.pc()
 	c.mu.Lock()
 	delete(c.orgs, org)
@@ -66,6 +73,11 @@ func (s *Service) forgetPolicy(org string) {
 
 // forgetFactor drops what is remembered about whether a person has a second factor (they just added or removed one).
 func (s *Service) forgetFactor(userID string) {
+	s.forgetFactorHere(userID)
+	s.busSend(busMsg{Kind: "forget", Forget: &forgetBusIn{User: userID}})
+}
+
+func (s *Service) forgetFactorHere(userID string) {
 	c := s.pc()
 	c.mu.Lock()
 	delete(c.factors, userID)

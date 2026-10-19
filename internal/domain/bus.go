@@ -32,9 +32,17 @@ const busChannel = "tasklane:cluster"
 
 type busMsg struct {
 	Node     string         `json:"node"`
-	Kind     string         `json:"kind"` // event, presence
+	Kind     string         `json:"kind"` // event, presence, forget
 	Event    *Event         `json:"event,omitempty"`
 	Presence *presenceBusIn `json:"presence,omitempty"`
+	Forget   *forgetBusIn   `json:"forget,omitempty"`
+}
+
+// forgetBusIn tells the other nodes that something they remember changed: an organization's security policy, a person's second factor.
+// Kinds a node does not know are ignored, so an older release beside this one keeps its own cache time-out as the bound.
+type forgetBusIn struct {
+	Org  string `json:"org,omitempty"`
+	User string `json:"user,omitempty"`
 }
 
 type presenceBusIn struct {
@@ -85,6 +93,13 @@ func (s *Service) fromBus(payload []byte) {
 		return
 	}
 	switch {
+	case m.Kind == "forget" && m.Forget != nil:
+		if m.Forget.Org != "" {
+			s.forgetPolicyHere(m.Forget.Org)
+		}
+		if m.Forget.User != "" {
+			s.forgetFactorHere(m.Forget.User)
+		}
 	case m.Kind == "event" && m.Event != nil:
 		s.emitLocal(*m.Event)
 	case m.Kind == "presence" && m.Presence != nil && s.Presence != nil:
