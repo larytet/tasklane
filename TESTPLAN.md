@@ -201,6 +201,8 @@ set, so the test runs the real code path, not a fallback. Images are pinned by d
 | INTEROP-05 | Pause a project (the barrier of UPG-03 and PAUSE) from node 1 while a writer on node 2 saves | Node 2 acknowledges and then refuses writes with the pause response; resume clears it on both nodes |
 | INTEROP-06 | One Playwright scenario, two browser contexts on different nodes: sign in, open an issue, see the other user's presence, type in the search box | The presence indicator shows, and the search results come from OpenSearch (checked by the response header or the `doctor`-visible engine in use) |
 
+**Status (M5.25).** INTEROP-01..06 are built and pass: `make interop` (`scripts/interop.sh`, `deploy/compose/docker-compose.interop.yml`) runs `internal/interop` (build tag `interop`, Go, real binary in two containers) and `e2e/interop` (Playwright, `playwright.interop.config.js`). Run once here: the stack was up in 36 s and the six scenarios took 12 s. Checked not to be vacuous: with `redis_url` blank INTEROP-01 and INTEROP-04 fail, with the PostgreSQL engine INTEROP-01 and INTEROP-02 fail. The compose file pins the images by digest (PostgreSQL 16, Redis 7, OpenSearch 2.17.1); the lowest and highest supported OpenSearch minors and a Valkey run are not yet in the nightly matrix.
+
 **Rules**
 
 - **Real services must be real.** The suite fails, not skips, if Redis or OpenSearch is unreachable; a test that

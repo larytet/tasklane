@@ -79,12 +79,12 @@ func TestPublishReachesEveryNodeAndAuthIsChecked(t *testing.T) {
 	if bad.Status().Connected {
 		t.Fatal("connected with a wrong password")
 	}
-	if err := redis.Ping(context.Background(), o); err == nil {
+	if _, err := redis.Ping(context.Background(), o); err == nil {
 		t.Fatal("ping with a wrong password")
 	}
 	o2, _ := redis.ParseURL("redis://x:pw@" + srv.Addr())
-	if err := redis.Ping(context.Background(), o2); err != nil {
-		t.Fatal(err)
+	if v, err := redis.Ping(context.Background(), o2); err != nil || v != "Redis 7.0.0-mock" {
+		t.Fatalf("%q %v", v, err)
 	}
 }
 

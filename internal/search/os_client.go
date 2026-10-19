@@ -98,6 +98,19 @@ func (c *OSClient) do(ctx context.Context, op, method, path string, body any, nd
 }
 
 // Health is the cluster status (green, yellow or red); an unreachable cluster is an error.
+// Version is the cluster's version number ("2.17.1").
+func (c *OSClient) Version(ctx context.Context) (string, error) {
+	out, _, err := c.do(ctx, "version", "GET", "/", nil, false)
+	if err != nil {
+		return "", err
+	}
+	if v, ok := out["version"].(map[string]any); ok {
+		n, _ := v["number"].(string)
+		return n, nil
+	}
+	return "", nil
+}
+
 func (c *OSClient) Health(ctx context.Context) (string, error) {
 	out, _, err := c.do(ctx, "health", "GET", "/_cluster/health", nil, false)
 	if err != nil {

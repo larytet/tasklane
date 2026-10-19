@@ -131,10 +131,10 @@ func Run(ctx context.Context, cfg config.Config) []Check {
 		o, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
 			add("redis", false, err.Error())
-		} else if err := redis.Ping(ctx, o); err != nil {
+		} else if v, err := redis.Ping(ctx, o); err != nil {
 			add("redis", false, "cannot use the cluster event bus at "+o.Addr+": "+err.Error()+" (nodes keep working alone meanwhile; check redis_url, the password and the firewall)")
 		} else {
-			add("redis", true, "the cluster event bus at "+o.Addr+" answers")
+			add("redis", true, strings.TrimSpace("the cluster event bus at "+o.Addr+" answers "+map[bool]string{true: "(" + v + ")", false: ""}[v != ""]))
 		}
 	case st != nil:
 		var nodes int
@@ -158,7 +158,8 @@ func Run(ctx context.Context, cfg config.Config) []Check {
 			case h == "yellow":
 				add("search", true, "OpenSearch is reachable; the cluster is yellow (replicas not allocated: expected on a single node)", true)
 			default:
-				add("search", true, "OpenSearch is reachable and green")
+				ver, _ := oc.Version(ctx)
+				add("search", true, "OpenSearch "+ver+" is reachable and green")
 			}
 		}
 	} else {

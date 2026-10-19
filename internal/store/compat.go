@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Compatibility between a binary and the schema it finds (SPEC 17.8, UPG-05, UPG-06). A node refuses to start when the
@@ -53,6 +55,47 @@ type Verdict struct {
 type IncompatibleError struct{ Reason, Fix string }
 
 func (e *IncompatibleError) Error() string { return e.Reason + ". " + e.Fix }
+
+// Behind reports that the schema is merely older than this release (as opposed to outside the range it can upgrade from).
+func (e *IncompatibleError) Behind() bool {
+	return strings.Contains(e.Reason, "is behind this release")
+}
+
+// MigrationRunning reports whether another node holds the migration lock right now.
+func (s *Store) MigrationRunning(ctx context.Context) bool {
+	conn, err := s.Pool.Acquire(ctx)
+	if err != nil {
+		return false
+	}
+	defer conn.Release()
+	var got bool
+	if conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(727274)`).Scan(&got) != nil {
+		return false
+	}
+	if got {
+		conn.Exec(context.Background(), `SELECT pg_advisory_unlock(727274)`)
+		return false
+	}
+	return true
+}
+
+// CheckCompatWaiting is CheckCompat for a node that starts while another is still applying migrations (several nodes brought up together
+// against a new database): a schema that is behind is rechecked for as long as a migration is running, instead of refused halfway through it.
+func (s *Store) CheckCompatWaiting(ctx context.Context, p Policy, wait time.Duration) (Verdict, error) {
+	end := time.Now().Add(wait)
+	for {
+		v, err := s.CheckCompat(ctx, p)
+		var ie *IncompatibleError
+		if err == nil || !errors.As(err, &ie) || !ie.Behind() || time.Now().After(end) || !s.MigrationRunning(ctx) {
+			return v, err
+		}
+		select {
+		case <-ctx.Done():
+			return v, err
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
 
 func (s *Store) CheckCompat(ctx context.Context, p Policy) (Verdict, error) {
 	v := Verdict{Latest: p.Latest}

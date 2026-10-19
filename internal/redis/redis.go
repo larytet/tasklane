@@ -402,19 +402,35 @@ func (b *Bus) pubOnce(ctx context.Context, fails *int) error {
 	}
 }
 
-// Ping checks that a server answers (for the doctor).
-func Ping(ctx context.Context, o Options) error {
+// Ping checks that a server answers (for the doctor) and returns the version it reports (Redis or Valkey).
+func Ping(ctx context.Context, o Options) (string, error) {
 	c, err := dial(ctx, o)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer c.c.Close()
 	r, err := c.do("PING")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if r.str != "PONG" {
-		return fmt.Errorf("redis: unexpected answer %q", r.str)
+		return "", fmt.Errorf("redis: unexpected answer %q", r.str)
 	}
-	return nil
+	info, err := c.do("INFO", "server")
+	if err != nil {
+		return "", nil // answering PING is what matters; some deployments forbid INFO
+	}
+	for _, line := range strings.Split(info.str, "\n") {
+		line = strings.TrimSpace(line)
+		for _, k := range []string{"valkey_version:", "redis_version:"} {
+			if strings.HasPrefix(line, k) {
+				v := strings.TrimPrefix(line, k)
+				if k == "valkey_version:" {
+					return "Valkey " + v, nil
+				}
+				return "Redis " + v, nil
+			}
+		}
+	}
+	return "", nil
 }

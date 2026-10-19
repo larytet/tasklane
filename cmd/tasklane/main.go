@@ -222,7 +222,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	defer st.Close()
 	// refuse to run against a schema this binary does not match; migrations are an explicit step
 	// except for a brand-new database, which is initialized here.
-	verdict, err := st.CheckCompat(ctx, store.DefaultPolicy())
+	verdict, err := st.CheckCompatWaiting(ctx, store.DefaultPolicy(), 5*time.Minute) // nodes started together: the others wait for the one that migrates
 	if err != nil {
 		log.Fatalf("refusing to start: %v", err)
 	}

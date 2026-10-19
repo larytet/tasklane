@@ -207,6 +207,9 @@ func (s *Server) serve(cl *client) {
 				continue
 			}
 			cl.send("+PONG\r\n")
+		case "INFO":
+			body := "# Server\r\nredis_version:7.0.0-mock\r\n"
+			cl.send("$%d\r\n%s\r\n", len(body), body)
 		case "SUBSCRIBE":
 			if !authed {
 				cl.send("-NOAUTH Authentication required.\r\n")

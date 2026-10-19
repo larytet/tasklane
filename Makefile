@@ -1,7 +1,7 @@
 GO ?= go
 export TASKLANE_TEST_DATABASE_URL ?= postgres://tl:tl@localhost:55432/tasklane
 
-.PHONY: build test vet db notice dist perf e2e e2e-update
+.PHONY: build test vet db notice dist perf e2e e2e-update interop
 build:
 	$(GO) build -o bin/tasklane ./cmd/tasklane
 vet:
@@ -31,3 +31,7 @@ e2e:
 	cd e2e && npm ci --no-audit --no-fund && env -u TASKLANE_TEST_DATABASE_URL PATH=$$PATH:/usr/local/go/bin npx playwright test
 e2e-update:
 	cd e2e && env -u TASKLANE_TEST_DATABASE_URL PATH=$$PATH:/usr/local/go/bin npx playwright test --update-snapshots
+
+# real-service interoperability smoke: two nodes with real PostgreSQL, Redis and OpenSearch from deploy/compose/docker-compose.interop.yml (needs Docker)
+interop:
+	./scripts/interop.sh

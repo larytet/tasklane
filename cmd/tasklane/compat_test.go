@@ -108,3 +108,71 @@ func TestUPG06_TheServerRefusesToStartOutsideItsSchemaRange(t *testing.T) {
 	}
 	pool.Exec(ctx, `DELETE FROM feature_gate WHERE name='future_thing'`)
 }
+
+// UPG-01 (nodes started together): a node that starts while another is applying migrations waits for it instead of refusing a schema that is
+// only behind because the migration is not finished. Found by the real-service interoperability profile, which starts two nodes at once.
+func TestUPG01_ANodeStartedDuringAMigrationWaitsForIt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the real binary")
+	}
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, testutil.DSN())
+	if err != nil || admin.Ping(ctx) != nil {
+		t.Skip("PostgreSQL not available")
+	}
+	defer admin.Close()
+	db := fmt.Sprintf("tl_wait_%d", time.Now().UnixNano()%1e9)
+	if _, err := admin.Exec(ctx, `CREATE DATABASE `+db); err != nil {
+		t.Skip("cannot create a database: " + err.Error())
+	}
+	defer admin.Exec(ctx, `DROP DATABASE `+db+` WITH (FORCE)`)
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tasklane")
+	if out, err := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	dsn := strings.Replace(testutil.DSN(), "/tasklane", "/"+db, 1)
+	env := append(os.Environ(), "TASKLANE_DATABASE_URL="+dsn, "TASKLANE_LISTEN=127.0.0.1:0", "TASKLANE_BLOB_DIR="+filepath.Join(dir, "blobs"))
+	mig := exec.Command(bin, "migrate")
+	mig.Env = env
+	if out, err := mig.CombinedOutput(); err != nil {
+		t.Fatalf("migrate: %v\n%s", err, out)
+	}
+	pool, _ := pgxpool.New(ctx, dsn)
+	defer pool.Close()
+	var latest int
+	pool.QueryRow(ctx, `SELECT max(version) FROM schema_migration`).Scan(&latest)
+	// a migration is "in progress": its lock is held by another session and the newest one is not yet recorded
+	hold, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Release()
+	hold.Exec(ctx, `SELECT pg_advisory_lock(727274)`)
+	pool.Exec(ctx, `UPDATE schema_migration SET version = version - 1000 WHERE version = $1`, latest)
+	c := exec.Command(bin, "serve")
+	c.Env = env
+	var out bytes.Buffer
+	c.Stdout, c.Stderr = &out, &out
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer c.Process.Kill()
+	time.Sleep(2 * time.Second)
+	if strings.Contains(out.String(), "refusing to start") {
+		t.Fatalf("the node refused to start while a migration was running:\n%s", out.String())
+	}
+	// the migration finishes
+	pool.Exec(ctx, `UPDATE schema_migration SET version = $1 WHERE version = $2`, latest, latest-1000)
+	hold.Exec(ctx, `SELECT pg_advisory_unlock(727274)`)
+	for i := 0; i < 60; i++ {
+		if strings.Contains(out.String(), "listening on") {
+			return
+		}
+		if strings.Contains(out.String(), "refusing to start") {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("the node did not come up after the migration finished:\n%s", out.String())
+}

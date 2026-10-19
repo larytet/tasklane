@@ -33,3 +33,16 @@ version gates (docs/UPGRADE.md) use the database, not Redis.
 
 If a node cannot reach Redis, or the nodes cannot reach each other, each side keeps serving. Two people on opposite sides editing the same text
 from the same version cannot both win: the database accepts one save and the other gets the usual conflict. Nothing needs repairing afterwards.
+
+## Proved against the real services
+
+`make interop` (Docker required) starts two Tasklane nodes with a real PostgreSQL, a real Redis and a real OpenSearch from
+`deploy/compose/docker-compose.interop.yml`, with search and the event bus switched on, and runs six basic scenarios: both nodes ready and
+`doctor` naming Redis and OpenSearch with their versions; ordinary searches on OpenSearch agreeing with the PostgreSQL engine on the same data
+for an administrator and a restricted person; the index following updates, transitions, comments, deletes and moves and surviving a rebuild; two
+people on different nodes seeing each other, a save reaching the other node's socket and a stale save getting the normal conflict; a pause on one
+node holding a writer on the other; and two browser contexts on different nodes seeing each other while the search box is answered by OpenSearch.
+The suite fails, it does not skip, if a service is missing or if a scenario was served by a fallback.
+
+Starting both nodes at the same moment against a new database is safe: a node that finds the schema only partly applied because another node
+is migrating waits for it (up to five minutes) instead of refusing to start.

@@ -1,0 +1,60 @@
+# The real-service interoperability profile (TESTPLAN 3.3): two Tasklane nodes sharing one PostgreSQL, one Redis and one OpenSearch node, all real,
+# with the search engine and the cluster bus switched on so that the real code paths run and nothing falls back. Started by `make interop`,
+# which builds the image, waits for the stack, runs the INTEROP scenarios and tears everything down. No fault injection, no fakes, no fake clock.
+# Images are pinned by digest. Published ports are random and bound to the loopback address; the runner reads them with `docker compose port`.
+name: tl-interop
+
+x-app: &app
+  image: tasklane:interop
+  build:
+    context: ../..
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    opensearch: {condition: service_healthy}
+  environment: &appenv
+    TASKLANE_DATABASE_URL: postgres://tl:tl@postgres:5432/tasklane?sslmode=disable
+    TASKLANE_REDIS_URL: redis://redis:6379/0
+    TASKLANE_SEARCH_ENGINE: opensearch
+    TASKLANE_OPENSEARCH_URL: http://opensearch:9200
+    TASKLANE_OPENSEARCH_ALLOW_PRIVATE: "true"   # the cluster is on the compose network, a private address
+    TASKLANE_ADMIN_EMAIL: admin@example.com
+    TASKLANE_ADMIN_PASSWORD: adminpass1
+    TASKLANE_BASE_URL: http://localhost
+    TASKLANE_SHUTDOWN_DRAIN_DELAY: 0s
+
+services:
+  postgres:
+    image: postgres:16@sha256:2586e2a95d1c9b31cb2967feb562948f7d364854453d703039b6efa45fe48417
+    environment: {POSTGRES_USER: tl, POSTGRES_PASSWORD: tl, POSTGRES_DB: tasklane}
+    ports: ["127.0.0.1::5432"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U tl -d tasklane"], interval: 2s, timeout: 3s, retries: 30}
+
+  redis:
+    image: redis:7@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
+    ports: ["127.0.0.1::6379"]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 2s, timeout: 3s, retries: 30}
+
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1@sha256:1193b7c29c5d63028523728243cc4da047ac49f697a8f8105e5aeee2f89bcc4c
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"          # CI only: a single throwaway node on a private network
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ulimits: {memlock: {soft: -1, hard: -1}, nofile: {soft: 65536, hard: 65536}}
+    ports: ["127.0.0.1::9200"]
+    healthcheck: {test: ["CMD-SHELL", "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s'"], interval: 3s, timeout: 5s, retries: 60}
+
+  app1:
+    <<: *app
+    ports: ["127.0.0.1::8080"]
+
+  app2:
+    <<: *app
+    ports: ["127.0.0.1::8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      opensearch: {condition: service_healthy}
+      app1: {condition: service_started}   # the first node makes the schema and the administrator; the second finds them (concurrent starts are also safe, UPG-01)
