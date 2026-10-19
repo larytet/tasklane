@@ -29,7 +29,7 @@ The phase of each applied migration is recorded in `schema_migration.phase`.
 1. Take a backup.
 2. Run the new release's `tasklane migrate` (expand only). Nodes of the previous release keep running (`doctor` on them shows the "beside a newer schema" warning).
 3. Replace the nodes one by one with the new release.
-4. When every node is on the new release and you are sure, run `tasklane migrate finalize`. After that the previous release will not start.
+4. When every node is on the new release and you are sure, run `tasklane migrate finalize`. It refuses while a live node still runs an older release than the binary (the node registry says which); `--force` overrides it when you know the node is gone. After that the previous release will not start.
 
 To go back inside step 2 and 3: start the previous release's binary again; nothing needs restoring. After step 4 going back means restoring the backup.
 
@@ -116,3 +116,7 @@ the newer text, lost acknowledgements retried with the same save id) through the
 reconciler of SPEC 21 judges the final text: no acknowledged save missing (E1), none that replaced a newer change (E2), none duplicated (E4), and the
 sequence gapless. A provider sends signed push deliveries through the balancer all the while, retrying the ones that fail and repeating some; every delivery
 that was acknowledged must be stored and applied exactly once and its commit linked to its issue.
+
+## Preflight
+
+`tasklane upgrade preflight [--backup DIR]` changes nothing. It prints the migrations the new binary would apply now and the ones held for `finalize`, every live node with its version (older: to replace; newer than this binary: blocker), whether the schema is inside the range the binary runs on, and the procedure in order (backup, `migrate`, replace nodes one at a time, `migrate finalize`). It exits 1 when something blocks.

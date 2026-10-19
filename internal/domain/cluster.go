@@ -363,3 +363,6 @@ func (s *Service) RunCluster(ctx context.Context, logf func(string, ...any)) {
 		}
 	}
 }
+
+// ClusterNodes lists the nodes that have registered, live or not, for the command-line upgrade tools.
+func (s *Service) ClusterNodes(ctx context.Context) ([]Node, error) { return s.liveNodes(ctx, s.DB) }

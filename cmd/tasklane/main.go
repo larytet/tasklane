@@ -86,7 +86,7 @@ func main() {
 		os.Exit(verifyRelease(os.Args[2], os.Args[3]))
 	}
 	cfgArgs := os.Args[min(2, len(os.Args)):]
-	if cmd == "blobs" || cmd == "migrate" || cmd == "backup" || cmd == "restore" || cmd == "create-admin" {
+	if cmd == "blobs" || cmd == "migrate" || cmd == "backup" || cmd == "restore" || cmd == "create-admin" || cmd == "upgrade" {
 		cfgArgs = nil // their words (migrate, verify, rewrap, plan, finalize, --verify) are the command's own; settings come from the environment and the file
 	}
 	cfg, err := config.Load(config.Options{Args: cfgArgs})
@@ -101,10 +101,18 @@ func main() {
 		restoreCmd(ctx, cfg)
 	case "serve":
 		serve(ctx, cfg)
+	case "upgrade":
+		if len(os.Args) < 3 || os.Args[2] != "preflight" {
+			log.Fatal("usage: tasklane upgrade preflight [--backup DIR]")
+		}
+		upgradePreflightCmd(ctx, cfg)
 	case "migrate":
 		st := mustOpen(ctx, cfg)
 		defer st.Close()
 		if len(os.Args) > 2 && os.Args[2] == "finalize" {
+			if err := finalizeGuard(ctx, st, len(os.Args) > 3 && os.Args[3] == "--force"); err != nil {
+				log.Fatal(err)
+			}
 			applied, err := st.Finalize(ctx)
 			if err != nil {
 				log.Fatal(err)
