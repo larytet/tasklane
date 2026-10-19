@@ -210,3 +210,42 @@ func TestCFG01_ZeroDurationsOnlyWhereTheSettingAllowsThem(t *testing.T) {
 		t.Fatalf("the default: %v %v", err, c.DrainDelay)
 	}
 }
+
+// CFG-03: a reload applies the safe subset, says which other settings need a restart, and rejects an invalid file as a whole.
+func TestCFG03_HotReloadOfTheSafeSubset(t *testing.T) {
+	files := map[string]string{"tasklane.conf": "password_min_length = 10\nlisten = :1111\ntrusted_proxies = 10.0.0.0/8\n"}
+	o := opts(nil, nil, files)
+	r, err := config.NewReloader(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// nothing changed: nothing to apply
+	if _, res, err := r.Reload(); err != nil || len(res.Applied)+len(res.RestartOnly) != 0 {
+		t.Fatalf("%v %+v", err, res)
+	}
+	// a hot key and a restart-only key change
+	files["tasklane.conf"] = "password_min_length = 14\nlisten = :2222\ntrusted_proxies = 10.0.0.0/8, 192.168.0.0/16\nmin_client_version = 3\n"
+	c, res, err := r.Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(res.Applied, ",") != "min_client_version,password_min_length,trusted_proxies" || strings.Join(res.RestartOnly, ",") != "listen" {
+		t.Fatalf("%+v", res)
+	}
+	if c.PasswordMinLength != 14 || c.MinClient != 3 || len(c.TrustedProxies) != 2 {
+		t.Fatalf("%+v", c)
+	}
+	// the same file again: the hot changes are applied already, the restart-only one is still waiting for a restart
+	if _, res, _ = r.Reload(); len(res.Applied) != 0 || strings.Join(res.RestartOnly, ",") != "listen" {
+		t.Fatalf("%+v", res)
+	}
+	// an invalid file is refused as a whole, with the setting named, and the next good file still applies
+	files["tasklane.conf"] = "password_min_length = ten\n"
+	if _, _, err := r.Reload(); err == nil || !strings.Contains(err.Error(), "password_min_length") || !strings.Contains(err.Error(), "kept") {
+		t.Fatalf("an invalid reload: %v", err)
+	}
+	files["tasklane.conf"] = "password_min_length = 16\nlisten = :2222\ntrusted_proxies = 10.0.0.0/8, 192.168.0.0/16\nmin_client_version = 3\n"
+	if _, res, err := r.Reload(); err != nil || strings.Join(res.Applied, ",") != "password_min_length" {
+		t.Fatalf("%v %+v", err, res)
+	}
+}

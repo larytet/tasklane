@@ -89,7 +89,8 @@ func main() {
 	if cmd == "blobs" || cmd == "migrate" || cmd == "backup" || cmd == "restore" || cmd == "create-admin" || cmd == "upgrade" {
 		cfgArgs = nil // their words (migrate, verify, rewrap, plan, finalize, --verify) are the command's own; settings come from the environment and the file
 	}
-	cfg, err := config.Load(config.Options{Args: cfgArgs})
+	reloadOpts = config.Options{Args: cfgArgs}
+	cfg, err := config.Load(reloadOpts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -305,19 +306,11 @@ func serve(ctx context.Context, cfg config.Config) {
 	if cfg.Hosted && cfg.BillingURL != "" {
 		svc.Billing = domain.WebhookBilling{URL: cfg.BillingURL, Secret: cfg.BillingSecret, AllowPrivate: cfg.WebhookAllowPrivate}
 	}
-	for _, c := range cfg.TrustedProxies {
-		if _, n, err := net.ParseCIDR(c); err == nil {
-			svc.TrustedProxies = append(svc.TrustedProxies, n)
-		} else if ip := net.ParseIP(c); ip != nil {
-			bits := 32
-			if ip.To4() == nil {
-				bits = 128
-			}
-			svc.TrustedProxies = append(svc.TrustedProxies, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
-		} else {
-			log.Fatalf("trusted_proxies: %q is not an address or a network", c)
-		}
+	proxies, perr := parseProxies(cfg.TrustedProxies)
+	if perr != nil {
+		log.Fatal(perr)
 	}
+	svc.TrustedProxies = proxies
 	svc.DashboardIframeHosts = cfg.DashboardIframeHosts
 	svc.NodeID, svc.NodeVersion = fmt.Sprintf("%s-%d-%x", host, os.Getpid(), nb), releaseVersion()
 	if err := svc.CheckNodeAgainstGates(ctx, svc.NodeVersion); err != nil { // rolling back past an activated behaviour is refused
@@ -440,6 +433,7 @@ func serve(ctx context.Context, cfg config.Config) {
 			log.Fatal(err)
 		}
 	}()
+	watchReload(svc, srv)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig

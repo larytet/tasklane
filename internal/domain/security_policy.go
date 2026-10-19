@@ -303,7 +303,8 @@ func (s *Service) ClientIP(remoteAddr, forwardedFor string) string {
 	if err != nil {
 		host = remoteAddr
 	}
-	if len(s.TrustedProxies) == 0 || !ipIn(s.TrustedProxies, host) {
+	trusted := s.trustedProxies()
+	if len(trusted) == 0 || !ipIn(trusted, host) {
 		return host
 	}
 	parts := strings.Split(forwardedFor, ",")
@@ -312,7 +313,7 @@ func (s *Service) ClientIP(remoteAddr, forwardedFor string) string {
 		if net.ParseIP(p) == nil {
 			return host // not an address: do not guess
 		}
-		if !ipIn(s.TrustedProxies, p) {
+		if !ipIn(trusted, p) {
 			return p
 		}
 	}

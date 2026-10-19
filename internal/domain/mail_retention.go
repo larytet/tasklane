@@ -33,23 +33,29 @@ type MailRetentionResult struct {
 }
 
 func (s *Service) mailRawDays() int {
-	if s.MailRawDays < 0 {
+	s.hotMu.RLock()
+	n := s.MailRawDays
+	s.hotMu.RUnlock()
+	if n < 0 {
 		return 0
 	}
-	if s.MailRawDays == 0 && !s.MailRetentionSet {
+	if n == 0 && !s.MailRetentionSet {
 		return defaultMailRawDays
 	}
-	return s.MailRawDays
+	return n
 }
 
 func (s *Service) mailBounceDays() int {
-	if s.MailBounceDays < 0 {
+	s.hotMu.RLock()
+	n := s.MailBounceDays
+	s.hotMu.RUnlock()
+	if n < 0 {
 		return 0
 	}
-	if s.MailBounceDays == 0 && !s.MailRetentionSet {
+	if n == 0 && !s.MailRetentionSet {
 		return defaultMailBounceDays
 	}
-	return s.MailBounceDays
+	return n
 }
 
 // forgetMessageID replaces a Message-ID by a hash of it: duplicates are still recognised, but the id (which names a host and often

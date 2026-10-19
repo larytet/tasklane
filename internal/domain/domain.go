@@ -62,6 +62,7 @@ type Service struct {
 	BaseURL         string
 	SSOAllowPrivate bool
 	SSOEgress       func(egress.Policy) egress.Policy
+	hotMu           sync.RWMutex
 	secretMu        sync.Mutex
 	derived         []byte
 	gateOnce        sync.Once

@@ -43,8 +43,10 @@ type Server struct {
 	// reload with 426. Requests that do not say (API tokens, MCP, scripts) are not clients in this sense and are never refused.
 	Version   string
 	MinClient int
-	draining  atomic.Bool
-	routes    []string
+	// minClientHot holds a reloaded MinClient plus one (zero: not reloaded)
+	minClientHot atomic.Int64
+	draining     atomic.Bool
+	routes       []string
 }
 
 // Drain makes /readyz fail, the first step of a graceful stop; /healthz keeps answering (the process is alive).
@@ -53,7 +55,16 @@ func (s *Server) Drain() { s.draining.Store(true) }
 // ClientVersion is the newest browser client this server speaks to (sent by the page in X-Tasklane-Client).
 const ClientVersion = 1
 
+// SetMinClient changes the oldest client served while the server runs.
+func (s *Server) SetMinClient(n int) { s.minClientHot.Store(int64(n) + 1) }
+
 func (s *Server) minClient() int {
+	if v := s.minClientHot.Load(); v > 0 {
+		if v-1 > 0 {
+			return int(v - 1)
+		}
+		return ClientVersion - 1
+	}
 	if s.MinClient > 0 {
 		return s.MinClient
 	}

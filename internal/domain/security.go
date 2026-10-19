@@ -54,8 +54,11 @@ type LoginResult struct {
 }
 
 func (s *Service) minPassword() int {
-	if s.PasswordMinLength > 8 {
-		return s.PasswordMinLength
+	s.hotMu.RLock()
+	n := s.PasswordMinLength
+	s.hotMu.RUnlock()
+	if n > 8 {
+		return n
 	}
 	return 8 // never weaker than eight characters
 }
