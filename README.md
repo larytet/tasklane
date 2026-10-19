@@ -1,9 +1,35 @@
 # tasklane
 
-An open source, self-hosted issue and project tracker with a Jira-like UI, written in Go.
+An open source issue and project tracker with a Jira-like UI, written in Go: a **drop-in replacement for Jira** that you
+run yourself, for one team or for many.
 
-Tasklane aims to give teams the parts of Jira they actually use - boards, backlogs, weekly sprints, rich ticket views,
+Tasklane gives teams the parts of Jira they actually use - boards, backlogs, weekly sprints, rich ticket views,
 custom fields, workflows - without the weight, and with the enterprise basics (SSO, audit, permissions) built in.
+
+## What it is
+
+- **A replacement for Jira, not a lookalike.** The same vocabulary (project, issue type, workflow, sprint, epic, filter), a
+  JQL-compatible query language (TQL), keys that look like Jira's (`ABC-123`) and keep working after a move, and a way
+  in: import a Jira project, or run a read-only one-way mirror of your Jira site while you switch. Boards, backlogs,
+  sprints, custom fields, workflows, automation, approvals, a customer portal, dashboards and releases are built.
+  What is *not* there yet: the Jira REST API under `/rest/api/3` (tools written against Jira's API need a small
+  adaptation; Tasklane has its own documented REST API, webhooks and an MCP server for agents) and write-back to Jira.
+- **Many sites on one installation.** An installation can serve several **organizations**, each a separate tenant
+  with its own people, projects, administrators, security policy and mail domain, and nothing visible across the line
+  (enforced by the database, not only by the application: [docs/ORGANIZATIONS.md](docs/ORGANIZATIONS.md)). A
+  deployment can be pinned to a region, and several nodes can serve one installation behind a load balancer, with rolling
+  upgrades ([docs/CLUSTER.md](docs/CLUSTER.md), [docs/UPGRADE.md](docs/UPGRADE.md)).
+- **Access rights management.** Roles per project (viewer, member, admin) and custom roles, groups, a permission scheme per
+  project, organization administrators who administer their own organization only, and per-organization security
+  policy (second factor required, network allow-list, session length, allowed e-mail domains). People sign in with a
+  password, a second factor (authenticator app or passkey), or single sign-on (OpenID Connect, SAML, LDAP and Active
+  Directory); accounts can be provisioned by SCIM; every administrative change goes to a tamper-evident audit log
+  ([docs/PERMISSIONS.md](docs/PERMISSIONS.md), [docs/IDENTITY.md](docs/IDENTITY.md), [docs/AUDIT.md](docs/AUDIT.md)).
+- **Billing support for a hosted service.** Switched on with `hosted=true`: a plan per organization (seats, projects,
+  storage, enforced by the database), usage metering, prices, and a monthly invoice per organization made on
+  schedule and delivered to your billing system by a signed webhook, with announced maintenance windows and support levels
+  ([docs/HOSTED.md](docs/HOSTED.md)). Tasklane prices and invoices what was used; it does not take payment, calculate tax
+  or draw PDFs. Off by default, and a self-hosted installation has none of it: no limits, no licence keys, no calls home.
 
 ## Quick start
 
@@ -294,14 +320,33 @@ Wireframes in dark mode (the reference theme). Tokens, type and spacing are in [
 
 ## Status
 
-Specification phase. See [SPEC.md](SPEC.md) for the functional specification and [DESIGN.md](DESIGN.md) for the
-design specification (tokens, typography, components, screens, backend and frontend architecture), and
-[TESTPLAN.md](TESTPLAN.md) for the test plan.
+Built and tested, and in use on a test installation; not yet released as 1.0. What exists against what is still open
+is kept in [STATUS.md](STATUS.md) (milestones, the issues found on the way and how each was resolved) and
+[TESTPLAN.md](TESTPLAN.md) (every test and what it covers); the specification is [SPEC.md](SPEC.md) and the design is
+[DESIGN.md](DESIGN.md).
+
+| Area | State |
+|---|---|
+| Tracker, workflows, custom fields, boards, backlog, sprints, dashboards, releases, approvals, automation, customer portal | built |
+| Lifecycle (convert, move, clone, trash, bulk jobs), import and export (JSON and CSV bundles; Jira, GitHub Issues, Trello, Linear, Asana and generic CSV in), Jira mirror (read-only, one way) | built |
+| Sign-in (password, second factor, passkeys, OpenID Connect, SAML, LDAP), SCIM, roles, groups, permission schemes, audit log, privacy export and erasure | built |
+| Organizations (tenants), hosted edition with plans, metering and invoices | built |
+| E-mail in and out, Git integration (GitHub and GitLab, read-only), MCP server for agents | built |
+| Several nodes, Redis or Valkey event bus, OpenSearch, S3 storage, rolling upgrades, backup and restore, Helm chart | built |
+| Jira REST API under `/rest/api/3`, write-back to Jira | not built |
+| The editor on the rich-text model (the converters between Markdown, Jira's document format and the model are built and tested; the page still edits plain text) | partly built |
+| Payment, tax and PDF invoices | not built (out of scope: Tasklane hands invoices to your billing system) |
+
+How it was tested: about 90 browser tests and a Go suite that runs against real PostgreSQL; a compose setup with two nodes
+on real PostgreSQL, Redis and OpenSearch; rolling upgrades under load, network faults and clock skew on real binaries; and a
+reliability campaign of 2.9 million saves and 1.6 million editing sessions with no lost, duplicated or stale save and no
+lost draft. That is about 1% of the saves and half of the sessions the specification asks for, so its 1-in-10^8 and
+1-in-10^9 error targets are not yet demonstrated, only that no error occurred at this size.
 
 ## Stack
 
 - Go (API server, workers), PostgreSQL, optional OpenSearch (an additional service) for search at scale
-- REST API (Jira-compatible subset under `/rest/api/3`) plus webhooks
+- REST API (Tasklane's own; a Jira-compatible subset under `/rest/api/3` is planned, not built), webhooks and an MCP server
 - Web UI: server-delivered SPA
 
 ## Related projects

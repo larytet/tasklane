@@ -422,9 +422,9 @@
 
   // ---------- ticket thread ----------
   const draftKey = (key, f) => 'tl-draft:' + S.me.id + ':' + key + ':' + f;
-  // A draft of a very large text is kept in pieces (PERF-09): the part before the window being edited and the part after it in chunks of 64 KB, and the window
+  // A draft of a very large text is kept in pieces (PERF-09): the part before the window being edited and the part after it in chunks of 16 KB, and the window
   // in one key of its own, so that typing rewrites only the small one; the main key says how many chunks there are. Anything else is one key with the whole draft.
-  const CHUNK = 65536;
+  const CHUNK = 16384;
   const partKey = (key, f, p) => draftKey(key, f) + ':' + p;
   function localDraft(key, f) {
     try {

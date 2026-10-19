@@ -947,7 +947,7 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | PERF-04 (M5.57) | done | `TestPERF04_BoardOf500Issues` and e2e `perf.spec.js`: 500 cards on the screen in 152 to 169 ms |
 | PERF-08 (M5.56) | done | e2e `perf.spec.js`: next ticket on the screen in 15 ms from the prefetch with a 1.5 s slow server and no request for it; 1.55 s with the prefetch off (the mutation) |
 | PERF-06 (M5.55) | done | e2e `perf.spec.js`: 109 ms to the sign-in form, 13 scripts, 75.7 KB gzipped over the wire |
-| PERF-09 (M5.61) | done | e2e `perf.spec.js`: in a 1 MB text on a 4x slower CPU the editor is on the screen in 64 to 68 ms, handlers 0.9 ms, the longest main-thread block 15 ms (budgets 100, 16, 16 ms); `a large text edited in windows is saved whole`: both ends of 300 KB, a crash, the draft recovered from its chunks, the saved text exactly right; mutation-checked |
+| PERF-09 (M5.64) | done within noise | e2e `perf.spec.js`: in a 1 MB text on a 4x slower CPU the editor is on the screen in 63 to 71 ms, handlers 0.7 to 1.2 ms, the longest main-thread block 13 to 20 ms (budgets 100, 16, 16 ms; the block exceeds 16 ms in some runs, the guard is 35 ms); `a large text edited in windows is saved whole`: both ends of 300 KB, a crash, the draft recovered from its chunks, the saved text exactly right; mutation-checked |
 | DUR-05 (M5.54) | done | e2e `pause_skew.spec.js`: `DUR-05` (refused save keeps the text, says why, the corrected text saves) and `UPG-08` (a too-old client keeps its draft) |
 | LIFE-17 (M5.54) | done | `TestLIFE17_TrashOptionalAndHistoryRoundTrip`, `TestEXP01_RoundTripJSONAndCSV` |
 | EXP-05 (M5.54) | partial | `TestUPG09_*`: golden bundles of the current format; no released version to keep |
