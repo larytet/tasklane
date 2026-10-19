@@ -495,6 +495,9 @@ func (s *Service) ProcessAutomationEvents(ctx context.Context, limit int) (int, 
 			relevant = relevant || e.Type == t
 		}
 		if relevant && e.P.Key != "" {
+			if i := strings.LastIndex(e.P.Key, "-"); i > 0 && s.blockedBy(ctx, e.P.Key[:i]) != nil {
+				return started, nil // a pause covers this project: automation stands still, and the cursor stays so the event is handled after it
+			}
 			n, err := s.automateEvent(ctx, e)
 			started += n
 			if err != nil {
@@ -882,6 +885,9 @@ func (s *Service) ProcessAutomationSchedules(ctx context.Context) (int, error) {
 			}
 			if pid != nil && *pid != ipid {
 				continue // a project's rule acts on that project only
+			}
+			if i := strings.LastIndex(key, "-"); i > 0 && s.blockedBy(ctx, key[:i]) != nil {
+				continue // a pause covers the project: a scheduled rule stands still, and this tick is not made up (the next one acts)
 			}
 			if started, err := s.runRule(ctx, r, issueID, -tick, autoEvent{Type: "schedule"}); err == nil && started {
 				runs++

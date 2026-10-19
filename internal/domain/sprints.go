@@ -980,6 +980,9 @@ func (s *Service) RunSprintJobs(ctx context.Context) (rolled, created int, err e
 		if err != nil {
 			continue
 		}
+		if s.blockedBy(ctx, b.Project) != nil {
+			continue // a pause covers the board's project: the job stands still (SPEC 18.2) and the next pass does its work
+		}
 		if b.AutoRollover {
 			ar, err := s.DB.Query(ctx, `SELECT id::text FROM sprint WHERE board_id::text=$1 AND state='active' AND ends_at<=$2 ORDER BY starts_at`, id, s.Now())
 			if err != nil {
