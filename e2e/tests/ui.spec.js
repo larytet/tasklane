@@ -198,3 +198,38 @@ test.describe('UI-01 visual baselines', () => {
     });
   }
 });
+
+// The issue list is paged by a hundred: the header says which range is shown, Prev and Next and the page numbers move, the last page is short, and the
+// issues on a page are not on another.
+test('SEARCH: a list of 230 issues is shown in pages of 100', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const ctx = await browser.newContext();
+  const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
+  expect((await ctx.request.post('/api/v1/login', { headers: H, data: { email: 'admin@example.com', password: 'adminpass1' } })).status()).toBe(200);
+  const pk = 'G' + Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
+  expect((await ctx.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Paging' } })).status()).toBe(201);
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await page.evaluate(async ({ pk }) => {
+    const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
+    for (let b = 0; b < 23; b++) await Promise.all(Array.from({ length: 10 }, (_, i) => fetch('/api/v1/issues', { method: 'POST', headers: H, body: JSON.stringify({ project: pk, type: 'Task', summary: `paged ${b * 10 + i}` }) })));
+  }, { pk });
+  await page.goto('/#/?syntax=tql&q=' + encodeURIComponent('project = ' + pk));
+  const rows = page.getByRole('listitem');
+  await expect(rows).toHaveCount(100);
+  await expect(page.getByText('230 issues · 1–100')).toBeVisible();
+  await expect(page.getByRole('button', { name: '‹ Prev' })).toBeDisabled();
+  const first = await rows.allTextContents();
+  await page.getByRole('button', { name: '2', exact: true }).click();
+  await expect(page.getByText('230 issues · 101–200')).toBeVisible();
+  await expect(rows).toHaveCount(100);
+  const second = await rows.allTextContents();
+  expect(second.filter(t => first.includes(t))).toEqual([]); // nothing on two pages
+  await page.getByRole('button', { name: 'Next ›' }).click();
+  await expect(page.getByText('230 issues · 201–230')).toBeVisible();
+  await expect(rows).toHaveCount(30);
+  await expect(page.getByRole('button', { name: 'Next ›' })).toBeDisabled();
+  await page.getByRole('button', { name: '‹ Prev' }).click();
+  await expect(page.getByText('230 issues · 101–200')).toBeVisible();
+});

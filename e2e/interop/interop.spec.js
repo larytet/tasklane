@@ -44,7 +44,7 @@ test('INTEROP-06: two people on different nodes see each other, and the search b
 
   // the search box on node 2: the response says OpenSearch answered
   await b.page.goto('/#/search');
-  const box = b.page.getByLabel('Search or TQL');
+  const box = b.page.getByLabel('Search', { exact: true }); // the default box takes plain text and runs it as `any ~`
   await expect(box).toBeVisible();
   const answered = b.page.waitForResponse(async r => {
     if (!r.url().includes('/api/v1/issues?') || r.request().method() !== 'GET') return false;
@@ -55,7 +55,7 @@ test('INTEROP-06: two people on different nodes see each other, and the search b
   // the index may be a few seconds behind the write: ask again until it has caught up
   for (let i = 0; i < 20; i++) {
     await box.fill('');
-    await box.fill('text ~ "gizmo"');
+    await box.fill('gizmo');
     await box.press('Enter');
     const got = await Promise.race([answered.then(() => true), new Promise(r => setTimeout(() => r(false), 4000))]);
     if (got) break;

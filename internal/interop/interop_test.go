@@ -306,6 +306,14 @@ var parityQueries = []struct {
 	{`labels in (red, blue) AND priority in (low, lowest) AND project = IOP`, false},
 	{`NOT labels = red AND project = IOP`, false},
 	{`text ~ "alpha"`, false},
+	// the plain search box runs as `any ~` (text, a summary substring, the key, the people): the two engines must agree on all of it
+	{`any ~ "alpha"`, false},
+	{`any ~ "wid"`, false},
+	{`any ~ "IOP-3"`, false},
+	{`any ~ "ivy"`, false},
+	{`any ~ "admin"`, false},
+	{`any ~ "alpha" AND any ~ "bravo"`, false},
+	{`any ~ "needle" OR any ~ "widget"`, false},
 }
 
 func checkParity(t *testing.T, label string) {
