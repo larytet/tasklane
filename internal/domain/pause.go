@@ -254,14 +254,21 @@ func (s *Service) RequestPause(ctx context.Context, a Actor, in PauseIn) (*Pause
 	s.leases(ctx, true)
 	// drain: wait for the writes that were already running
 	end := time.Now().Add(drain)
+	abort := func(reason string) (*PauseLease, error) {
+		s.DB.Exec(ctx, `DELETE FROM pause_lease WHERE id=$1`, id) // abort: the scope returns to running
+		s.leases(ctx, true)
+		s.DB.Exec(ctx, `INSERT INTO audit_event(actor_id,actor_label,action,target,detail) VALUES($1,$2,'pause.aborted',$3,$4)`, nilIfEmpty(a.ID), a.Label, in.Scope, jsonMarshal(map[string]any{"reason": reason}))
+		return nil, ErrDrainTimeout
+	}
 	for s.inflightIn(in.Scope) > 0 {
 		if time.Now().After(end) {
-			s.DB.Exec(ctx, `DELETE FROM pause_lease WHERE id=$1`, id) // abort: the scope returns to running
-			s.leases(ctx, true)
-			s.DB.Exec(ctx, `INSERT INTO audit_event(actor_id,actor_label,action,target,detail) VALUES($1,$2,'pause.aborted',$3,$4)`, nilIfEmpty(a.ID), a.Label, in.Scope, `{"reason":"drain deadline"}`)
-			return nil, ErrDrainTimeout
+			return abort("drain deadline")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// and the writes of the other nodes: each says when it has none left (once every live node can, see PauseBarrierG)
+	if waiting := s.pauseBarrier(ctx, id, end); len(waiting) > 0 {
+		return abort("drain deadline: still writing on " + strings.Join(waiting, ", "))
 	}
 	// the marker is taken after the drain, so everything acknowledged before it is in the database
 	mk, err = s.marker(ctx, mode, in.Scope)
@@ -343,4 +350,62 @@ func (s *Service) ActiveMaintenance(ctx context.Context) []Maintenance {
 		}
 	}
 	return out
+}
+
+// AckPauses is this node's half of the pause barrier: for every lease it has seen it says it has no write of its own left in the lease's scope.
+// A write that arrives after the lease is cached is held, so an acknowledgement cannot be overtaken by new work on this node.
+func (s *Service) AckPauses(ctx context.Context) {
+	if s.NodeID == "" {
+		return
+	}
+	for _, l := range s.leases(ctx, true) {
+		if s.inflightIn(l.Scope) == 0 {
+			s.DB.Exec(ctx, `INSERT INTO pause_ack(lease_id,node_id,acked_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, l.ID, s.NodeID, s.Now())
+		}
+	}
+}
+
+// RunPauseAcks keeps AckPauses going.
+func (s *Service) RunPauseAcks(ctx context.Context) {
+	t := time.NewTicker(200 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.AckPauses(ctx)
+		}
+	}
+}
+
+// pauseBarrier waits until every other live node has acknowledged the lease, and returns the nodes that had not by the deadline. It waits only
+// when the cluster qualifies for the barrier: while any live node is older than the release that acknowledges (a rolling upgrade is in progress)
+// the gate is off and the other nodes are given the fixed moment they always had to see the lease.
+func (s *Service) pauseBarrier(ctx context.Context, leaseID string, deadline time.Time) []string {
+	if s.NodeID == "" || !s.GateOn(ctx, PauseBarrierG) {
+		return nil
+	}
+	for {
+		rows, err := s.DB.Query(ctx, `SELECT n.id FROM cluster_node n WHERE n.id<>$1 AND n.seen_at > $2 AND NOT EXISTS (SELECT 1 FROM pause_ack a WHERE a.lease_id::text=$3 AND a.node_id=n.id) ORDER BY n.id`,
+			s.NodeID, s.Now().Add(-nodeLiveFor), leaseID)
+		if err != nil {
+			return nil
+		}
+		var waiting []string
+		for rows.Next() {
+			var id string
+			rows.Scan(&id)
+			waiting = append(waiting, id)
+		}
+		rows.Close()
+		if len(waiting) == 0 || time.Now().After(deadline) {
+			return waiting
+		}
+		select {
+		case <-ctx.Done():
+			return waiting
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
 }

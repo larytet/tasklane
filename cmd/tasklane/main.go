@@ -298,6 +298,7 @@ func serve(ctx context.Context, cfg config.Config) {
 		log.Fatalf("refusing to start: %v", err)
 	}
 	go svc.RunCluster(ctx, log.Printf)
+	go svc.RunPauseAcks(ctx)
 	svc.IMAPAllowPrivate = cfg.IMAPAllowPrivate
 	svc.MailRawDays, svc.MailBounceDays, svc.MailRetentionSet = cfg.MailRawDays, cfg.MailBounceDays, true
 	go svc.RunMailRetentionWorker(ctx, time.Hour, log.Printf)

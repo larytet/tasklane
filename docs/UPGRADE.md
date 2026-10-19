@@ -71,3 +71,15 @@ Exchange bundles (the JSON and CSV zips that export writes and import reads) car
 - **The guard:** `internal/domain/testdata/bundles/vN/` holds a JSON and a CSV bundle written by version N together with what they must import as. Every release must still import all of them, and **raising `BundleVersion` without adding its fixture fails the tests**. Make a version's fixture with `TASKLANE_UPDATE_GOLDEN=1 go test ./internal/domain -run TestUPG09_WriteGolden` and commit it; the files of a released version are evidence and are never rewritten.
 - **Backups** (`tasklane backup`, see BACKUP.md) have their own `BackupVersion` and the same guard, with fixtures under `internal/domain/testdata/backups/vN`.
 - **Support window:** the previous two releases' formats must stay readable (SPEC 17.8). With one format version so far, that is version 1.
+
+## The pause barrier across nodes
+
+A pause (an import, a restore) used to wait only for the writes of the node that asked for it. Now, when every live node runs a release that
+knows how, each node that has seen the pause says so once it has no write of its own left in the scope (`pause_ack`), and the pause is not
+reported as `paused` until every other live node has said so. A node that stops sending its heartbeat for half a minute is no longer waited for. A
+node that never answers makes the pause abort at its drain deadline (the scope runs again, nothing changes) with an audit entry
+(`pause.aborted`) naming the nodes it was waiting for.
+
+During a rolling upgrade, while any live node is older than the release that acknowledges, this behaviour is a gate (`pause_barrier`) that stays
+off: the pause then gives the other nodes the fixed moment it always gave them to see the lease. The gate turns on by itself once every live node
+is new enough (see the cluster version gate above); `GET /api/v1/admin/cluster` shows it.

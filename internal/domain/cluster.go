@@ -21,6 +21,7 @@ const (
 	gateOff        = "off"
 	gatePending    = "pending"
 	gateOn         = "on"
+	PauseBarrierG  = "pause_barrier"  // a pause waits for every other node to say it has drained; a node that does not know to say so would stall it
 	MailRetentionG = "mail_retention" // the purge of inbound mail leaves a hashed Message-ID that older nodes do not recognise
 )
 
@@ -34,6 +35,7 @@ type Gate struct {
 
 // BuiltinGates are the gates this release defines.
 var BuiltinGates = []Gate{
+	{Name: PauseBarrierG, MinVersion: "0.1.0", Doc: "A pause waits for every node to acknowledge it has no write left in the scope; a node that does not acknowledge would make every pause wait out its deadline"},
 	{Name: MailRetentionG, MinVersion: "0.1.0", Doc: "Purging inbound mail replaces its Message-ID by a hash; a node that does not know the hash would treat a redelivery as new mail"},
 }
 

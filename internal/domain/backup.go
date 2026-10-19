@@ -45,7 +45,7 @@ const (
 // backupSkip are the tables a backup leaves out: they describe the moment of the backup, not the data.
 var backupSkip = map[string]bool{
 	"schema_migration": true, "session": true, "mfa_pending": true, "cluster_node": true, "webauthn_challenge": true,
-	"login_attempt": true, "upload_session": true, "direct_upload": true, "oauth_code": true, "sso_state": true, "pause_lease": true,
+	"login_attempt": true, "upload_session": true, "direct_upload": true, "oauth_code": true, "sso_state": true, "pause_lease": true, "pause_ack": true,
 }
 
 type BackupMarker struct {
