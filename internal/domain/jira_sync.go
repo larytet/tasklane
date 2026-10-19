@@ -56,6 +56,9 @@ func (s *Service) SyncJiraProject(ctx context.Context, a Actor, projectKey strin
 	return s.syncJira(ctx, pid, false)
 }
 
+// JiraAfterPage, when set (tests only), runs after each page of a sync has been applied and its gate released.
+var JiraAfterPage func(projectKey string)
+
 var ErrSyncBusy = errors.New("another node is already syncing this project")
 
 // syncJira reads what changed in Jira since the watermark and applies it, one transaction per issue. With full, the
@@ -82,12 +85,13 @@ func (s *Service) syncJira(ctx context.Context, pid string, full bool) (int, err
 		s.DB.Exec(ctx, `UPDATE jira_project SET last_error=$2 WHERE project_id::text=$1`, pid, trimErr(err))
 		return 0, err
 	}
-	// a pause drains the sync like any other writer; the watermark is already stored, so restore resumes from it
-	end, perr := s.admitGate(ctx, pkey)
-	if perr != nil {
+	// a pause drains the sync one batch at a time (PAUSE-11): each page of issues is applied, and the watermark advanced, inside the gate;
+	// between pages a pause holds the sync, and what comes after the pause continues from the stored watermark
+	if end, perr := s.admitGate(ctx, pkey); perr != nil {
 		return 0, perr
+	} else {
+		end()
 	}
-	defer end()
 	cl, actor, err := s.jiraClient(ctx, connID)
 	if err != nil {
 		return fail(err)
@@ -116,10 +120,16 @@ func (s *Service) syncJira(ctx context.Context, pid string, full bool) (int, err
 			s.advanceWatermark(ctx, pid, maxUpdated, n)
 			return fail(err)
 		}
+		end, perr := s.admitGate(ctx, pkey)
+		if perr != nil {
+			s.advanceWatermark(ctx, pid, maxUpdated, n)
+			return n, perr
+		}
 		for _, ji := range pg.Issues {
 			updated, err := s.applyJiraIssue(ctx, cl, pid, pkey, actor, ji)
 			if err != nil {
 				s.advanceWatermark(ctx, pid, maxUpdated, n)
+				end()
 				return fail(fmt.Errorf("%s: %w", ji.Key(), err))
 			}
 			if updated.After(maxUpdated) {
@@ -129,6 +139,10 @@ func (s *Service) syncJira(ctx context.Context, pid string, full bool) (int, err
 		}
 		s.resolveJiraParents(ctx, pid)
 		s.advanceWatermark(ctx, pid, maxUpdated, 0)
+		end()
+		if JiraAfterPage != nil {
+			JiraAfterPage(pkey)
+		}
 		if pg.Next == "" {
 			break
 		}
@@ -137,7 +151,13 @@ func (s *Service) syncJira(ctx context.Context, pid string, full bool) (int, err
 	// roles and groups are read after the issues, so people the issues just introduced (by account id and email) can be mapped
 	var permErr error
 	if permAt == nil || s.Now().Sub(*permAt) > permRefresh {
-		if permErr = s.syncJiraPermissions(ctx, cl, pid, jiraKey); permErr != nil {
+		end, perr := s.admitGate(ctx, pkey)
+		if perr != nil {
+			return n, perr
+		}
+		permErr = s.syncJiraPermissions(ctx, cl, pid, jiraKey)
+		end()
+		if permErr != nil {
 			permErr = fmt.Errorf("permissions: %w", permErr) // the project fails closed once the last good read is stale
 		}
 	}
@@ -690,7 +710,8 @@ func (s *Service) RunJiraWorkers(ctx context.Context, logf func(string, ...any))
 			}
 			rows.Close()
 			for _, id := range ids {
-				if _, err := s.syncJira(ctx, id, false); err != nil && !errors.Is(err, ErrSyncBusy) && ctx.Err() == nil {
+				var paused *ErrPaused
+				if _, err := s.syncJira(ctx, id, false); err != nil && !errors.Is(err, ErrSyncBusy) && !errors.As(err, &paused) && ctx.Err() == nil { // a pause is expected: the sync resumes when it ends
 					logf("jira sync: %v", err)
 				}
 			}

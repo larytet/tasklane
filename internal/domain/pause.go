@@ -47,6 +47,9 @@ type Marker struct {
 	LSN      string    `json:"lsn"`
 	At       time.Time `json:"at"`
 	Mode     string    `json:"mode"`
+	// JiraWatermarks is, per mirrored project in scope, how far the Jira sync had read when the marker was taken (PAUSE-11). Taken
+	// after the drain, so no sync batch is half applied; the sync resumes from the stored watermark when the pause ends.
+	JiraWatermarks map[string]time.Time `json:"jira_watermarks,omitempty"`
 }
 
 type gate struct {
@@ -204,7 +207,7 @@ func (s *Service) RequestPause(ctx context.Context, a Actor, in PauseIn) (*Pause
 	if in.Owner == "" {
 		in.Owner = a.Label
 	}
-	mk, err := s.marker(ctx, mode)
+	mk, err := s.marker(ctx, mode, in.Scope)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +264,7 @@ func (s *Service) RequestPause(ctx context.Context, a Actor, in PauseIn) (*Pause
 		time.Sleep(10 * time.Millisecond)
 	}
 	// the marker is taken after the drain, so everything acknowledged before it is in the database
-	mk, err = s.marker(ctx, mode)
+	mk, err = s.marker(ctx, mode, in.Scope)
 	if err != nil {
 		return nil, err
 	}
@@ -272,12 +275,28 @@ func (s *Service) RequestPause(ctx context.Context, a Actor, in PauseIn) (*Pause
 	return &PauseLease{ID: id, Scope: in.Scope, Owner: in.Owner, Mode: mode, State: "paused", StartedAt: s.Now(), Deadline: s.Now().Add(hold), Marker: mb}, nil
 }
 
-func (s *Service) marker(ctx context.Context, mode string) (Marker, error) {
+func (s *Service) marker(ctx context.Context, mode, scope string) (Marker, error) {
 	m := Marker{At: s.Now(), Mode: mode}
 	if err := s.DB.QueryRow(ctx, `SELECT COALESCE(max(id),0), pg_current_wal_lsn()::text FROM outbox`).Scan(&m.OutboxID, &m.LSN); err != nil {
 		return m, err
 	}
-	return m, nil
+	rows, err := s.DB.Query(ctx, `SELECT p.key, jp.watermark FROM jira_project jp JOIN project p ON p.id=jp.project_id WHERE jp.watermark IS NOT NULL AND ($1='instance' OR $1='project:'||p.key)`, scope)
+	if err != nil {
+		return m, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		var w time.Time
+		if err := rows.Scan(&k, &w); err != nil {
+			return m, err
+		}
+		if m.JiraWatermarks == nil {
+			m.JiraWatermarks = map[string]time.Time{}
+		}
+		m.JiraWatermarks[k] = w
+	}
+	return m, rows.Err()
 }
 
 // ReleasePause ends a pause; held writes continue and go through the normal compare-and-set.

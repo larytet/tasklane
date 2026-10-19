@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -819,5 +820,86 @@ func TestMIR11_CutOverToNative(t *testing.T) {
 	is, err := e.Svc.CreateIssue(ctx, e.Admin, domain.CreateIn{Project: "WEB", Summary: "native now"})
 	if err != nil || is.Key != "WEB-5" {
 		t.Fatalf("%v %s", err, is.Key)
+	}
+}
+
+// PAUSE-11: a pause drains a mirror's sync one batch at a time and holds the next; the marker records how far the sync had read; after
+// the pause the sync continues from that watermark and loses nothing.
+func TestPAUSE11_MirrorSyncDrainsPerBatchMarkerCarriesTheWatermarkAndResumes(t *testing.T) {
+	r := newJira(t)
+	r.jm.PageSize = 50
+	for i := 1; i <= 120; i++ {
+		r.issue(i, fmt.Sprintf("bulk %d", i), "To Do", "new", "Task", nil)
+	}
+	r.mirror(t)
+	e := r.e
+	domain.PauseAdmitWait = 50 * time.Millisecond
+	defer func() { domain.PauseAdmitWait = 2 * time.Second; domain.JiraAfterPage = nil }()
+	var lease *domain.PauseLease
+	pages := 0
+	domain.JiraAfterPage = func(string) {
+		pages++
+		if pages == 1 { // a pause arrives between the first and the second batch
+			var err error
+			if lease, err = e.Svc.RequestPause(ctx, e.Admin, domain.PauseIn{Scope: "project:WEB"}); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	n, err := e.Svc.SyncJiraProject(ctx, e.Admin, "WEB")
+	var paused *domain.ErrPaused
+	if !errors.As(err, &paused) || lease == nil {
+		t.Fatalf("the second batch ran during the pause: %v", err)
+	}
+	if n != 50 {
+		t.Fatalf("first batch applied %d issues, want 50", n)
+	}
+	var count int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM issue i JOIN project p ON p.id=i.project_id WHERE p.key='WEB'`).Scan(&count)
+	if count != 50 {
+		t.Fatalf("%d issues in the mirror at the pause, want exactly the one batch", count)
+	}
+	var stored time.Time
+	e.Store.Pool.QueryRow(ctx, `SELECT watermark FROM jira_project`).Scan(&stored)
+	var mk domain.Marker
+	if err := json.Unmarshal(lease.Marker, &mk); err != nil {
+		t.Fatal(err)
+	}
+	if w, ok := mk.JiraWatermarks["WEB"]; !ok || !w.Equal(stored) {
+		t.Fatalf("the marker records %v, the stored watermark is %v", mk.JiraWatermarks, stored)
+	}
+	// a pause of another scope does not name this project; an instance pause does
+	if err := e.Svc.ReleasePause(ctx, e.Admin, lease.ID); err != nil {
+		t.Fatal(err)
+	}
+	domain.JiraAfterPage = nil
+	for scope, want := range map[string]bool{"project:ABC": false, "instance": true} {
+		l, err := e.Svc.RequestPause(ctx, e.Admin, domain.PauseIn{Scope: scope})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m domain.Marker
+		json.Unmarshal(l.Marker, &m)
+		if _, has := m.JiraWatermarks["WEB"]; has != want {
+			t.Errorf("scope %s: watermark named = %v, want %v", scope, has, want)
+		}
+		e.Svc.ReleasePause(ctx, e.Admin, l.ID)
+	}
+	// resume: the sync continues from the watermark (not from scratch) and every issue arrives once
+	before := r.jm.Count("updated")
+	if _, err := e.Svc.SyncJiraProject(ctx, e.Admin, "WEB"); err != nil {
+		t.Fatal(err)
+	}
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM issue i JOIN project p ON p.id=i.project_id WHERE p.key='WEB'`).Scan(&count)
+	if count != 120 {
+		t.Fatalf("%d issues after the resume, want 120", count)
+	}
+	var dup int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM (SELECT origin_id FROM issue WHERE origin_id IS NOT NULL GROUP BY origin_id HAVING count(*)>1) d`).Scan(&dup)
+	if dup != 0 {
+		t.Fatalf("%d duplicated issues", dup)
+	}
+	if r.jm.Count("updated") <= before {
+		t.Fatal("the resumed sync did not query Jira for changes since the watermark")
 	}
 }
