@@ -38,6 +38,13 @@ func env(t testing.TB, k string) string {
 	return v
 }
 
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
 type client struct {
 	base string
 	http *http.Client
@@ -252,7 +259,7 @@ func TestINTEROP01_StackIsUpAndTheServicesAreInUse(t *testing.T) {
 	})
 	// doctor, run inside the first node's container, names both services with their versions
 	out := compose(t, "exec -T app1 /usr/local/bin/tasklane doctor")
-	for _, want := range []string{"redis", "Redis 7", "search", "OpenSearch 2."} {
+	for _, want := range []string{"redis", envOr("INTEROP_REDIS_EXPECT", "Redis 7"), "search", envOr("INTEROP_OS_EXPECT", "OpenSearch 2.")} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("doctor does not mention %q:\n%s", want, out)
 		}

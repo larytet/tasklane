@@ -31,12 +31,12 @@ services:
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U tl -d tasklane"], interval: 2s, timeout: 3s, retries: 30}
 
   redis:
-    image: redis:7@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
+    image: ${INTEROP_REDIS_IMAGE:-redis:7@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85}   # or a Valkey image, see scripts/interop-matrix.sh
     ports: ["127.0.0.1::6379"]
-    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 2s, timeout: 3s, retries: 30}
+    healthcheck: {test: ["CMD-SHELL", "redis-cli ping || valkey-cli ping"], interval: 2s, timeout: 3s, retries: 30}
 
   opensearch:
-    image: opensearchproject/opensearch:2.17.1@sha256:1193b7c29c5d63028523728243cc4da047ac49f697a8f8105e5aeee2f89bcc4c
+    image: ${INTEROP_OS_IMAGE:-opensearchproject/opensearch:2.17.1@sha256:1193b7c29c5d63028523728243cc4da047ac49f697a8f8105e5aeee2f89bcc4c}
     environment:
       discovery.type: single-node
       DISABLE_SECURITY_PLUGIN: "true"          # CI only: a single throwaway node on a private network

@@ -23,6 +23,7 @@ type Server struct {
 	cut       map[string]bool
 	subs      map[string]map[*client]bool
 	Published int
+	InfoExtra string // lines added to INFO server (a Valkey names its own version after the Redis one)
 }
 
 type client struct {
@@ -208,7 +209,7 @@ func (s *Server) serve(cl *client) {
 			}
 			cl.send("+PONG\r\n")
 		case "INFO":
-			body := "# Server\r\nredis_version:7.0.0-mock\r\n"
+			body := "# Server\r\nredis_version:7.0.0-mock\r\n" + s.InfoExtra
 			cl.send("$%d\r\n%s\r\n", len(body), body)
 		case "SUBSCRIBE":
 			if !authed {

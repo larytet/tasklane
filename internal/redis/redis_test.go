@@ -141,3 +141,12 @@ func TestOneNodeCutOffFromRedis(t *testing.T) {
 	a.Publish("events", []byte("two"))
 	wait(t, "b receives again", func() bool { return gb.n() == 1 })
 }
+
+func TestPingNamesValkeyByItsOwnVersion(t *testing.T) {
+	srv := redismock.New(t)
+	srv.InfoExtra = "server_name:valkey\r\nvalkey_version:8.0.1\r\n"
+	o, _ := redis.ParseURL("redis://" + srv.Addr())
+	if v, err := redis.Ping(context.Background(), o); err != nil || v != "Valkey 8.0.1" {
+		t.Fatalf("%q %v", v, err)
+	}
+}

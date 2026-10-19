@@ -420,17 +420,15 @@ func Ping(ctx context.Context, o Options) (string, error) {
 	if err != nil {
 		return "", nil // answering PING is what matters; some deployments forbid INFO
 	}
+	redisV := ""
 	for _, line := range strings.Split(info.str, "\n") {
 		line = strings.TrimSpace(line)
-		for _, k := range []string{"valkey_version:", "redis_version:"} {
-			if strings.HasPrefix(line, k) {
-				v := strings.TrimPrefix(line, k)
-				if k == "valkey_version:" {
-					return "Valkey " + v, nil
-				}
-				return "Redis " + v, nil
-			}
+		switch { // Valkey reports its own version beside the Redis version it stays compatible with: its own is the one that matters
+		case strings.HasPrefix(line, "valkey_version:"):
+			return "Valkey " + strings.TrimPrefix(line, "valkey_version:"), nil
+		case strings.HasPrefix(line, "redis_version:"):
+			redisV = "Redis " + strings.TrimPrefix(line, "redis_version:")
 		}
 	}
-	return "", nil
+	return redisV, nil
 }

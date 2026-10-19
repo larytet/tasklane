@@ -1,7 +1,7 @@
 GO ?= go
 export TASKLANE_TEST_DATABASE_URL ?= postgres://tl:tl@localhost:55432/tasklane
 
-.PHONY: build test vet db notice dist perf e2e e2e-update interop
+.PHONY: build test vet db notice dist perf e2e e2e-update interop interop-matrix
 build:
 	$(GO) build -o bin/tasklane ./cmd/tasklane
 vet:
@@ -35,3 +35,7 @@ e2e-update:
 # real-service interoperability smoke: two nodes with real PostgreSQL, Redis and OpenSearch from deploy/compose/docker-compose.interop.yml (needs Docker)
 interop:
 	./scripts/interop.sh
+
+# every supported Redis or Valkey and OpenSearch combination (nightly)
+interop-matrix:
+	./scripts/interop-matrix.sh
