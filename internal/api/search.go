@@ -7,6 +7,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/search"
+	"github.com/larytet/tasklane/internal/search/tql"
 )
 
 func (s *Server) scope(r *http.Request) (search.Scope, error) {
@@ -24,7 +25,15 @@ func (s *Server) registerSearch(mux *http.ServeMux) {
 		}
 		lim, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		off, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-		res, err := s.Search.Search(r.Context(), sc, r.URL.Query().Get("q"), search.Page{Limit: lim, Offset: off})
+		q := r.URL.Query().Get("q")
+		if r.URL.Query().Get("syntax") == "text" { // the plain search box: words, quotes, AND/OR/NOT; TQL is the default
+			if q, err = tql.FromText(q); err != nil {
+				te, _ := search.IsQueryError(err)
+				s.fail(w, 400, "tql_error", te.Msg, map[string]any{"pos": te.Pos})
+				return
+			}
+		}
+		res, err := s.Search.Search(r.Context(), sc, q, search.Page{Limit: lim, Offset: off})
 		if te, ok := search.IsQueryError(err); ok {
 			s.fail(w, 400, "tql_error", te.Msg, map[string]any{"pos": te.Pos})
 			return

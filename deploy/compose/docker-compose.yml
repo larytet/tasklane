@@ -23,6 +23,8 @@ services:
       TASKLANE_BASE_URL: ${TASKLANE_BASE_URL:-http://localhost:8080}
       TASKLANE_ADMIN_EMAIL: ${TASKLANE_ADMIN_EMAIL:-}
       TASKLANE_ADMIN_PASSWORD: ${TASKLANE_ADMIN_PASSWORD:-}
+      # identity providers on private addresses (LDAP domain controllers, an in-house OIDC server) need this
+      TASKLANE_SSO_ALLOW_PRIVATE: ${TASKLANE_SSO_ALLOW_PRIVATE:-false}
     ports:
       - "8080:8080"
     volumes:

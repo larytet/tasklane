@@ -18,6 +18,7 @@ const (
 var (
 	phaseRe   = regexp.MustCompile(`(?m)^--\s*phase:\s*(expand|contract)\s*$`)
 	noTxRe    = regexp.MustCompile(`(?m)^--\s*no-transaction\s*$`)
+	widensRe  = regexp.MustCompile(`(?m)^--\s*widens:\s*([a-z_][a-z0-9_]*)\s*$`)
 	createTbl = regexp.MustCompile(`(?i)\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_.]*)`)
 	createIdx = regexp.MustCompile(`(?i)\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[a-z_][a-z0-9_]*\s+ON\s+([a-z_][a-z0-9_.]*)`)
 )
@@ -58,6 +59,17 @@ func Lint(name, sql string, earlier map[string]bool) []string {
 	body := strings.ToUpper(stripComments(sql))
 	// a trigger that refuses TRUNCATE protects data; only a statement that runs it destroys any
 	body = regexp.MustCompile(`\bBEFORE\s+(?:[A-Z]+\s+OR\s+)*TRUNCATE\b`).ReplaceAllString(body, "BEFORE")
+	// a CHECK constraint replaced by a wider one (more allowed values) is safe for the previous release, which never writes the new
+	// values; the migration says so with `-- widens: name` and must add the constraint of that name back as a CHECK. Whether it is
+	// really wider is the reviewer's to judge: the header is the flag for that review.
+	for _, m := range widensRe.FindAllStringSubmatch(sql, -1) {
+		name := strings.ToUpper(m[1])
+		if !regexp.MustCompile(`\bADD\s+CONSTRAINT\s+` + name + `\s+CHECK\b`).MatchString(body) {
+			add("`-- widens: %s` but the migration does not add %s back as a CHECK constraint", m[1], m[1])
+			continue
+		}
+		body = regexp.MustCompile(`\bDROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?`+name+`\b`).ReplaceAllString(body, "")
+	}
 	if ph == Expand {
 		for _, bad := range []struct{ re, why string }{
 			{`\bDROP\s+TABLE\b`, "DROP TABLE removes data the previous release may still read"},

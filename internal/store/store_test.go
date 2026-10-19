@@ -104,6 +104,9 @@ func TestUPG01_LintRejectsDangerousExpandMigrations(t *testing.T) {
 		"truncate":                       "-- phase: expand\nTRUNCATE comment;",
 		"plain index on an old table":    "-- phase: expand\nCREATE INDEX i_x ON issue (priority);",
 		"concurrent index inside a tx":   "-- phase: expand\nCREATE INDEX CONCURRENTLY i_x ON issue (priority);",
+		"drop a check":                   "-- phase: expand\nALTER TABLE issue DROP CONSTRAINT issue_kind_check;",
+		"widens without adding it back":  "-- phase: expand\n-- widens: issue_kind_check\nALTER TABLE issue DROP CONSTRAINT issue_kind_check;",
+		"widens one, drops another":      "-- phase: expand\n-- widens: issue_kind_check\nALTER TABLE issue DROP CONSTRAINT issue_kind_check;\nALTER TABLE issue DROP CONSTRAINT issue_other;\nALTER TABLE issue ADD CONSTRAINT issue_kind_check CHECK (kind IN ('a','b','c'));",
 		"multi-statement no-transaction": "-- phase: expand\n-- no-transaction\nCREATE INDEX CONCURRENTLY a ON issue (priority);\nCREATE INDEX CONCURRENTLY b ON issue (status_id);",
 	}
 	for name, sql := range cases {
@@ -117,6 +120,7 @@ func TestUPG01_LintRejectsDangerousExpandMigrations(t *testing.T) {
 		"new table and its index":         "-- phase: expand\nCREATE TABLE t (a int);\nCREATE INDEX t_a ON t (a);",
 		"concurrent index, no-tx":         "-- phase: expand\n-- no-transaction\nCREATE INDEX CONCURRENTLY i_x ON issue (priority);",
 		"a trigger that refuses truncate": "-- phase: expand\nCREATE TRIGGER t BEFORE TRUNCATE ON issue FOR EACH STATEMENT EXECUTE FUNCTION f();\nCREATE TRIGGER u BEFORE UPDATE OR DELETE OR TRUNCATE ON issue FOR EACH STATEMENT EXECUTE FUNCTION f();",
+		"a check replaced by a wider one": "-- phase: expand\n-- widens: issue_kind_check\nALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_kind_check;\nALTER TABLE issue ADD CONSTRAINT issue_kind_check CHECK (kind IN ('a','b','c'));",
 		"contract may drop":               "-- phase: contract\nALTER TABLE issue DROP COLUMN old;",
 		"commented-out drop ignored":      "-- phase: expand\n-- DROP TABLE comment;\nALTER TABLE issue ADD COLUMN z int;",
 	}

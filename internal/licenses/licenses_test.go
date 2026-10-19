@@ -119,6 +119,10 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 				if strings.HasSuffix(p, "internal/domain/billing.go") && strings.Contains(m, "http.NewRequest") {
 					continue
 				}
+				// LDAP sign-in connects to the directory an administrator configured as a sign-in provider, through the egress policy, and nothing else
+				if strings.HasSuffix(p, "internal/ldap/ldap.go") && strings.Contains(m, "net.Dial") {
+					continue
+				}
 				// the cluster bus connects to the Redis or Valkey server the operator configured (redis_url) and nothing else
 				if strings.HasSuffix(p, "internal/redis/redis.go") && strings.Contains(m, "net.Dial") {
 					continue

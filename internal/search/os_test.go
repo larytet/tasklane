@@ -172,6 +172,7 @@ func TestTQL_TranslatorParityWithPostgres(t *testing.T) {
 		`labels = payments`, `labels in (payments, auth)`, `labels != payments`, `labels is EMPTY`, `labels is not EMPTY`,
 		`priority = high`, `priority in (highest, low)`, `type = Bug`, `type != Bug`, `type in (Bug, Story)`,
 		`text ~ "checkout"`, `text ~ "webhook"`, `text ~ "test card"`, `text ~ "onboarding"`, `text !~ "checkout"`, `text ~ "` + k["checkout"] + `"`,
+		`any ~ "checkout"`, `any ~ "Alice"`, `any ~ "alice@example"`, `any ~ "heckou"`, `any ~ "` + k["checkout"] + `"`, `any !~ "alice"`, `NOT any ~ "checkout" AND any ~ "alice"`,
 		`summary ~ "login"`, `summary ~ "heckou"`, `description ~ "unicode"`, `comment ~ "investigating"`, `comment ~ "retry"`,
 		`key = ` + k["login"], `key in (` + k["login"] + `, ` + k["export"] + `)`, `key != ` + k["login"],
 		`created >= -1d`, `created < -1d`, `updated >= startOfDay()`, `resolved is EMPTY`, `resolved is not EMPTY`,

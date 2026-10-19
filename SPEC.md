@@ -441,6 +441,11 @@ Management is split into dedicated tabs inside Admin (and per-project Settings),
 - **TQL**: JQL-compatible subset: fields, operators (`=`, `!=`, `~`, `in`, `not in`, `is`, `was`, `changed`, `>`, `<`),
   `AND`/`OR`/`NOT`, `ORDER BY`, functions (`currentUser()`, `openSprints()`, `startOfWeek()`, `endOfWeek()`,
   `membersOf()`, `releasedVersions()`, `now()`, `startOfDay()`), parentheses, text search with stemming.
+- **Plain search** (the search box's default; a Text/TQL toggle switches, and the URL keeps `syntax=text|tql`): words and
+  `"phrases"`, `AND`/`OR`/`NOT` in any case, brackets, `-word`; words side by side must all match. Each word runs as
+  `any ~ "word"`: summary, description, labels and comments, a summary substring (three characters or more), the issue key,
+  and assignee or reporter by a word of the name or the start of the email (`Alan` finds Alan Polevoi, not Catalan).
+  `any` is usable in TQL too. API: `GET /api/v1/issues?q=...&syntax=text`; without `syntax` the query is TQL.
 - Query builder UI (basic mode, no syntax needed) with field/operator/value pickers and autocomplete.
 - Saved filters: name, description, owner, sharing (user, group, project, org), favourite, subscriptions (email digest).
 - Views: list, detail split, table with chosen columns, calendar, timeline. Column picker persists per user.

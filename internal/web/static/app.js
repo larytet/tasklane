@@ -2,7 +2,7 @@
   'use strict';
   const L = window.TL;
   const $app = document.getElementById('app');
-  const S = { me: null, projects: [], users: [], q: '', view: null, timers: [] };
+  const S = { me: null, projects: [], users: [], q: '', syntax: 'text', tql: '', view: null, timers: [] };
 
   // ---------- helpers ----------
   function h(tag, props, ...kids) {
@@ -125,17 +125,30 @@
   }
 
   function topbar() {
-    const q = h('input', { type: 'search', placeholder: 'Search or TQL…  e.g. project = ABC AND status = "To Do"', class: 'grow', 'aria-label': 'Search or TQL', value: S.q });
-    q.addEventListener('keydown', e => {
-      if (e.key !== 'Enter') return;
+    // the search box speaks plain text (Alan AND (Arkady OR Dana)) by default, or TQL; the URL keeps which, so a link reopens the same search
+    const hint = { text: 'Search…  e.g. Alan AND (Arkady OR Dana) -draft', tql: 'TQL…  e.g. project = ABC AND status = "To Do"' };
+    const q = h('input', { type: 'search', placeholder: hint[S.syntax], class: 'grow', 'aria-label': S.syntax === 'tql' ? 'Search in TQL' : 'Search', value: S.q });
+    const search = () => {
       S.q = q.value;
-      const target = '#/?q=' + encodeURIComponent(q.value);
+      const target = '#/?q=' + encodeURIComponent(q.value) + '&syntax=' + S.syntax;
       if (location.hash === target) route(); // the same search again is a refresh: no hashchange fires for an identical hash
       else location.hash = target;
-    });
+    };
+    q.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+    const mode = (m, label, title) => h('button', { class: 'btn' + (S.syntax === m ? '' : ' ghost'), 'aria-pressed': S.syntax === m ? 'true' : 'false', title, onclick: () => {
+      if (S.syntax === m) return;
+      // switching runs nothing: text to TQL shows the search as the TQL it ran as, to edit further; TQL has no plain-text form
+      if (m === 'tql') { if (q.value.trim() === S.q.trim() && S.tql) q.value = S.tql; } else q.value = '';
+      S.syntax = m;
+      q.placeholder = hint[m]; q.setAttribute('aria-label', m === 'tql' ? 'Search in TQL' : 'Search');
+      for (const b of seg.children) { const on = b.dataset.m === m; b.className = 'btn' + (on ? '' : ' ghost'); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+      q.focus();
+    }, 'data-m': m }, label);
+    const seg = h('span', { class: 'syntax', role: 'group', 'aria-label': 'Search syntax' });
+    seg.append(mode('text', 'Text', 'Words, "phrases", AND / OR / NOT, -word; matches text, keys and people'), mode('tql', 'TQL', 'Tasklane Query Language: field = value …'));
     return h('div', { class: 'bar' },
       h('span', { class: 'brand', tabindex: 0, role: 'link', onclick: () => { location.hash = '#/'; }, onkeydown: e => { if (e.key === 'Enter') location.hash = '#/'; } }, 'Tasklane'),
-      q,
+      h('span', { class: 'search grow' }, q, seg),
       h('button', { class: 'btn primary', onclick: createDialog }, '+ Create'),
       h('button', { class: 'btn ghost', id: 'bell', 'aria-label': 'Inbox', onclick: () => { location.hash = '#/inbox/unread'; } }, 'Inbox', h('span', { id: 'bell-n', class: 'badge', hidden: true })),
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
@@ -147,7 +160,7 @@
   }
 
   function loginView() {
-    const email = h('input', { type: 'email', id: 'email', autocomplete: 'username' }), pw = h('input', { type: 'password', id: 'pw', autocomplete: 'current-password' });
+    const email = h('input', { type: 'text', id: 'email', autocomplete: 'username', inputmode: 'email', autocapitalize: 'none', spellcheck: 'false' }), pw = h('input', { type: 'password', id: 'pw', autocomplete: 'current-password' });
     const msg = h('div', { class: 'err', role: 'alert' });
     // the second step: a passkey or security key, and/or a code from the authenticator app or a recovery code
     const codeStep = (mfaToken, totp, key) => {
@@ -184,7 +197,7 @@
     const sso = h('div', { class: 'sso' });
     if (new URLSearchParams(location.search).get('sso') === 'denied') msg.textContent = 'Single sign-on was not allowed for this account.';
     clear($app).append(h('form', { class: 'login card', onsubmit: go },
-      h('h1', {}, 'Tasklane'), h('label', { for: 'email' }, 'Email'), email, h('label', { for: 'pw' }, 'Password'), pw, msg,
+      h('h1', {}, 'Tasklane'), h('label', { for: 'email' }, 'Email or username'), email, h('label', { for: 'pw' }, 'Password'), pw, msg,
       h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, 'Sign in')), sso));
     email.focus();
     api('GET', '/api/v1/auth/sso/providers').then(r => {
@@ -198,20 +211,40 @@
     stopTimers();
     S.q = q || '';
     const out = h('div', { class: 'card', role: 'list' }), err = h('div', { class: 'tqlerr', role: 'alert' }), meta = h('div', { class: 'muted' });
-    clear($app).append(topbar(), h('div', { class: 'page' }, err, meta, out));
-    const r = await api('GET', '/api/v1/issues?limit=100&q=' + encodeURIComponent(S.q));
-    if (r.status === 400) { err.textContent = r.data.error + (r.data.detail && r.data.detail.pos != null ? ' (at position ' + r.data.detail.pos + ')' : ''); return; }
-    if (r.status !== 200) { err.textContent = 'Could not load issues'; return; }
-    meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues';
-    if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
-    if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
-    for (const i of r.data.issues) {
-      const open = () => { location.hash = '#/issue/' + i.key; };
-      out.append(h('div', { class: 'row', role: 'listitem', tabindex: 0, onclick: open, onkeydown: e => { if (e.key === 'Enter') open(); } },
-        h('span', { class: 'tile ' + i.type, title: i.type }), h('span', { class: 'key' }, i.key), h('span', { class: 'sum' }, i.summary),
-        h('span', { class: 'pri ' + i.priority, title: i.priority }, PRI[i.priority] || ''), i.assignee ? avatar(i.assignee) : h('span', { class: 'av' }, '–'),
-        lozenge(i.status, i.status_category), h('span', { class: 'muted' }, L.relTime(i.updated))));
-    }
+    const pager = h('div', { class: 'actions', style: 'margin-top:8px' });
+    clear($app).append(topbar(), h('div', { class: 'page' }, err, meta, out, pager));
+    const size = 100;
+    const load = async n => {
+      const r = await api('GET', '/api/v1/issues?limit=' + size + '&offset=' + n * size + '&q=' + encodeURIComponent(S.q) + '&syntax=' + S.syntax);
+      if (r.status === 400) { err.textContent = r.data.error + (r.data.detail && r.data.detail.pos != null ? ' (at position ' + r.data.detail.pos + ')' : ''); return; }
+      if (r.status !== 200) { err.textContent = 'Could not load issues'; return; }
+      S.tql = r.data.query || '';
+      clear(out); clear(pager);
+      const pages = Math.max(1, Math.ceil(r.data.total / size));
+      const from = n * size + 1, to = n * size + r.data.issues.length;
+      meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues' + (pages > 1 && r.data.issues.length ? ' · ' + from + '–' + to : '');
+      if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
+      if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
+      for (const i of r.data.issues) {
+        const open = () => { location.hash = '#/issue/' + i.key; };
+        out.append(h('div', { class: 'row', role: 'listitem', tabindex: 0, onclick: open, onkeydown: e => { if (e.key === 'Enter') open(); } },
+          h('span', { class: 'tile ' + i.type, title: i.type }), h('span', { class: 'key' }, i.key), h('span', { class: 'sum' }, i.summary),
+          h('span', { class: 'pri ' + i.priority, title: i.priority }, PRI[i.priority] || ''), i.assignee ? avatar(i.assignee) : h('span', { class: 'av' }, '–'),
+          lozenge(i.status, i.status_category), h('span', { class: 'muted' }, L.relTime(i.updated))));
+      }
+      if (pages < 2) return;
+      // numbered pages around the current one, with the first and last always reachable
+      const go = k => async () => { await load(k); window.scrollTo(0, 0); };
+      pager.append(h('button', { class: 'btn ghost', disabled: n === 0, onclick: go(n - 1) }, '‹ Prev'));
+      let gap = false;
+      for (let k = 0; k < pages; k++) {
+        if (k !== 0 && k !== pages - 1 && Math.abs(k - n) > 2) { if (!gap) pager.append(h('span', { class: 'muted' }, '…')); gap = true; continue; }
+        gap = false;
+        pager.append(h('button', { class: k === n ? 'btn' : 'btn ghost', 'aria-current': k === n ? 'page' : null, onclick: go(k) }, String(k + 1)));
+      }
+      pager.append(h('button', { class: 'btn ghost', disabled: n >= pages - 1, onclick: go(n + 1) }, 'Next ›'));
+    };
+    await load(0);
   }
 
 
@@ -1049,8 +1082,10 @@
     if ((m = hash.match(/^#\/trash\/([A-Za-z0-9]*)/))) return trashView(m[1].toUpperCase() || (S.projects[0] && S.projects[0].key) || '');
     if ((m = hash.match(/^#\/issue\/([A-Za-z0-9-]+)/))) return issueView(m[1].toUpperCase());
     for (const x of EXT.routes) { const mm = hash.match(x.re); if (mm) { stopTimers(); return x.run(mm); } }
-    const q = hash.startsWith('#/?q=') ? decodeURIComponent(hash.slice(5)) : '';
-    return listView(q);
+    // #/?q=…&syntax=text|tql; a link without syntax (older links, Releases' "Issues") is TQL
+    const p = new URLSearchParams(hash.startsWith('#/?') ? hash.slice(3) : '');
+    if (p.has('q')) S.syntax = p.get('syntax') === 'text' ? 'text' : 'tql';
+    return listView(p.get('q') || '');
   }
   // the unread count on the Inbox button: fetched on every screen and every 30 seconds
   async function bell() {

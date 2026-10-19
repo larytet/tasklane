@@ -1,7 +1,7 @@
 # Accounts and sign-in
 
-- **Sign-in.** Email and password. Five failed attempts for an address lock it for fifteen minutes (a `429` with `Retry-After`); the lock applies to addresses that have no account in exactly the same way, so it reveals nothing. A success clears the count. Passwords are at least eight characters (`password_min_length` raises it) and cannot be the email address.
-- **Two-factor authentication** (TOTP, RFC 6238; any authenticator app). Account → Set up: add the key to the app, confirm with a code, and keep the ten **recovery codes** (shown once; each works once). Signing in then takes the password and a code. A code is good once: the time step it belongs to is claimed atomically, one step of clock drift is tolerated, five wrong codes end the pending sign-in, and the pending sign-in expires after five minutes. Turning it off needs the password; an administrator can reset it for someone who lost their device and recovery codes (that also ends their sessions). Other sessions end when it is switched on. The secret is stored encrypted.
+- **Sign-in.** Email and password, or a directory name and password when an LDAP provider is set up (below). Five failed attempts for an address lock it for fifteen minutes (a `429` with `Retry-After`); the lock applies to addresses that have no account in exactly the same way, so it reveals nothing. A success clears the count. Passwords are at least eight characters (`password_min_length` raises it) and cannot be the email address.
+- **Two-factor authentication** (TOTP, RFC 6238; any authenticator app). Account → Set up: scan the QR code (drawn by Tasklane itself, so the secret is not sent to an image service) or type the key into the app, confirm with a code, and keep the ten **recovery codes** (shown once; each works once). Signing in then takes the password and a code. A code is good once: the time step it belongs to is claimed atomically, one step of clock drift is tolerated, five wrong codes end the pending sign-in, and the pending sign-in expires after five minutes. Turning it off needs the password; an administrator can reset it for someone who lost their device and recovery codes (that also ends their sessions). Other sessions end when it is switched on. The secret is stored encrypted.
 - **Sessions.** Account → Sessions lists each device (address, browser, last active); each can be ended, or all but this one. Sessions and tokens are checked against the database on every request, so ending one, changing a password, resetting two-factor authentication or deactivating the account takes effect on the next request.
 - **API tokens.** Account → API tokens: a token has a name and an optional lifetime (up to five years), is shown once, is stored hashed, shows when it was last used, and stops working when it expires or is revoked. Scoped agent tokens (MCP) are not accepted by the REST API, so a token limited to reading cannot be used there with the person's full rights.
 - **Offboarding.** An administrator ends every session of a person, and with `tokens` also their API tokens (`POST /api/v1/users/{id}/revoke-access`); deactivating the account stops everything as well.
@@ -26,6 +26,53 @@
 - **Accounts** work as for OpenID Connect: matched by the NameID, then by the address; created at first sign-in unless switched off; limited to some email domains if you say so; a deactivated account stays out; the provider vouches for its people's addresses.
 - The signature checker is about 600 lines of standard-library Go (`internal/saml`), written against fixtures produced by a different implementation (lxml, whose canonicalization is libxml2's) in many shapes, plus tampered and signature-wrapping variants; see `internal/saml/testdata/gen.py`.
 - Not built: single logout, signed `AuthnRequest`s, encrypted assertions, identity-provider-initiated sign-in, attribute-to-role mapping, metadata fetched from a URL and refreshed (paste it, and change the certificate here when the identity provider rotates it), customer (portal) SAML sign-in.
+
+## LDAP directory (Active Directory, OpenLDAP)
+
+**Admin → Identity → Add a provider → LDAP.** People then sign in on the ordinary form with their **directory name** (`jana.k`,
+`CORP\jana.k`, `jana.k@corp.example`) or their address, and their **directory password**. There is no button: when no local
+password matches, Tasklane asks each enabled LDAP provider in name order.
+
+- **How a password is checked.** Tasklane connects, binds as the search account, searches under the base DN with the user filter
+  (`{user}` is what the person typed, escaped so it can never change the filter), and requires **exactly one** entry. It then binds
+  as that entry with the password typed. Nothing is cached: a person disabled or removed in the directory is refused at once. An
+  empty password is refused before anything is sent (many servers would accept it as an anonymous bind).
+- **Settings.**
+  - Server addresses: `ldaps://dc1.example.com` (port 636) or `ldap://dc1.example.com` (port 389) with **StartTLS**; several,
+    tried in order.
+  - A password is never sent unencrypted: plain `ldap://` without StartTLS is refused, except to this machine.
+  - The server certificate is verified against the system authorities, or the **CA certificate** you paste. "Do not verify" exists
+    for directories whose CA you cannot give, as Active Directory often runs; prefer pasting the CA.
+  - Search account DN and password: the password is stored encrypted and never shown. Without a search account the search is
+    anonymous.
+  - The default user filter is `(|(sAMAccountName={user})(userPrincipalName={user})(uid={user})(mail={user}))`.
+  - The email attribute defaults to `mail`; the name attribute to `displayName`, then `cn`.
+- **Who may sign in** is written into the user filter, as Active Directory expresses it. Only members of a group, including nested
+  groups, and not disabled accounts:
+  `(&(sAMAccountName={user})(memberOf:1.2.840.113556.1.4.1941:=CN=Tasklane,OU=Groups,DC=corp,DC=example)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))`.
+- **Accounts** work as for single sign-on. A person is matched by the directory's identifier (`objectGUID`, `entryUUID`, else the DN),
+  then by the address. Accounts are created at first sign-in unless that is switched off, and sign-in can be limited to some email
+  domains. A deactivated account stays out. An entry without an address is refused.
+- **What still applies:**
+  - Two-factor authentication: a directory password is a password.
+  - Network rules and the organization's "require a second factor" policy.
+  - The **lockout**: five failures lock the name typed for fifteen minutes and stop the guessing before it reaches the directory, so
+    Tasklane does not help lock the person's directory account.
+  - Local passwords keep working beside the directory.
+  - Sessions record `via = ldap`.
+- **Trying it.** The provider's *Edit* dialog has **Try a sign-in** (`POST /api/v1/admin/sso/providers/{id}/check`). It asks the
+  directory with a name and password and says what it found: the DN, the address, and whether the account exists or would be
+  created. It signs nobody in and creates nothing.
+- **Network.** Connections go through the egress policy: a directory on a private or loopback address, the usual case, needs
+  `sso_allow_private` (`TASKLANE_SSO_ALLOW_PRIVATE=true`). Why a directory refused is logged on the server; the person only sees
+  that sign-in failed.
+- The client is the part of LDAP v3 a sign-in needs, written in standard-library Go (`internal/ldap`: BER, filters, simple bind,
+  StartTLS, subtree search). It does not follow referrals or page results, and it has no SASL or Kerberos.
+- Not built:
+  - group-to-role mapping (administrators are made in Tasklane)
+  - ending existing sessions when the directory disables someone (their next sign-in is refused; open sessions run out)
+  - SCIM-style sync of the whole directory
+  - LDAP sign-in for portal customers
 
 ## SCIM 2.0 provisioning
 
