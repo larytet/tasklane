@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { pageErrors, newUser, login, createIssue, PASSWORD } from './helpers.js';
+import { pageErrors, newUser, login, createIssue, tqlBox, PASSWORD } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
 test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
@@ -152,14 +152,32 @@ test('UI-05 and TQL in the UI: a search narrows the list; a bad query shows wher
   await u.page.goto('/');
   // search is derived data and may lag a saved change by a few seconds (SPEC 21): repeat the search until it appears
   await expect(async () => {
-    await u.page.getByLabel('Search or TQL').fill('summary ~ "zebra"');
-    await u.page.getByLabel('Search or TQL').press('Enter');
+    await (await tqlBox(u.page)).fill('summary ~ "zebra"');
+    await (await tqlBox(u.page)).press('Enter');
     await expect(u.page.getByRole('listitem')).toHaveCount(1, { timeout: 1500 });
   }).toPass({ timeout: 15000 });
   await expect(u.page.getByRole('listitem').first()).toContainText(key);
-  await u.page.getByLabel('Search or TQL').fill('status = (');
-  await u.page.getByLabel('Search or TQL').press('Enter');
+  await (await tqlBox(u.page)).fill('status = (');
+  await (await tqlBox(u.page)).press('Enter');
   await expect(u.page.getByRole('alert')).toContainText('at position');
+});
+
+// the default box is plain text: words, a phrase, AND / OR / NOT, -word, and the same search shown as TQL when switched
+test('SEARCH: the default search box takes plain text and can show it as TQL', async ({ browser }) => {
+  const u = await newUser(browser, 'jana@example.com');
+  const word = 'quokka' + Array.from({ length: 6 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('');
+  const key = await createIssue(u.page, `${word} on the loose`, 'text about a small marsupial');
+  await createIssue(u.page, `${word} draft note`, 'unrelated');
+  await u.page.goto('/');
+  const box = u.page.getByLabel('Search', { exact: true });
+  await expect(async () => {
+    await box.fill(`${word} -draft`);
+    await box.press('Enter');
+    await expect(u.page.getByRole('listitem')).toHaveCount(1, { timeout: 1500 });
+  }).toPass({ timeout: 15000 });
+  await expect(u.page.getByRole('listitem').first()).toContainText(key);
+  await u.page.getByRole('button', { name: 'TQL', exact: true }).click(); // the search that ran, as TQL, to edit further
+  await expect(u.page.getByLabel('Search in TQL')).not.toHaveValue('');
 });
 
 test.describe('UI-01 visual baselines', () => {

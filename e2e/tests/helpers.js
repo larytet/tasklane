@@ -44,3 +44,10 @@ export async function saveAsApi(page, key, body, baseSeq) {
 export async function versions(page, key) {
   return page.evaluate(async key => (await fetch(`/api/v1/issues/${key}/text/description/versions`, { credentials: 'same-origin' })).json(), key);
 }
+
+// The search box speaks plain text by default (Text) and TQL when asked: switch to TQL and give back the box.
+export async function tqlBox(page) {
+  const btn = page.getByRole('button', { name: 'TQL', exact: true });
+  if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click();
+  return page.getByLabel('Search in TQL');
+}

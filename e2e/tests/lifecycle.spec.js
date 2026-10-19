@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { pageErrors, newUser, createIssue } from './helpers.js';
+import { pageErrors, newUser, createIssue, tqlBox } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
 test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
@@ -22,8 +22,8 @@ test('LIFE-09/10: delete shows a plan first, goes to the trash, is restorable fr
   await expect(jana.page.getByRole('button', { name: '+ Create' })).toBeVisible();
   await expect(jana.page.getByText('Moved to the trash')).toBeVisible();
   // gone from lists and search, gone (410) when opened directly
-  await jana.page.getByLabel('Search or TQL').fill(`key = ${key}`);
-  await jana.page.getByLabel('Search or TQL').press('Enter');
+  await (await tqlBox(jana.page)).fill(`key = ${key}`);
+  await (await tqlBox(jana.page)).press('Enter');
   await expect(jana.page.getByText('No issues match.')).toBeVisible();
   await jana.page.goto(`/#/issue/${key}`);
   await expect(jana.page.getByRole('alert')).toContainText('This issue was deleted');
@@ -71,8 +71,8 @@ test('LIFE-05: moving gives a new key; the old key still opens the issue and the
   // search by the old key finds it
   await expect(async () => {
     await jana.page.goto('/#/');
-    await jana.page.getByLabel('Search or TQL').fill(`key = ${key}`);
-    await jana.page.getByLabel('Search or TQL').press('Enter');
+    await (await tqlBox(jana.page)).fill(`key = ${key}`);
+    await (await tqlBox(jana.page)).press('Enter');
     await expect(jana.page.getByRole('listitem')).toHaveCount(1, { timeout: 1500 });
   }).toPass({ timeout: 15000 });
 });
