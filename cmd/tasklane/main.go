@@ -26,6 +26,7 @@ import (
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/mail"
 	"github.com/larytet/tasklane/internal/mcp"
+	"github.com/larytet/tasklane/internal/redis"
 	"github.com/larytet/tasklane/internal/rt"
 	"github.com/larytet/tasklane/internal/search"
 	"github.com/larytet/tasklane/internal/store"
@@ -364,9 +365,20 @@ func serve(ctx context.Context, cfg config.Config) {
 	svc.Matcher = search.Matcher{Engine: pgEngine, Now: svc.Now} // automation reads PostgreSQL, never a lagging copy
 	go svc.RunAutomation(ctx, log.Printf)
 	go sprintJobs(ctx, svc)
+	var bus *redis.Bus
+	if cfg.RedisURL != "" { // live events and presence between nodes; see internal/domain/bus.go
+		o, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			log.Fatal(err)
+		}
+		bus = redis.New(o)
+		svc.AttachBus(domain.RedisBus(bus))
+		go bus.Run(ctx)
+	}
 	var hub *rt.Hub
 	if cfg.Realtime {
 		hub = rt.New(svc)
+		svc.OnRemotePresence = hub.BroadcastPresence
 		go hub.SweepLoop(ctx)
 	} else { // no socket to tell anyone: presence that missed its heartbeats is still removed
 		log.Printf("realtime is switched off: pages work without live updates")
@@ -383,7 +395,13 @@ func serve(ctx context.Context, cfg config.Config) {
 			}
 		}()
 	}
-	srv := &api.Server{Version: svc.NodeVersion, MinClient: cfg.MinClient, Hub: hub, Svc: svc, Search: searcher, SearchAdmin: searchAdmin, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
+	degraded := func() string {
+		if st, ok := svc.BusLink(); ok && !st.Connected {
+			return "the cluster event bus (redis_url) is unreachable: live updates and presence from other nodes are missing until it returns"
+		}
+		return ""
+	}
+	srv := &api.Server{Degraded: degraded, Version: svc.NodeVersion, MinClient: cfg.MinClient, Hub: hub, Svc: svc, Search: searcher, SearchAdmin: searchAdmin, SessionTTL: cfg.SessionTTL, Secure: strings.HasPrefix(cfg.BaseURL, "https://"),
 		Ready: func(ctx context.Context) error {
 			if err := st.Pool.Ping(ctx); err != nil {
 				return err

@@ -25,12 +25,14 @@ import (
 )
 
 type Server struct {
-	Svc         *domain.Service
-	Logf        func(string, ...any) // where server-side problems are reported (default: the standard logger)
-	SessionTTL  time.Duration
-	Secure      bool // set the Secure flag on the session cookie
-	Extra       func(mux *http.ServeMux, s *Server)
-	Ready       func(ctx context.Context) error
+	Svc        *domain.Service
+	Logf       func(string, ...any) // where server-side problems are reported (default: the standard logger)
+	SessionTTL time.Duration
+	Secure     bool // set the Secure flag on the session cookie
+	Extra      func(mux *http.ServeMux, s *Server)
+	Ready      func(ctx context.Context) error
+	// Degraded says what is not working that does not stop this node serving (empty: nothing); it shows on /readyz as a note, not a failure
+	Degraded    func() string
 	Search      search.Searcher
 	SearchAdmin *search.Admin
 	BlobOrigin  string // optional separate origin for signed file links
@@ -92,6 +94,12 @@ func (s *Server) Handler() http.Handler {
 		if s.Ready != nil {
 			if err := s.Ready(r.Context()); err != nil {
 				http.Error(w, "not ready", 503)
+				return
+			}
+		}
+		if s.Degraded != nil { // still ready: a node whose link to the cluster bus is down serves everything, only alone
+			if d := s.Degraded(); d != "" {
+				w.Write([]byte("ready, degraded: " + d))
 				return
 			}
 		}
@@ -310,7 +318,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	s.handle(mux, "DELETE /api/v1/issues/{key}/presence", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		key := strings.ToUpper(r.PathValue("key"))
-		if s.Svc.Presence.Leave(key, actorOf(r).ID) && s.Hub != nil {
+		if s.Svc.LeavePresence(key, actorOf(r).ID) && s.Hub != nil {
 			s.Hub.BroadcastPresence(key)
 		}
 		s.json(w, 200, map[string]bool{"ok": true})

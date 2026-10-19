@@ -87,6 +87,8 @@ type GateState struct {
 }
 
 type Cluster struct {
+	// Events is this node's link to the cluster event bus; absent when no bus is configured.
+	Events     *BusStatus  `json:"events,omitempty"`
 	Nodes      []Node      `json:"nodes"`
 	MinVersion string      `json:"min_version"`
 	Gates      []GateState `json:"gates"`
@@ -300,6 +302,9 @@ func (s *Service) ClusterStatus(ctx context.Context, a Actor) (Cluster, error) {
 		return Cluster{}, err
 	}
 	c := Cluster{Nodes: ns}
+	if st, ok := s.BusLink(); ok {
+		c.Events = &st
+	}
 	if c.Nodes == nil {
 		c.Nodes = []Node{}
 	}

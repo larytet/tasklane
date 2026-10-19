@@ -14,7 +14,6 @@ func barrierGate() domain.Gate {
 	return domain.Gate{Name: domain.PauseBarrierG, MinVersion: "1.0.0", Doc: "pause barrier"}
 }
 
-
 // UPG-03 (pause barrier): with every node new enough, a pause is not reported until the other nodes have finished their own writes in the scope.
 func TestUPG03_PauseWaitsForTheWritesOfOtherNodes(t *testing.T) {
 	e, key := pauseEnv(t)

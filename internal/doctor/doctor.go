@@ -15,6 +15,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/config"
 	"github.com/larytet/tasklane/internal/mail"
+	"github.com/larytet/tasklane/internal/redis"
 	"github.com/larytet/tasklane/internal/store"
 )
 
@@ -123,6 +124,25 @@ func Run(ctx context.Context, cfg config.Config) []Check {
 		} else {
 			os.Remove(f)
 			add("blob store", true, "local filesystem at "+cfg.BlobDir+" is writable")
+		}
+	}
+	switch {
+	case cfg.RedisURL != "":
+		o, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			add("redis", false, err.Error())
+		} else if err := redis.Ping(ctx, o); err != nil {
+			add("redis", false, "cannot use the cluster event bus at "+o.Addr+": "+err.Error()+" (nodes keep working alone meanwhile; check redis_url, the password and the firewall)")
+		} else {
+			add("redis", true, "the cluster event bus at "+o.Addr+" answers")
+		}
+	case st != nil:
+		var nodes int
+		st.Pool.QueryRow(ctx, `SELECT count(*) FROM cluster_node WHERE seen_at > now() - interval '30 seconds'`).Scan(&nodes)
+		if nodes > 1 {
+			add("redis", false, fmt.Sprintf("%d nodes are running and redis_url is not set: live updates and presence reach only the people connected to the node that handled a change; set redis_url to a Redis or Valkey server", nodes), true)
+		} else {
+			add("redis", true, "no cluster event bus configured (a single node needs none)", true)
 		}
 	}
 	if cfg.SearchEngine == "opensearch" {

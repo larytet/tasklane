@@ -22,6 +22,10 @@ import (
 )
 
 type Service struct {
+	// Bus carries live events and presence between nodes (see AttachBus); OnRemotePresence is told when another node's presence changed what an issue shows.
+	Bus              EventBus
+	OnRemotePresence func(issueKey string)
+	busID            string
 	// Hosted turns on the hosted edition's plans, quotas and metering (SPEC 17.9); HostedRegion is the region this deployment serves. Off, none of it exists.
 	Hosted       bool
 	HostedRegion string
@@ -215,6 +219,12 @@ type Event struct {
 }
 
 func (s *Service) emit(e Event) {
+	s.emitLocal(e)
+	s.busSend(busMsg{Kind: "event", Event: &e})
+}
+
+// emitLocal tells this node's own listeners and pages (a change made here, or one another node announced on the bus).
+func (s *Service) emitLocal(e Event) {
 	if s.Publish != nil {
 		s.Publish(e)
 	}

@@ -842,6 +842,10 @@ progress, `fsck` results, scan queue, and health of the store.
 | Helm chart | App, optional ingress, references to external PostgreSQL, Redis and object storage | Kubernetes |
 | Linux tarball with systemd unit | The binaries and the engine, a sample unit and config | Single node without containers |
 
+The Compose files are also the test environment. An `interop` profile starts two app nodes with real PostgreSQL, Redis
+or Valkey and OpenSearch, and a few end-to-end tests prove basic interoperability with those real services (search on
+OpenSearch, presence and events across nodes through Redis); the rest of the tests may use in-process doubles (TESTPLAN 3.3).
+
 Not shipped in v1: Windows services, deb/rpm packages (the tarball covers bare Linux), a managed installer for PostgreSQL.
 Browsers: the latest two versions of Chrome, Edge, Firefox and Safari.
 

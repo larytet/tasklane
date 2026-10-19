@@ -313,7 +313,8 @@ Deployment profiles, same artifact (one Go binary):
 
 The single-node profile is the latency reference: no network hops other than browser to app, and app to local Postgres.
 Both profiles ship as Docker Compose files under `deploy/compose/`; the same files, with test overlays, are the test
-environments (TESTPLAN 3.1), so what is tested is what is shipped.
+environments (TESTPLAN 3.1), so what is tested is what is shipped. The `interop` profile (two nodes, real Redis and
+real OpenSearch) carries the basic interoperability scenarios of TESTPLAN 3.3; in-process doubles cover the rest.
 
 ### 10.1 Suggested Go layout
 

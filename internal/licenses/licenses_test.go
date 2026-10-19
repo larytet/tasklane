@@ -115,6 +115,10 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 				if m == "seat" && (strings.HasSuffix(p, "internal/domain/hosted.go") || (strings.HasSuffix(p, "internal/config/config.go") && strings.Contains(line, `Name: "hosted"`))) {
 					continue
 				}
+				// the cluster bus connects to the Redis or Valkey server the operator configured (redis_url) and nothing else
+				if strings.HasSuffix(p, "internal/redis/redis.go") && strings.Contains(m, "net.Dial") {
+					continue
+				}
 				// the S3 backend talks to the bucket the operator configured and nothing else
 				if strings.HasSuffix(p, "internal/blob/s3.go") {
 					continue

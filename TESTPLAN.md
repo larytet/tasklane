@@ -27,6 +27,7 @@ Tooling is a recommendation; the contract is the level and the gate, not the pro
 | Unit | Pure Go and TS logic: TQL parser, workflow engine, rank, permission evaluation, converters | `go test`, Vitest | Every commit |
 | Property / fuzz | Three-way merge properties, TQL parser, ADF and Markdown converters, import mappers | `testing/quick`/`rapid`, `go test -fuzz`, fast-check | Every commit (short), nightly (long) |
 | Integration | Handlers + real PostgreSQL (+ Redis for multi-node tests), outbox workers, WS gateway | testcontainers, `httptest` | Every commit |
+| Real-service interoperability (smoke) | A few end-to-end scenarios against a **real Redis or Valkey and a real OpenSearch** started by Docker Compose (section 3.3): the stack comes up, search runs on OpenSearch, two app nodes share events and presence through Redis. Basic interoperability only, no edge cases | Compose `interop` profile, Go integration tests with the real binary, one Playwright scenario | PR, nightly |
 | Contract / API compatibility | `/rest/api/3` subset vs recorded Jira responses; webhook payloads; exchange formats | Golden files, schema validation | Every commit |
 | End to end (UI) | Real browser against a real server, multi-user scenarios | Playwright, multiple browser contexts | PR, nightly |
 | Visual regression | Components and screens in dark, light, compact, comfortable | Playwright screenshots, per-theme baselines | PR |
@@ -74,7 +75,8 @@ shipped `deploy/compose/` files; test overlays add fault injection, fakes and ru
 waits for health, seeds data, runs the suite and tears down (`docker compose -p tl-$RUN_ID ... up --wait`, then
 `down -v`); a unique project name and random published ports let CI run many projects in parallel.
 
-**Layout**
+**Layout** (the target; today only `docker-compose.yml`, `docker-compose.test.yml` and the new, self-contained
+`docker-compose.interop.yml` of section 3.3 exist or are required)
 
 ```
 deploy/compose/
@@ -111,6 +113,7 @@ deploy/compose/
 | `scm-gitlab` | `gitlab-ce` (self-managed, seeded group and project; needs about 4 GB RAM and a few minutes to start) | GIT tests, nightly |
 | `jira-fake` | `jira-fake`: recorded Jira REST, webhook and permission fixtures; scripted 429 with `Retry-After`, 5xx, latency, resets, truncated bodies, and dropped, delayed, duplicated and reordered webhooks; exotic permission schemes and grant types, deleted and closed accounts, a 10,000-issue project | MIR, IMP, EXP on every PR and nightly, local dev |
 | `search` | `opensearch` (one node in CI, three nodes for performance runs) | TQL-08..20, PERF-05 |
+| `interop` | `app1`, `app2`, `postgres`, `redis` (or `valkey`), `opensearch` (one node, security off in CI), all pinned by digest, healthchecks, no fault injection; defined in the one file `deploy/compose/docker-compose.interop.yml` and started by `make interop` | INTEROP-01..06 (section 3.3) |
 | `egress` | `evil-sink` on a private range plus an internal-only network | SSRF tests |
 | `obs` | `prometheus`, `otel-collector`, `grafana` | PERF and LOAD runs |
 | `runners` | `playwright` (official image), `k6`, the simulated-user fleet for LIVE-09 | All E2E, load and campaign runs |
@@ -143,7 +146,8 @@ the real Jira verification before a major release (section 5.17).
 
 | Dependency | Commit (`go test`) | PR (Compose) | Nightly / release | Why |
 |---|---|---|---|---|
-| PostgreSQL, Redis or Valkey | real (testcontainers) | real | real, plus `ha` | Cheap to run; mocking them hides the bugs that matter (locks, outbox, GIN plans) |
+| PostgreSQL | real (testcontainers) | real | real, plus `ha` | Cheap to run; mocking it hides the bugs that matter (locks, outbox, GIN plans) |
+| Redis or Valkey | in-process `redismock` is allowed for fast tests of the cluster code; **at least the INTEROP scenarios run against the real server** | **real** (`interop` profile, two app nodes) | real, plus `ha` | A mock written by the same author as the client shares its misreadings of the protocol; the real server is cheap, so the basic cross-node behavior is always proved against it (section 3.3) |
 | **Outbound SMTP** | **mock:** in-process Go SMTP server in the test (scripted greeting, EHLO extensions, AUTH, STARTTLS with a throwaway CA, 4xx and 5xx at each stage, drop after DATA, slow reads) | **mock:** `mailpit` (inspect rendered mail by API, no delivery) | mock, plus a real relay smoke: one message through a real provider to a seeded test mailbox, verified by IMAP | No test may send real mail; the protocol and failure paths are what we test, and only a mock can fail on demand. The real relay run proves deliverability and DKIM (MAIL-20) once a night |
 | Inbound mail (IMAP, SMTP listener) | in-process fake for parser units | **real server:** `greenmail` | real | A real IMAP server behaves like one (UIDVALIDITY, IDLE); the message content comes from the `mail-replies` and `mail-hostile` corpora |
 | Mail provider APIs (SES, SendGrid, Mailgun, Postmark) | mock (`httptest`, payloads and signature schemes from each provider's documentation) | mock: provider-webhook fake | real sandbox or test-token send where the provider offers one free (Postmark test token, Mailgun sandbox, SES sandbox to verified addresses); recorded exchanges replayed to detect drift | Per-message cost and verified-sender setup; contract check keeps the mock honest |
@@ -153,7 +157,7 @@ the real Jira verification before a major release (section 5.17).
 | S3 | `fs` backend and in-process fake | real MinIO | real MinIO and AWS S3 (budgeted) | MinIO is real S3 semantics for free; AWS differences caught nightly |
 | ClamAV | built-in EICAR check | real `clamav` | real | Container is free |
 | OIDC and SAML identity provider | in-process fake IdP for token units | real `keycloak` | real | Real flows, redirects and signatures |
-| OpenSearch | none | real (when the engine is enabled) | real, 1 and 3 nodes | Needed for TQL-05 and fan-out; not mocked |
+| OpenSearch | in-process `osmock` is allowed for translator, indexer and fallback units; **at least the INTEROP scenarios run against the real cluster** | **real** (`interop` profile, one node; engine enabled) | real, 1 and 3 nodes | Needed for TQL-05 and fan-out; the mock must never be the only evidence that a query or a mapping is accepted by OpenSearch (section 3.3) |
 | Webhook targets (outbound webhooks, automation) | `httptest` receiver | `webhook-sink` container recording requests | same | Receiver behavior is ours to script |
 | DNS (SPF, DKIM, DMARC checks) | in-process resolver stub | a test DNS zone container | real lookups against test domains we own | MAIL-20 |
 | Outbound egress to unknown hosts | blocked | blocked (internal network; named exceptions only) | blocked, `egress` profile | SSRF suite SEC-12, no accidental calls |
@@ -171,6 +175,44 @@ Rules for the mocks:
   sandbox at a time, unique names per run, teardown in all cases, and a janitor for leftovers. A run that exhausts the
   budget reports "budget exhausted" and fails, never silently passes.
 - **Credentials** for real services are test accounts only, held in the CI vault, absent from pull requests from forks.
+
+### 3.3 Real-service interoperability smoke (INTEROP)
+
+**Purpose.** Everything else in this plan may run against in-process doubles. These few end-to-end scenarios prove that
+the shipped binary works with the **real Redis (or Valkey) and the real OpenSearch** it is documented to work with.
+They cover **basic interoperability only**: the happy path of each integration. Edge cases, failures, scale and upgrades
+stay with the existing cases (TQL-16, CHAOS-02, DUR-06, PERF-05) and are not part of this section for now.
+
+**Environment.** The Compose `interop` profile (section 3.1), started with `make interop`. For now it is the **only new
+Compose layout**: one self-contained file, `deploy/compose/docker-compose.interop.yml`, next to the existing
+`docker-compose.yml`. The five-file layout above (`compose.base`, `single`, `multi`, `ha`, `test`) is the target for
+later and is not built as part of this work. The file holds two app nodes, PostgreSQL,
+Redis or Valkey 7 or newer, and one OpenSearch node (the supported version range's lowest and highest minor are run
+nightly, one of them per PR). The app is started with `search_engine=opensearch`, the OpenSearch URL, and the Redis URL
+set, so the test runs the real code path, not a fallback. Images are pinned by digest; readiness uses healthchecks and
+`/readyz`. No fault injection, no toxiproxy, no fake clock.
+
+| Id | Scenario (real services only) | Pass when |
+|---|---|---|
+| INTEROP-01 | Bring the profile up; `tasklane doctor` and `/readyz` on both nodes | Both nodes ready; `doctor` reports Redis and OpenSearch reachable with their versions; the OpenSearch index and alias exist with the expected mapping |
+| INTEROP-02 | Through the API create a project and a few dozen issues with text, comments and custom fields; wait for the indexer to catch up; run about ten ordinary TQL and text searches (field equals, text match, `ORDER BY`, a permission-restricted user) | Every query returns the same result set as the PostgreSQL engine on the same data; the response states OpenSearch served it (no fallback); the restricted user sees only what they may see |
+| INTEROP-03 | Update, transition and delete issues and comments; wait | The index follows each change (new text is found, deleted issues disappear, a moved issue is found under its new project); `tasklane reindex` rebuilds the index and the same queries still pass |
+| INTEROP-04 | Two users on **different nodes** open the same issue; one edits and saves, then the other saves from the old version | Presence of each user appears on the other's node; the save event reaches the other node's socket; the second save gets the normal `TextConflict`, not data loss |
+| INTEROP-05 | Pause a project (the barrier of UPG-03 and PAUSE) from node 1 while a writer on node 2 saves | Node 2 acknowledges and then refuses writes with the pause response; resume clears it on both nodes |
+| INTEROP-06 | One Playwright scenario, two browser contexts on different nodes: sign in, open an issue, see the other user's presence, type in the search box | The presence indicator shows, and the search results come from OpenSearch (checked by the response header or the `doctor`-visible engine in use) |
+
+**Rules**
+
+- **Real services must be real.** The suite fails, not skips, if Redis or OpenSearch is unreachable; a test that
+  silently falls back to PostgreSQL or to local-only presence is a failure (assert the engine and the bus in use).
+- **Basic only.** A scenario that needs a killed connection, a red cluster, a slow node, TLS or credential rotation, or
+  a large dataset belongs to the chaos and search cases, not here. New INTEROP cases need a reason that a mock cannot
+  give the evidence.
+- **Mocks stay, and are checked.** Where the same scenario also runs against `redismock` and `osmock`, a difference in
+  the result is a mock bug and is fixed in the mock (contract check, section 3.2).
+- **Budget:** the profile starts in under three minutes and the six scenarios finish in under ten, so the suite can run
+  on every pull request. Artifacts on failure follow section 3.1.
+- **Local use:** `make interop` runs the same profile and suite on a developer machine with Docker.
 
 ## 4. Traceability (spec area to tests)
 
@@ -320,9 +362,9 @@ live in a version-controlled file so changes are reviewed.
 | Id | Fault | Expected behavior |
 |---|---|---|
 | CHAOS-01 | Kill an app node (single and multi-node) mid-save | Clients reconnect within seconds; no acknowledged save lost; retried saves applied once; drafts intact; UI shows state |
-| CHAOS-02 | Redis down, then restored (multi-node) | Readiness degraded; presence and events local only and cache invalidation on TTL; saves unaffected; full recovery on return |
+| CHAOS-02 | Redis down, then restored (multi-node) | Readiness degraded; presence and events local only and cache invalidation on TTL; saves unaffected; full recovery on return | | **covered (M5.24)** `TestCHAOS02_*` against `redismock` (saves on both nodes unaffected and fast while down; each node's own events and presence continue, the other's missing; the link status and cluster status show it; events and presence resume on return; nothing late; every save in the database) and `TestRedisGoesAwayAndComesBack`; `/readyz` degraded note. The real-Redis evidence is INTEROP-04 (section 3.3)
 | CHAOS-03 | Packet loss and latency (5% loss, 300 ms) | Editing and saving stay usable; retries idempotent; conflicts still caught |
-| CHAOS-04 | Network partition between nodes | Saves on either side stay correct (the database decides); presence local; events resume on heal |
+| CHAOS-04 | Network partition between nodes | Saves on either side stay correct (the database decides); presence local; events resume on heal | | **covered (M5.24)** `TestCHAOS04_*` and `TestOneNodeCutOffFromRedis` (a node cut off from the bus: two edits from the same base, one on each side, give exactly one winner and one conflict; events and presence stay on their side; the cut-off node reads the truth from the database; heal resumes both); mutation-tested
 | CHAOS-05 | Slow or full disk | Backpressure, clear error, no corruption | **covered** `TestCHAOS05_*` (a full disk: 507 `storage_full` with a plain message, nothing left behind, other work unaffected, recovery; a stuck disk: the next upload refused at once as busy, interactive p95 unchanged, clean failure and slot release; the 507 mapping mutation-tested). The database's own disk-full error is mapped but not exercised
 | CHAOS-06 | Realtime layer disabled | Ticket loads; saves work through REST; presence absent; conflicts still caught | **covered** `TestCHAOS06_*` (no hub: the ticket answers 404 `realtime_disabled`, presence by HTTP, a stale save caught) and e2e `CHAOS-06` (the page asks once and stops, edits, saves, and gets the conflict dialog)
 | CHAOS-07 | Deploy with graceful drain | Clients reconnect to another node in under 1 s; no lost save; drafts untouched | **covered** `TestCHAOS07_*`: the hub (24 pages told to reconnect with spread delays, sockets closed, new ones refused) and the real binary on SIGTERM (readiness fails within a second while liveness stays up, an open page gets the hint, a request in flight when the signal arrives is still answered, clean exit; each step mutation-tested). Not covered: a real load balancer and a multi-node rolling restart
@@ -716,7 +758,7 @@ owner decides whether to wait.
 | Stage | Contents | Gate |
 |---|---|---|
 | Commit | Format, lint, unit, short property/fuzz, contract, merge corpus, bundle-size budgets | All green, under about 10 minutes |
-| Pull request | Integration, E2E smoke (including a two-user conflict), visual, axe, security scanners, mirror tests against `jira-fake`, mail against the SMTP mock | All green; visual diffs reviewed |
+| Pull request | Integration, E2E smoke (including a two-user conflict), **real-service interoperability smoke with Redis and OpenSearch (INTEROP-01..06, section 3.3)**, visual, axe, security scanners, mirror tests against `jira-fake`, mail against the SMTP mock | All green; visual diffs reviewed |
 | Nightly | Long property/fuzz, full E2E, chaos subset, load subset on `perf`, real-relay mail smoke, real GitHub, AWS S3, mock contract checks, soak (weekly) | Trend report; regression opens an issue |
 | Release candidate | Full perf (all PERF and LOAD), full chaos, upgrade and DR, manual a11y, security review, import/export compatibility | Exit criteria below |
 | Major release candidate, extra | Real Jira verification (5.17), run manually once, in addition to the row above | JREAL-01..10 passed or excepted; see release criteria |
@@ -785,6 +827,19 @@ Every severity 1 or 2 defect gets a regression test (a document triple added to 
 - Choose the concrete tools per level (section 2) at the start of M1; keep the gates, not the products.
 - Decide the reference `perf` hardware profile and the reference mid-range phone profile.
 - External penetration test (SEC-11) is postponed; decide when to schedule it, and revisit before any public or multi-tenant hosted offering.
+
+### 11.1 Usage budget stop (rule for the implementing agent)
+
+The account has a weekly usage limit. A status-line script (`~/usage-statusline.sh`) records it in
+`~/.claude/usage.log` and keeps the flag file `~/.claude/usage-pause.flag` while weekly use is at or above 50%.
+
+- **Before starting each milestone**, check whether the flag file exists (`test -e ~/.claude/usage-pause.flag`).
+- **If it exists**, do not start the milestone. Finish and commit only what is already in progress, and only with the tests
+  green (never commit on red to beat the limit). Then write one line in STATUS.md ("paused at weekly N%, next: ...") and
+  stop, telling the user that it is waiting. Do not work around the flag, delete it, or edit the script.
+- **If the file is missing**, continue as usual. A missing or stale `usage.log` means the status line is not installed,
+  not that the budget is fine; mention that once in STATUS.md.
+- The flag clears on its own when the weekly window resets. The user can resume, or raise the limit with `USAGE_PAUSE_AT`.
 
 ## 12. Implementation status
 

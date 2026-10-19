@@ -143,5 +143,6 @@ func (s *Service) HeartbeatChanged(ctx context.Context, a Actor, key, field stri
 	var offline bool
 	s.DB.QueryRow(ctx, `SELECT appear_offline FROM app_user WHERE id=$1`, a.ID).Scan(&offline)
 	changed := s.Presence.Heartbeat(is.Key, a, field, offline)
+	s.busSend(busMsg{Kind: "presence", Presence: &presenceBusIn{Issue: is.Key, UserID: a.ID, Name: a.Label, Field: field, Offline: offline}})
 	return s.Presence.List(is.Key, a.ID), changed, nil
 }
