@@ -26,6 +26,7 @@ type Service struct {
 	Bus              EventBus
 	OnRemotePresence func(issueKey string)
 	busID            string
+	projOrg          sync.Map // project key -> organization id
 	// Hosted turns on the hosted edition's plans, quotas and metering (SPEC 17.9); HostedRegion is the region this deployment serves. Off, none of it exists.
 	Hosted       bool
 	HostedRegion string

@@ -98,14 +98,18 @@ func (s *Service) GetServiceTerms(ctx context.Context, a Actor, orgID string) (S
 }
 
 type MaintenanceNotice struct {
-	ID        string     `json:"id"`
-	OrgID     string     `json:"org_id"`
-	Kind      string     `json:"kind"`
-	Starts    time.Time  `json:"starts_at"`
-	Ends      time.Time  `json:"ends_at"`
-	Message   string     `json:"message"`
-	CreatedBy string     `json:"created_by,omitempty"`
-	Cancelled *time.Time `json:"cancelled_at,omitempty"`
+	ID         string     `json:"id"`
+	OrgID      string     `json:"org_id"`
+	Kind       string     `json:"kind"`
+	Starts     time.Time  `json:"starts_at"`
+	Ends       time.Time  `json:"ends_at"`
+	Message    string     `json:"message"`
+	CreatedBy  string     `json:"created_by,omitempty"`
+	Cancelled  *time.Time `json:"cancelled_at,omitempty"`
+	HoldWrites bool       `json:"hold_writes"`
+	Started    *time.Time `json:"started_at,omitempty"`
+	Finished   *time.Time `json:"finished_at,omitempty"`
+	LastError  string     `json:"last_error,omitempty"`
 }
 
 type MaintenanceIn struct {
@@ -113,6 +117,8 @@ type MaintenanceIn struct {
 	Starts  time.Time `json:"starts_at"`
 	Ends    time.Time `json:"ends_at"`
 	Message string    `json:"message"`
+	// HoldWrites (default true) holds the tenant's writes for the whole of the work, as a pause on the organization; false only announces it
+	HoldWrites *bool `json:"hold_writes"`
 }
 
 // insideWindow reports whether the whole span lies within one occurrence of the weekly window.
@@ -172,8 +178,9 @@ func (s *Service) ScheduleMaintenance(ctx context.Context, a Actor, orgID string
 		if clash > 0 {
 			return &ConflictError{"other work is already announced for that time"}
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO maintenance_notice(org_id,kind,starts_at,ends_at,message,created_by) VALUES($1::uuid,$2,$3,$4,$5,$6) RETURNING id::text`,
-			orgID, in.Kind, in.Starts, in.Ends, in.Message, a.Label).Scan(&n.ID); err != nil {
+		hold := in.HoldWrites == nil || *in.HoldWrites
+		if err := tx.QueryRow(ctx, `INSERT INTO maintenance_notice(org_id,kind,starts_at,ends_at,message,created_by,hold_writes) VALUES($1::uuid,$2,$3,$4,$5,$6,$7) RETURNING id::text`,
+			orgID, in.Kind, in.Starts, in.Ends, in.Message, a.Label, hold).Scan(&n.ID); err != nil {
 			return err
 		}
 		return s.audit(ctx, tx, a, "maintenance.scheduled", n.ID, map[string]any{"org": orgID, "kind": in.Kind, "starts": in.Starts, "ends": in.Ends})
@@ -186,8 +193,8 @@ func (s *Service) ScheduleMaintenance(ctx context.Context, a Actor, orgID string
 
 func (s *Service) loadNotice(ctx context.Context, id string) (MaintenanceNotice, error) {
 	var n MaintenanceNotice
-	err := s.DB.QueryRow(ctx, `SELECT id::text,org_id::text,kind,starts_at,ends_at,message,created_by,cancelled_at FROM maintenance_notice WHERE id::text=$1`, id).
-		Scan(&n.ID, &n.OrgID, &n.Kind, &n.Starts, &n.Ends, &n.Message, &n.CreatedBy, &n.Cancelled)
+	err := s.DB.QueryRow(ctx, `SELECT id::text,org_id::text,kind,starts_at,ends_at,message,created_by,cancelled_at,hold_writes,started_at,finished_at,last_error FROM maintenance_notice WHERE id::text=$1`, id).
+		Scan(&n.ID, &n.OrgID, &n.Kind, &n.Starts, &n.Ends, &n.Message, &n.CreatedBy, &n.Cancelled, &n.HoldWrites, &n.Started, &n.Finished, &n.LastError)
 	if err != nil {
 		return n, ErrNotFound
 	}
@@ -211,6 +218,9 @@ func (s *Service) CancelMaintenance(ctx context.Context, a Actor, orgID, id, rea
 	}
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE maintenance_notice SET cancelled_at=$2,cancel_reason=$3 WHERE id::text=$1`, id, s.Now(), reason); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM pause_lease WHERE owner=$1`, "maintenance:"+id); err != nil { // work already under way stops holding the tenant's writes
 			return err
 		}
 		return s.audit(ctx, tx, a, "maintenance.cancelled", id, map[string]any{"org": orgID, "reason": reason})
@@ -271,4 +281,69 @@ func (s *Service) UpcomingMaintenance(ctx context.Context, a Actor) []Maintenanc
 		return []MaintenanceNotice{}
 	}
 	return n
+}
+
+// RunMaintenanceOnce does what announced work calls for at this moment, and is safe to call from every node: the first to find a notice due claims it,
+// takes a pause on the tenant's organization lasting until the work's end, and the pause ends by itself at its deadline (it is also released at once
+// when the work is cancelled). A claim that could not be carried out (the writes did not drain in time) is released and tried again at the next call
+// while the window lasts, with the reason kept on the notice.
+func (s *Service) RunMaintenanceOnce(ctx context.Context) {
+	if !s.Hosted {
+		return
+	}
+	operator := Actor{Admin: true, Label: "maintenance"}
+	// finished work: mark it, and let go of its hold
+	rows, err := s.DB.Query(ctx, `SELECT id::text FROM maintenance_notice WHERE started_at IS NOT NULL AND finished_at IS NULL AND ends_at <= $1`, s.Now())
+	if err == nil {
+		var done []string
+		for rows.Next() {
+			var id string
+			rows.Scan(&id)
+			done = append(done, id)
+		}
+		rows.Close()
+		for _, id := range done {
+			s.DB.Exec(ctx, `DELETE FROM pause_lease WHERE owner=$1`, "maintenance:"+id)
+			s.leases(ctx, true)
+			s.DB.Exec(ctx, `UPDATE maintenance_notice SET finished_at=$2 WHERE id::text=$1`, id, s.Now())
+		}
+	}
+	// work that is due: one at a time
+	for {
+		var id, org string
+		var ends time.Time
+		err := s.DB.QueryRow(ctx, `UPDATE maintenance_notice SET started_at=$1, last_error='' WHERE started_at IS NULL AND id = (SELECT id FROM maintenance_notice
+			WHERE cancelled_at IS NULL AND started_at IS NULL AND hold_writes AND starts_at <= $1 AND ends_at > $1 ORDER BY starts_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+			RETURNING id::text, org_id::text, ends_at`, s.Now()).Scan(&id, &org, &ends)
+		if err != nil {
+			return
+		}
+		drain := 60 * time.Second
+		hold := ends.Sub(s.Now()) - drain
+		if hold < time.Second {
+			hold = time.Second
+		}
+		if _, err := s.RequestPause(ctx, operator, PauseIn{Scope: "org:" + org, Owner: "maintenance:" + id, DrainWaitMS: int(drain / time.Millisecond), HoldMS: int(hold / time.Millisecond)}); err != nil {
+			s.DB.Exec(ctx, `UPDATE maintenance_notice SET started_at=NULL, last_error=$2 WHERE id::text=$1`, id, trimErr(err))
+			return
+		}
+		s.DB.Exec(ctx, `INSERT INTO audit_event(actor_label,action,target,detail) VALUES('maintenance','maintenance.started',$1,$2)`, id, jsonMarshal(map[string]any{"org": org, "ends": ends}))
+	}
+}
+
+// RunMaintenance keeps announced work going (hosted installations only).
+func (s *Service) RunMaintenance(ctx context.Context, logf func(string, ...any)) {
+	if !s.Hosted {
+		return
+	}
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		s.RunMaintenanceOnce(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }

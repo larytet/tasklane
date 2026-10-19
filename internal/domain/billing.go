@@ -360,3 +360,63 @@ func InvoiceCSV(inv Invoice) string {
 type UpstreamError struct{ Msg string }
 
 func (e *UpstreamError) Error() string { return e.Msg }
+
+// RunBillingOnce makes and delivers the invoices that are owed: for every organization with a plan and a price, the month before this one, once, as soon as
+// the month is over. An invoice that was made but could not be delivered is delivered at a later call. Nothing is made for an organization with no
+// prices (nothing to charge) or no recorded usage in that month. Safe from every node: the one live invoice per month is the database's rule.
+func (s *Service) RunBillingOnce(ctx context.Context) (made, sent int) {
+	if !s.Hosted {
+		return
+	}
+	operator := Actor{Admin: true, Label: "billing"}
+	prev := s.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+	rows, err := s.DB.Query(ctx, `SELECT org_id::text FROM org_plan WHERE price_base_cents+price_seat_cents+price_gib_cents+price_customer_cents > 0`)
+	if err != nil {
+		return
+	}
+	var orgs []string
+	for rows.Next() {
+		var id string
+		rows.Scan(&id)
+		orgs = append(orgs, id)
+	}
+	rows.Close()
+	for _, org := range orgs {
+		var have string
+		var status string
+		err := s.DB.QueryRow(ctx, `SELECT number,status FROM invoice WHERE org_id::text=$1 AND period=$2 AND status<>'void'`, org, prev).Scan(&have, &status)
+		if err != nil {
+			inv, gerr := s.GenerateInvoice(ctx, operator, org, prev)
+			if gerr != nil {
+				continue // no usage recorded for the month, or someone else made it a moment ago
+			}
+			made++
+			have, status = inv.Number, inv.Status
+		}
+		if status == "open" && s.Billing != nil {
+			if _, err := s.SendInvoice(ctx, operator, org, have); err == nil {
+				sent++
+			}
+		}
+	}
+	return
+}
+
+// RunBilling runs RunBillingOnce every hour (hosted installations only).
+func (s *Service) RunBilling(ctx context.Context, logf func(string, ...any)) {
+	if !s.Hosted {
+		return
+	}
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		if m, n := s.RunBillingOnce(ctx); m+n > 0 {
+			logf("billing: %d invoice(s) made, %d delivered", m, n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}

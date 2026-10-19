@@ -81,3 +81,19 @@ A notice is refused unless the work lies inside the window, starts after the pro
 for that tenant. The tenant's people see the next one in a banner from two weeks before until it is over (`scheduled` in `GET /api/v1/system/status`), and a
 cancelled one disappears with its reason kept in the audit log. The notice announces; the work itself is done with the pause (docs/BACKUP.md) and the
 rolling upgrade procedure (docs/UPGRADE.md). The operator sets terms and notices; a tenant's administrators read their own.
+
+## Maintenance that does what it announces
+
+A maintenance notice is not only a banner. When its time comes the first node to find it due (every node looks every ten seconds) takes a **pause on the
+tenant's organization**: the organization's writes wait a moment and are then refused with `503` and `Retry-After` while reads, drafts and presence carry
+on, other tenants are not touched, and the pause ends at the work's end by itself, or at once if the work is cancelled. A notice made with
+`"hold_writes": false` only announces. If the writes cannot be drained in time, or another pause is in the way, the claim is released with the reason on the notice
+(`last_error`) and tried again while the window lasts. Starting and finishing are audited (`maintenance.started`).
+
+Pauses accept three scopes: `instance`, `org:<organization id>` and `project:<KEY>`; scopes that cover any of the same writes cannot be held at once.
+
+## Invoices on schedule
+
+Once a month ends, the first node to look (every hour) makes the invoice of the month just past for every organization that has a plan and a price and
+recorded usage, and delivers it if a billing endpoint is configured; an invoice that could not be delivered is delivered at a later look, and a month that
+already has a live invoice is left alone.

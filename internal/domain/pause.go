@@ -69,8 +69,41 @@ var PauseAdmitWait = 2 * time.Second
 
 const pauseCacheTTL = time.Second
 
-func scopeOf(projectKey string) []string {
-	return []string{"instance", "project:" + strings.ToUpper(projectKey)}
+// orgOfProject is the organization a project belongs to (it never changes, so it is remembered).
+func (s *Service) orgOfProject(ctx context.Context, projectKey string) string {
+	k := strings.ToUpper(projectKey)
+	if v, ok := s.projOrg.Load(k); ok {
+		return v.(string)
+	}
+	var org string
+	if s.DB.QueryRow(ctx, `SELECT org_id::text FROM project WHERE key=$1`, k).Scan(&org) != nil {
+		return ""
+	}
+	s.projOrg.Store(k, org)
+	return org
+}
+
+// scopesFor are the pause scopes that cover a write to a project: the whole instance, its organization, and the project.
+func (s *Service) scopesFor(ctx context.Context, projectKey string) []string {
+	out := []string{"instance", "project:" + strings.ToUpper(projectKey)}
+	if org := s.orgOfProject(ctx, projectKey); org != "" {
+		out = append(out, "org:"+org)
+	}
+	return out
+}
+
+// scopesOverlap reports whether two pause scopes cover any of the same writes.
+func (s *Service) scopesOverlap(ctx context.Context, a, b string) bool {
+	if a == b || a == "instance" || b == "instance" {
+		return true
+	}
+	if strings.HasPrefix(a, "project:") && strings.HasPrefix(b, "org:") {
+		a, b = b, a
+	}
+	if strings.HasPrefix(a, "org:") && strings.HasPrefix(b, "project:") {
+		return s.orgOfProject(ctx, strings.TrimPrefix(b, "project:")) == strings.TrimPrefix(a, "org:")
+	}
+	return false
 }
 
 // leases returns the active leases (expired ones are removed), cached for a second so the hot path stays one map read.
@@ -102,7 +135,7 @@ func (s *Service) leases(ctx context.Context, force bool) []PauseLease {
 
 func (s *Service) blockedBy(ctx context.Context, projectKey string) *PauseLease {
 	for _, l := range s.leases(ctx, false) {
-		for _, sc := range scopeOf(projectKey) {
+		for _, sc := range s.scopesFor(ctx, projectKey) {
 			if l.Scope == sc {
 				return &l
 			}
@@ -144,14 +177,17 @@ func (s *Service) admitGate(ctx context.Context, projectKey string) (func(), err
 		}
 	}
 	gt := s.g()
+	orgScope := "org:" + s.orgOfProject(ctx, projectKey)
 	gt.mu.Lock()
 	gt.inflight[projectKey]++
+	gt.inflight[orgScope]++
 	gt.inflight["*"]++
 	gt.mu.Unlock()
 	// a pause may have started between the check and the registration: back out and wait again
 	if l := s.blockedBy(ctx, projectKey); l != nil && l.State == "paused" {
 		gt.mu.Lock()
 		gt.inflight[projectKey]--
+		gt.inflight[orgScope]--
 		gt.inflight["*"]--
 		gt.mu.Unlock()
 		return s.admit(ctx, projectKey)
@@ -159,6 +195,7 @@ func (s *Service) admitGate(ctx context.Context, projectKey string) (func(), err
 	return func() {
 		gt.mu.Lock()
 		gt.inflight[projectKey]--
+		gt.inflight[orgScope]--
 		gt.inflight["*"]--
 		gt.mu.Unlock()
 	}, nil
@@ -171,11 +208,14 @@ func (s *Service) inflightIn(scope string) int {
 	if scope == "instance" {
 		return gt.inflight["*"]
 	}
+	if strings.HasPrefix(scope, "org:") {
+		return gt.inflight[scope]
+	}
 	return gt.inflight[strings.ToUpper(strings.TrimPrefix(scope, "project:"))]
 }
 
 type PauseIn struct {
-	Scope       string `json:"scope"` // "instance" or "project:KEY"
+	Scope       string `json:"scope"` // "instance", "org:ID" or "project:KEY"
 	Owner       string `json:"owner"`
 	Mode        string `json:"mode"`          // pause (hold writes), snapshot (marker only, no hold), none
 	DrainWaitMS int    `json:"drain_wait_ms"` // default 60000
@@ -195,8 +235,14 @@ func (s *Service) RequestPause(ctx context.Context, a Actor, in PauseIn) (*Pause
 	if mode != "pause" && mode != "snapshot" && mode != "none" {
 		return nil, invalid("mode must be pause, snapshot or none")
 	}
-	if in.Scope != "instance" && !strings.HasPrefix(in.Scope, "project:") {
-		return nil, invalid("scope must be instance or project:KEY")
+	if in.Scope != "instance" && !strings.HasPrefix(in.Scope, "project:") && !strings.HasPrefix(in.Scope, "org:") {
+		return nil, invalid("scope must be instance, org:ID or project:KEY")
+	}
+	if strings.HasPrefix(in.Scope, "org:") {
+		if !s.orgExists(ctx, strings.TrimPrefix(in.Scope, "org:")) {
+			return nil, invalid("unknown organization in scope")
+		}
+		in.Scope = "org:" + strings.ToLower(strings.TrimPrefix(in.Scope, "org:"))
 	}
 	if strings.HasPrefix(in.Scope, "project:") {
 		if _, err := s.projectID(ctx, strings.TrimPrefix(in.Scope, "project:")); err != nil {
@@ -237,7 +283,7 @@ func (s *Service) RequestPause(ctx context.Context, a Actor, in PauseIn) (*Pause
 		for rows.Next() {
 			var sc, ow string
 			rows.Scan(&sc, &ow)
-			if sc == in.Scope || sc == "instance" || in.Scope == "instance" {
+			if s.scopesOverlap(ctx, sc, in.Scope) {
 				clash = sc + " (" + ow + ")"
 			}
 		}
@@ -287,7 +333,7 @@ func (s *Service) marker(ctx context.Context, mode, scope string) (Marker, error
 	if err := s.DB.QueryRow(ctx, `SELECT COALESCE(max(id),0), pg_current_wal_lsn()::text FROM outbox`).Scan(&m.OutboxID, &m.LSN); err != nil {
 		return m, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT p.key, jp.watermark FROM jira_project jp JOIN project p ON p.id=jp.project_id WHERE jp.watermark IS NOT NULL AND ($1='instance' OR $1='project:'||p.key)`, scope)
+	rows, err := s.DB.Query(ctx, `SELECT p.key, jp.watermark FROM jira_project jp JOIN project p ON p.id=jp.project_id WHERE jp.watermark IS NOT NULL AND ($1='instance' OR $1='project:'||p.key OR $1='org:'||p.org_id::text)`, scope)
 	if err != nil {
 		return m, err
 	}
