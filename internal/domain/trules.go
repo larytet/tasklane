@@ -482,6 +482,13 @@ func (s *Service) ProcessWorkflowJobs(ctx context.Context, limit int) (int, erro
 		if err != nil {
 			return done, err
 		}
+		var pkey string
+		s.DB.QueryRow(ctx, `SELECT p.key FROM issue i JOIN project p ON p.id=i.project_id WHERE i.id::text=$1`, issueID).Scan(&pkey)
+		if pkey != "" && s.blockedBy(ctx, pkey) != nil {
+			// a pause covers the issue's project: workers stand still (SPEC 18.2); the job is looked at again soon and no attempt is spent
+			s.DB.Exec(ctx, `UPDATE workflow_job SET next_at=$2 WHERE id=$1`, id, s.Now().Add(5*time.Second))
+			continue
+		}
 		runErr := s.runJob(ctx, kind, issueID, params, payload)
 		if runErr == nil {
 			s.DB.Exec(ctx, `UPDATE workflow_job SET state='done',done_at=$2,attempts=attempts+1,last_error='' WHERE id=$1`, id, s.Now())

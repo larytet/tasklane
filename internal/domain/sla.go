@@ -410,14 +410,17 @@ func (s *Service) slaTouch(ctx context.Context, issueID string) {
 // SLASweep recomputes every clock that is still open (so breaches are found and noticed without anyone touching the issue) and returns how
 // many issues it looked at.
 func (s *Service) SLASweep(ctx context.Context) (int, error) {
-	rows, err := s.DB.Query(ctx, `SELECT DISTINCT issue_id::text FROM sla_clock WHERE state IN ('running','paused','breached')`)
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT c.issue_id::text, p.key FROM sla_clock c JOIN issue i ON i.id=c.issue_id JOIN project p ON p.id=i.project_id WHERE c.state IN ('running','paused','breached')`)
 	if err != nil {
 		return 0, err
 	}
 	var ids []string
 	for rows.Next() {
-		var id string
-		rows.Scan(&id)
+		var id, pkey string
+		rows.Scan(&id, &pkey)
+		if s.blockedBy(ctx, pkey) != nil {
+			continue // a pause covers the project: the sweep stands still and the next one catches up
+		}
 		ids = append(ids, id)
 	}
 	rows.Close()

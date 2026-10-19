@@ -436,6 +436,23 @@ func (s *Service) purgeOne(ctx context.Context, tx pgx.Tx, id string) (int, erro
 }
 
 // PurgeExpired hard-deletes trashed issues whose retention ended; legal hold blocks it. Run by the janitor.
+// batchPaused reports whether a pause covers any project that has an issue in the deleted batch.
+func (s *Service) batchPaused(ctx context.Context, batch string) bool {
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT p.key FROM issue i JOIN project p ON p.id=i.project_id WHERE i.delete_batch=$1`, batch)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		rows.Scan(&k)
+		if s.blockedBy(ctx, k) != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) PurgeExpired(ctx context.Context) (int, error) {
 	rows, err := s.DB.Query(ctx, `SELECT DISTINCT delete_batch FROM issue WHERE deleted_at IS NOT NULL AND purge_after<=$1 AND delete_batch IS NOT NULL
 		AND NOT EXISTS (SELECT 1 FROM issue h WHERE h.delete_batch=issue.delete_batch AND h.legal_hold)`, s.Now())
@@ -452,6 +469,9 @@ func (s *Service) PurgeExpired(ctx context.Context) (int, error) {
 	sort.Strings(batches)
 	n := 0
 	for _, b := range batches {
+		if s.batchPaused(ctx, b) {
+			continue // a pause covers one of its projects: the purge stands still (SPEC 18.2) and the next pass does it
+		}
 		err := s.tx(ctx, func(tx pgx.Tx) error {
 			ids, err := tx.Query(ctx, `SELECT id,key FROM issue WHERE delete_batch=$1 AND deleted_at IS NOT NULL FOR UPDATE`, b)
 			if err != nil {
