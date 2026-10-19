@@ -4,6 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$PATH:/usr/local/go/bin"
+# --bus: the previous release is the first one that has the cluster event bus, both releases share a Redis, the crowd is 50 people and the second old node is killed
+if [ "${1:-}" = "--bus" ]; then shift; export UPGRADE_BUS=1 UPGRADE_KILL=1 UPGRADE_USERS=50 UPGRADE_REDIS_URL=redis://redis:6379/0; UPGRADE_FROM="${UPGRADE_FROM:-91a5aec}"; fi
 FROM="${UPGRADE_FROM:-$(cat scripts/upgrade-from)}"
 P="tl-upgrade-${RUN_ID:-$$}"
 FILE="$PWD/deploy/compose/docker-compose.upgrade.yml"

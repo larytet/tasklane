@@ -380,12 +380,17 @@ func clusterVersions(t testing.TB, a *user) (versions map[string]int, gate strin
 }
 
 func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
-	const users = 12
+	users := 12
+	if v := os.Getenv("UPGRADE_USERS"); v != "" {
+		fmt.Sscan(v, &users)
+	}
+	bus := os.Getenv("UPGRADE_BUS") == "1"   // both releases share a Redis: events and presence must cross the versions
+	kill := os.Getenv("UPGRADE_KILL") == "1" // the second old node is killed instead of stopped
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// the old release, one node first (it makes the schema), then the second
-	compose(t, "up -d --wait postgres")
+	compose(t, "up -d --wait postgres redis")
 	compose(t, "up -d old1")
 	old1 := "http://127.0.0.1:" + port(t, "old1", 8080)
 	waitReady(t, old1, 90*time.Second)
@@ -433,6 +438,11 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	st.total.Store(0)
 	st.ok.Store(0)
 	st.lat = nil
+	var probe *busProbe
+	if bus {
+		probe = newBusProbe(t, adm)
+	}
+	adm.mustJSON(t, "POST", "/api/v1/projects", map[string]string{"key": "UPI", "name": "Import during the upgrade"}, 201)
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
@@ -472,6 +482,20 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	if _, gate := clusterVersions(t, a1); gate == "on" {
 		t.Fatal("the pause barrier is on beside a node of the old release that cannot acknowledge it")
 	}
+	if bus {
+		probe.check(t, old2, new1, "old to new")
+		probe.check(t, new1, old2, "new to old")
+	}
+	// an import runs while the cluster holds two releases
+	var csv strings.Builder
+	csv.WriteString("Key,Summary,Description\n")
+	for i := 1; i <= 150; i++ {
+		fmt.Fprintf(&csv, "I-%d,Imported row %d,Imported while the nodes were being replaced\n", i, i)
+	}
+	imp := a1.mustJSON(t, "POST", "/api/v1/import/csv", map[string]any{"project": "UPI", "csv": csv.String(), "mapping": map[string]any{"columns": map[string]string{"Key": "key", "Summary": "summary", "Description": "description"}}}, 200)
+	if c, _ := imp["counts"].(map[string]any); c == nil || fmt.Sprint(c["issues_created"]) != "150" {
+		t.Fatalf("the import in the mixed cluster: %v", imp)
+	}
 	startPause := time.Now()
 	lease := a1.mustJSON(t, "POST", "/api/v1/admin/pause", map[string]any{"scope": "project:UPP", "owner": "upgrade test", "drain_wait_ms": 20000}, 200)
 	if lease["state"] != "paused" || time.Since(startPause) > 10*time.Second {
@@ -485,7 +509,11 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	waitReady(t, new2, 90*time.Second)
 	l.add(new2)
 	eventually(t, "the balancer to see the second new node", 10*time.Second, func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.backends[new2].ok })
-	compose(t, "stop -t 30 old2")
+	if kill {
+		compose(t, "kill old2") // no drain, no goodbye: the balancer finds out by its readiness check
+	} else {
+		compose(t, "stop -t 30 old2")
+	}
 	l.remove(old2)
 	phase("the new release alone", 8*time.Second)
 
@@ -502,6 +530,15 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 		t.Fatalf("a pause across the two new nodes: %v with %d acknowledgements", lease["state"], acks)
 	}
 
+	if bus {
+		probe.check(t, new1, new2, "new to new")
+	}
+	var imported int
+	pool.QueryRow(ctx, `SELECT count(*) FROM issue i JOIN project p ON p.id=i.project_id WHERE p.key='UPI'`).Scan(&imported)
+	if imported != 150 {
+		t.Errorf("%d issues of the import are there, want 150", imported)
+	}
+
 	close(stop)
 	wg.Wait()
 
@@ -514,7 +551,7 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	for _, f := range st.failures {
 		t.Logf("  failure: %s", f)
 	}
-	if total < 1500 {
+	if total < 125*int64(users) {
 		t.Fatalf("only %d requests were made: the crowd did not run long enough to mean anything", total)
 	}
 	if rate < 99.5 {
@@ -588,4 +625,104 @@ func eventually(t testing.TB, what string, within time.Duration, f func() bool) 
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("timed out after %s waiting for %s", within, what)
+}
+
+// ---- events and presence between nodes of different releases, through the shared Redis
+
+type sock struct {
+	mu   sync.Mutex
+	msgs []map[string]any
+}
+
+func (s *sock) has(f func(map[string]any) bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.msgs {
+		if f(m) {
+			return true
+		}
+	}
+	return false
+}
+
+func dialSock(t testing.TB, ctx context.Context, u *user, base, key string) *sock {
+	t.Helper()
+	_, b, _ := u.do("POST", "/api/v1/ws/ticket", nil, true)
+	var tk struct {
+		Ticket string `json:"ticket"`
+	}
+	json.Unmarshal(b, &tk)
+	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(base, "http")+"/api/v1/ws?ticket="+tk.Ticket, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {base}}})
+	if err != nil {
+		t.Fatalf("socket on %s: %v", base, err)
+	}
+	s := &sock{}
+	go func() {
+		for {
+			_, b, err := ws.Read(ctx)
+			if err != nil {
+				return
+			}
+			var m map[string]any
+			if json.Unmarshal(b, &m) == nil {
+				s.mu.Lock()
+				s.msgs = append(s.msgs, m)
+				s.mu.Unlock()
+			}
+		}
+	}()
+	sub, _ := json.Marshal(map[string]any{"op": "sub", "channel": "issue:" + key})
+	ws.Write(ctx, websocket.MessageText, sub)
+	eventually(t, "a subscription on "+base, 10*time.Second, func() bool { return s.has(func(m map[string]any) bool { return m["type"] == "subscribed" }) })
+	return s
+}
+
+type busProbe struct {
+	adm            *user
+	key            string
+	other, otherID string
+}
+
+func newBusProbe(t testing.TB, adm *user) *busProbe {
+	adm.mustJSON(t, "POST", "/api/v1/projects", map[string]string{"key": "UPX", "name": "Bus probe"}, 201)
+	made := adm.mustJSON(t, "POST", "/api/v1/users", map[string]any{"email": "probe@example.com", "name": "Probe Person", "password": "probepass1"}, 201)
+	adm.mustJSON(t, "POST", "/api/v1/projects/UPX/members", map[string]string{"user": fmt.Sprint(made["id"]), "role": "member"}, 200)
+	is := adm.mustJSON(t, "POST", "/api/v1/issues", map[string]any{"project": "UPX", "type": "Task", "summary": "bus probe"}, 201)
+	return &busProbe{adm: adm, key: fmt.Sprint(is["key"]), other: "probe@example.com"}
+}
+
+// check: a person on the node `listen` sees, through the shared bus, a change and a presence announced on the node `act` (the two run different releases).
+func (p *busProbe) check(t testing.TB, listen, act, what string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	listener := &user{base: listen, c: newClient(listen), st: &stats{}}
+	if st, b, err := listener.do("POST", "/api/v1/login", map[string]string{"email": p.other, "password": "probepass1"}, true); err != nil || st != 200 {
+		t.Fatalf("login on %s: %d %v %s", listen, st, err, b)
+	}
+	s := dialSock(t, ctx, listener, listen, p.key)
+	actor := adminClient(t, act)
+	marker := fmt.Sprintf("bus probe %s %d", what, time.Now().UnixNano())
+	actor.mustJSON(t, "POST", "/api/v1/issues/"+p.key+"/comments", map[string]any{"body": marker}, 201)
+	eventually(t, what+": the change to reach the other release's socket", 15*time.Second, func() bool {
+		return s.has(func(m map[string]any) bool {
+			ev, _ := m["event"].(map[string]any)
+			return m["type"] == "event" && ev != nil && ev["issue"] == p.key && ev["type"] == "comment.added"
+		})
+	})
+	actor.mustJSON(t, "POST", "/api/v1/issues/"+p.key+"/presence", map[string]any{"field": ""}, 200)
+	eventually(t, what+": presence to reach the other release's socket", 20*time.Second, func() bool {
+		return s.has(func(m map[string]any) bool {
+			if m["type"] != "presence" {
+				return false
+			}
+			ps, _ := m["presence"].([]any)
+			for _, x := range ps {
+				if pm, _ := x.(map[string]any); pm != nil && fmt.Sprint(pm["name"]) != "" && pm["name"] != "Probe Person" {
+					return true
+				}
+			}
+			return false
+		})
+	})
 }

@@ -94,3 +94,8 @@ one joins, the old one is stopped and drains), checks the mixed cluster (two ver
 still works), replaces the second, and checks that the gate turned on by itself and that a pause now waits for the acknowledgements of both nodes.
 It fails if fewer than 99.5% of requests succeed after one retry, if the 95th percentile latency passes one second, if any change a person was told was
 saved is missing at the end, or if a socket stays down for more than 15 seconds.
+
+`make upgrade-bus` (`scripts/upgrade.sh --bus`) repeats it with the previous release being the first that has the cluster event bus (`scripts/upgrade.sh` takes
+`UPGRADE_FROM`), a Redis that both releases share, fifty simulated people, and the second old node killed instead of stopped. While the cluster holds two
+releases it also checks, in both directions, that a change and a person's presence announced on a node of one release reach a socket on a node of the
+other; it runs a 150-row import then; and it checks at the end that every row of the import is there and that the new nodes still talk to each other.

@@ -8,6 +8,7 @@ x-env: &env
   TASKLANE_ADMIN_EMAIL: admin@example.com
   TASKLANE_ADMIN_PASSWORD: adminpass1
   TASKLANE_BASE_URL: http://localhost
+  TASKLANE_REDIS_URL: ${UPGRADE_REDIS_URL:-}      # set (redis://redis:6379/0) by `scripts/upgrade.sh --bus`: both releases share one Redis
   TASKLANE_SHUTDOWN_DRAIN_DELAY: ${UPGRADE_DRAIN:-3s}
 
 x-node: &node
@@ -24,6 +25,10 @@ services:
     ports: ["127.0.0.1::5432"]
     command: ["postgres", "-c", "fsync=off", "-c", "max_connections=300"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U tl -d tasklane"], interval: 2s, timeout: 3s, retries: 30}
+
+  redis:
+    image: redis:7@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 2s, timeout: 3s, retries: 30}
 
   old1: {<<: *node, image: "${UPGRADE_OLD_IMAGE:?set by scripts/upgrade.sh}"}
   old2: {<<: *node, image: "${UPGRADE_OLD_IMAGE}"}
