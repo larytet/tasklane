@@ -230,7 +230,7 @@ func TestSAML04_Configuration(t *testing.T) {
 		"not a certificate": func(p *domain.SSOProvider) { p.SAMLCerts = []string{"hello"} },
 		"bad metadata":      func(p *domain.SSOProvider) { p.SAMLMetadata = "<nope/>" },
 		"a bad name":        func(p *domain.SSOProvider) { p.Name = "Bad Name" },
-		"another protocol":  func(p *domain.SSOProvider) { p.Protocol = "ldap" },
+		"another protocol":  func(p *domain.SSOProvider) { p.Protocol = "kerberos" },
 	}
 	for name, mut := range cases {
 		in := good

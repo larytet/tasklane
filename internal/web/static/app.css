@@ -77,10 +77,13 @@ h1.subject{font-size:20px;line-height:28px;font-weight:600;margin:8px 0}
 .row .sum{min-width:0}
 .bar{flex-wrap:wrap}
 .bar input[type=search]{min-width:0}
+.bar .search{display:flex;gap:4px;align-items:center;min-width:0}
+.bar .syntax{display:flex;gap:2px;flex:none}
+.bar .syntax .btn{padding:5px 8px;font-size:12px}
 .page{padding:12px}
 @media(max-width:600px){
   .bar{padding:8px 12px;gap:6px}
-  .bar input[type=search]{order:10;flex:1 1 100%}
+  .bar .search{order:10;flex:1 1 100%}
   .row{flex-wrap:wrap;min-height:56px;padding:6px 12px;row-gap:2px}
   .row .sum{flex:1 1 calc(100% - 60px)}
   .row .key{order:0}

@@ -66,6 +66,17 @@ func (s *Server) registerSSO(mux *http.ServeMux) {
 			s.fail(w, 404, "not_found", "not found", nil)
 		}
 	}))
+	// an administrator tries a name and password against an LDAP provider: nobody is signed in, the answer says what a sign-in would find
+	s.handle(mux, "POST /api/v1/admin/sso/providers/{id}/check", adm(func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Login, Password string }
+		id, good := pathID(r, "id")
+		if !good {
+			s.fail(w, 404, "not_found", "not found", nil)
+		} else if s.decode(w, r, &in) {
+			v, err := s.Svc.LDAPCheck(r.Context(), actorOf(r), id, in.Login, in.Password)
+			s.reply(w, v, err)
+		}
+	}))
 	// the sign-in page asks which buttons to show: enabled providers' names only
 	s.handle(mux, "GET /api/v1/auth/sso/providers", func(w http.ResponseWriter, r *http.Request) {
 		s.json(w, 200, s.Svc.SSOChoices(r.Context()))

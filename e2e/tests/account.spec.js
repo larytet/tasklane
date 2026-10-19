@@ -152,7 +152,7 @@ test('SEC-04: administrators set up single sign-on and SCIM tokens; the sign-in 
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
   await page.goto('/#/admin/identity');
-  await expect(page.getByRole('heading', { name: 'Single sign-on (OpenID Connect and SAML)' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Single sign-on (OpenID Connect, SAML and LDAP)' })).toBeVisible();
   const name = 'idp' + uniq();
   await page.getByRole('button', { name: 'Add a provider' }).click();
   const dlg = page.getByRole('dialog');
@@ -193,6 +193,57 @@ test('SEC-04: administrators set up single sign-on and SCIM tokens; the sign-in 
   await page.getByRole('button', { name: 'Delete Acme login' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('listitem').filter({ hasText: 'Acme login' })).toHaveCount(0);
+  await ctx.close(); await out.close();
+});
+
+test('SEC-04: an administrator sets up an LDAP directory; it is checked, listed and tried, and adds no button to the sign-in page', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  ctx.on('page', watch);
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await page.getByLabel('Email').fill('admin@example.com');
+  await page.getByLabel('Password').fill('adminpass1');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('button', { name: '+ Create' })).toBeVisible();
+  await page.goto('/#/admin/identity');
+  await page.getByRole('button', { name: 'Add a provider' }).click();
+  const dlg = page.getByRole('dialog');
+  await dlg.getByLabel('Protocol').selectOption('ldap');
+  await expect(dlg.getByLabel('Issuer address')).toBeHidden();
+  await dlg.getByLabel('Name', { exact: true }).fill('corp-ad-' + uniq());
+  await dlg.getByLabel('Button label').fill('Corp directory');
+  // a password would travel in clear: refused
+  await dlg.getByLabel('StartTLS').uncheck();
+  await dlg.getByLabel('Server addresses').fill('ldap://dc1.corp.example');
+  await dlg.getByLabel('Base DN').fill('dc=corp,dc=example');
+  await dlg.getByLabel('Search account DN').fill('cn=svc,dc=corp,dc=example');
+  await dlg.getByLabel('Search account password').fill('svc-secret');
+  await dlg.getByRole('button', { name: 'Save' }).click();
+  await expect(dlg.getByRole('alert')).toContainText('unencrypted');
+  await dlg.getByLabel('Server addresses').fill('ldaps://127.0.0.1:1');
+  const a11y = await new AxeBuilder({ page }).analyze();
+  expect(a11y.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await dlg.getByRole('button', { name: 'Save' }).click();
+  const item = page.getByRole('listitem').filter({ hasText: 'Corp directory' });
+  await expect(item).toContainText('LDAP · ldaps://127.0.0.1:1');
+  // the search password is not shown back; trying a sign-in reports why it failed (nothing listens on that port)
+  await page.getByRole('button', { name: 'Edit Corp directory' }).click();
+  await expect(dlg.getByLabel('Search account password')).toHaveValue('');
+  await expect(dlg.getByLabel('Search account password')).toHaveAttribute('placeholder', 'unchanged');
+  await dlg.getByLabel('Test name').fill('jana.k');
+  await dlg.getByLabel('Test password').fill('whatever');
+  await dlg.getByRole('button', { name: 'Try a sign-in' }).click();
+  await expect(dlg.getByRole('status')).toContainText('Refused');
+  await dlg.getByRole('button', { name: 'Cancel' }).click();
+  // a signed-out visitor sees no LDAP button, and the form takes a name as well as an address
+  const out = await browser.newContext();
+  const op = await out.newPage();
+  await op.goto('/');
+  await expect(op.getByLabel('Email or username')).toHaveAttribute('type', 'text');
+  await expect(op.getByRole('link', { name: 'Sign in with Corp directory' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Delete Corp directory' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('listitem').filter({ hasText: 'Corp directory' })).toHaveCount(0);
   await ctx.close(); await out.close();
 });
 

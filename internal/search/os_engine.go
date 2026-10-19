@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/larytet/tasklane/internal/search/tql"
 )
@@ -104,7 +105,7 @@ func (t *osTr) cmp(x tql.Cmp) (map[string]any, error) {
 		return nil, unsupported("history clauses read the history store")
 	}
 	switch x.Field {
-	case "text", "summary", "description", "comment":
+	case "text", "summary", "description", "comment", "any":
 		return t.text(x)
 	case "project", "key", "issuekey", "type", "issuetype", "status", "priority", "parent":
 		field := map[string]string{"project": "project", "key": "key", "issuekey": "key", "type": "type", "issuetype": "type", "status": "status", "priority": "priority", "parent": "parent"}[x.Field]
@@ -270,6 +271,22 @@ func (t *osTr) userIDs(name string) ([]string, error) {
 	return ids, rows.Err()
 }
 
+// people returns the users a plain search word names (peopleMatch), read from PostgreSQL like userIDs.
+func (t *osTr) people(termS string) ([]string, error) {
+	rows, err := t.pg.DB.Query(t.ctx, `SELECT u.id::text FROM app_user u WHERE `+peopleMatch("u", "$1"), likeEscape(termS))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (t *osTr) text(x tql.Cmp) (map[string]any, error) {
 	if x.Op != "~" && x.Op != "!~" {
 		return nil, errAt(x.Pos, "%s supports only ~ and !~", x.Field)
@@ -299,6 +316,25 @@ func (t *osTr) text(x tql.Cmp) (map[string]any, error) {
 		if in := t.internalComments(termS); in != nil {
 			should = append(should, in)
 		}
+	case "any": // as in PostgreSQL: text, a summary substring and people (assignee, reporter)
+		if keyLike.MatchString(termS) {
+			should = append(should, term("key", strings.ToUpper(termS)))
+		}
+		should = append(should, match("summary"), match("description"), match("comments"))
+		if in := t.internalComments(termS); in != nil {
+			should = append(should, in)
+		}
+		if utf8.RuneCountInString(termS) >= 3 {
+			should = append(should, map[string]any{"wildcard": map[string]any{"summary_norm": "*" + strings.ToLower(escWild(termS)) + "*"}})
+		}
+		ids, err := t.people(termS)
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) > 0 {
+			should = append(should, terms("assignee", ids), terms("reporter", ids))
+		}
+		t.ranked = t.ranked || x.Op == "~"
 	default:
 		if keyLike.MatchString(termS) {
 			should = append(should, term("key", strings.ToUpper(termS)))

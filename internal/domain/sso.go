@@ -47,6 +47,15 @@ type SSOProvider struct {
 	SAMLNameAttr  string   `json:"saml_name_attr"`
 	SAMLMetadata  string   `json:"saml_metadata,omitempty"` // accepted on save: the identity provider's metadata fills in the entity id, address and certificates
 	PortalKey     string   `json:"portal,omitempty"`        // the project whose portal this provider signs customers in to (empty: the staff sign-in)
+	// LDAP: Issuer holds the server addresses (space-separated) and ClientSecret the search account's password
+	LDAPBindDN     string `json:"ldap_bind_dn"`
+	LDAPBaseDN     string `json:"ldap_base_dn"`
+	LDAPUserFilter string `json:"ldap_user_filter"`
+	LDAPStartTLS   bool   `json:"ldap_start_tls"`
+	LDAPSkipVerify bool   `json:"ldap_skip_verify"`
+	LDAPCAPEM      string `json:"ldap_ca_pem"`
+	LDAPEmailAttr  string `json:"ldap_email_attr"`
+	LDAPNameAttr   string `json:"ldap_name_attr"`
 	// shown, not saved
 	ACSURL      string     `json:"acs_url,omitempty"`
 	MetadataURL string     `json:"metadata_url,omitempty"`
@@ -90,6 +99,13 @@ func (s *Service) saveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 		in.Protocol = "oidc"
 	}
 	switch in.Protocol {
+	case "ldap":
+		if portalPID != "" {
+			return in, invalid("LDAP signs in staff only; a portal uses OpenID Connect or SAML")
+		}
+		if err := s.prepareLDAP(&in, id == 0); err != nil {
+			return in, err
+		}
 	case "saml":
 		if err := s.prepareSAML(ctx, &in); err != nil {
 			return in, err
@@ -109,7 +125,7 @@ func (s *Service) saveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 			return in, invalid("the scopes must include openid")
 		}
 	default:
-		return in, invalid("the protocol is oidc or saml")
+		return in, invalid("the protocol is oidc, saml or ldap")
 	}
 	for i, d := range in.AllowedDomains {
 		in.AllowedDomains[i] = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(d), "@"))
@@ -121,7 +137,7 @@ func (s *Service) saveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 		in.SAMLCerts = []string{}
 	}
 	var enc any
-	if in.ClientSecret != "" && in.Protocol == "oidc" {
+	if in.ClientSecret != "" && in.Protocol != "saml" {
 		b, err := s.seal(ctx, in.ClientSecret)
 		if err != nil {
 			return in, err
@@ -136,13 +152,17 @@ func (s *Service) saveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 			return err
 		}
 		if id == 0 {
-			if err := dup(tx.QueryRow(ctx, `INSERT INTO sso_provider(name,label,issuer,client_id,client_secret_enc,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr,portal_project_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::uuid) RETURNING id`,
-				in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr, nilIfEmpty(portalPID)).Scan(&id)); err != nil {
+			if err := dup(tx.QueryRow(ctx, `INSERT INTO sso_provider(name,label,issuer,client_id,client_secret_enc,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr,portal_project_id,
+				ldap_bind_dn,ldap_base_dn,ldap_user_filter,ldap_start_tls,ldap_skip_verify,ldap_ca_pem,ldap_email_attr,ldap_name_attr) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::uuid,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING id`,
+				in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr, nilIfEmpty(portalPID),
+				in.LDAPBindDN, in.LDAPBaseDN, in.LDAPUserFilter, in.LDAPStartTLS, in.LDAPSkipVerify, in.LDAPCAPEM, in.LDAPEmailAttr, in.LDAPNameAttr).Scan(&id)); err != nil {
 				return err
 			}
 		} else {
-			tag, err := tx.Exec(ctx, `UPDATE sso_provider SET name=$2,label=$3,issuer=$4,client_id=$5,client_secret_enc=COALESCE($6,client_secret_enc),scopes=$7,allowed_domains=$8,jit=$9,enabled=$10,protocol=$11,saml_sso_url=$12,saml_certs=$13,saml_email_attr=$14,saml_name_attr=$15 WHERE id=$1`,
-				id, in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr)
+			tag, err := tx.Exec(ctx, `UPDATE sso_provider SET name=$2,label=$3,issuer=$4,client_id=$5,client_secret_enc=COALESCE($6,client_secret_enc),scopes=$7,allowed_domains=$8,jit=$9,enabled=$10,protocol=$11,saml_sso_url=$12,saml_certs=$13,saml_email_attr=$14,saml_name_attr=$15,
+				ldap_bind_dn=$16,ldap_base_dn=$17,ldap_user_filter=$18,ldap_start_tls=$19,ldap_skip_verify=$20,ldap_ca_pem=$21,ldap_email_attr=$22,ldap_name_attr=$23 WHERE id=$1`,
+				id, in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr,
+				in.LDAPBindDN, in.LDAPBaseDN, in.LDAPUserFilter, in.LDAPStartTLS, in.LDAPSkipVerify, in.LDAPCAPEM, in.LDAPEmailAttr, in.LDAPNameAttr)
 			if err = dup(err); err != nil {
 				return err
 			}
@@ -162,13 +182,15 @@ func (s *Service) saveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 	return p, nil
 }
 
-const ssoProviderCols = `id,name,label,issuer,client_id,client_secret_enc IS NOT NULL,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr,COALESCE((SELECT key FROM project WHERE id=portal_project_id),'')`
+const ssoProviderCols = `id,name,label,issuer,client_id,client_secret_enc IS NOT NULL,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr,COALESCE((SELECT key FROM project WHERE id=portal_project_id),''),
+	ldap_bind_dn,ldap_base_dn,ldap_user_filter,ldap_start_tls,ldap_skip_verify,ldap_ca_pem,ldap_email_attr,ldap_name_attr`
 
 type rowScanner interface{ Scan(...any) error }
 
 func (s *Service) scanSSOProvider(r rowScanner) (SSOProvider, error) {
 	var p SSOProvider
-	if err := r.Scan(&p.ID, &p.Name, &p.Label, &p.Issuer, &p.ClientID, &p.SecretSet, &p.Scopes, &p.AllowedDomains, &p.JIT, &p.Enabled, &p.Protocol, &p.SAMLSSOURL, &p.SAMLCerts, &p.SAMLEmailAttr, &p.SAMLNameAttr, &p.PortalKey); err != nil {
+	if err := r.Scan(&p.ID, &p.Name, &p.Label, &p.Issuer, &p.ClientID, &p.SecretSet, &p.Scopes, &p.AllowedDomains, &p.JIT, &p.Enabled, &p.Protocol, &p.SAMLSSOURL, &p.SAMLCerts, &p.SAMLEmailAttr, &p.SAMLNameAttr, &p.PortalKey,
+		&p.LDAPBindDN, &p.LDAPBaseDN, &p.LDAPUserFilter, &p.LDAPStartTLS, &p.LDAPSkipVerify, &p.LDAPCAPEM, &p.LDAPEmailAttr, &p.LDAPNameAttr); err != nil {
 		return p, err
 	}
 	if p.Protocol == "saml" {
@@ -217,9 +239,10 @@ func (s *Service) DeleteSSOProvider(ctx context.Context, a Actor, id int64) erro
 	})
 }
 
-// SSOChoices are the sign-in buttons: enabled providers only, nothing else about them.
+// SSOChoices are the sign-in buttons: enabled providers only, nothing else about them. An LDAP provider has no button: people
+// use the ordinary form.
 func (s *Service) SSOChoices(ctx context.Context) []map[string]string {
-	rows, err := s.DB.Query(ctx, `SELECT name,label FROM sso_provider WHERE enabled AND portal_project_id IS NULL ORDER BY name`)
+	rows, err := s.DB.Query(ctx, `SELECT name,label FROM sso_provider WHERE enabled AND portal_project_id IS NULL AND protocol<>'ldap' ORDER BY name`)
 	out := []map[string]string{}
 	if err != nil {
 		return out
@@ -436,7 +459,7 @@ func (s *Service) ssoRedirectURI() string {
 // SSOStart begins a sign-in and returns the address to send the browser to.
 func (s *Service) SSOStart(ctx context.Context, name, redirect string) (string, error) {
 	var p SSOProvider
-	err := s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,scopes,protocol,saml_sso_url FROM sso_provider WHERE lower(name)=lower($1) AND enabled`, name).Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &p.Scopes, &p.Protocol, &p.SAMLSSOURL)
+	err := s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,scopes,protocol,saml_sso_url FROM sso_provider WHERE lower(name)=lower($1) AND enabled AND protocol<>'ldap'`, name).Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &p.Scopes, &p.Protocol, &p.SAMLSSOURL)
 	if err != nil {
 		return "", ErrNotFound
 	}
@@ -528,13 +551,30 @@ func (s *Service) SSOCallback(ctx context.Context, state, code string, ttl time.
 // ssoSignIn is what both protocols end with: the identity provider has vouched for a subject and an address; match the person to an
 // account (by the provider's subject, then by the address) or create one when the provider allows it, and start a session.
 func (s *Service) ssoSignIn(ctx context.Context, res SSOResult, p SSOProvider, jit bool, sub, email, name string, verified bool, ttl time.Duration, meta ClientMeta) (SSOResult, error) {
-	var err error
 	email = strings.ToLower(strings.TrimSpace(email))
 	if sub == "" || email == "" || !verified || !strings.Contains(email, "@") {
 		return res, ErrForbidden // an address the provider does not vouch for is not an identity
 	}
 	if p.PortalKey != "" {
 		return s.portalSSOSignIn(ctx, res, p, email, meta)
+	}
+	uid, created, err := s.ssoAccount(ctx, p, jit, sub, email, name, meta)
+	if err != nil {
+		return res, ErrForbidden
+	}
+	res.Created = created
+	if err := s.DB.QueryRow(ctx, `SELECT id::text,email,name,kind,is_admin FROM app_user WHERE id::text=$1`, uid).Scan(&res.User.ID, &res.User.Email, &res.User.Name, &res.User.Kind, &res.User.Admin); err != nil {
+		return res, err
+	}
+	res.Token, err = s.newSessionVia(ctx, uid, ttl, meta, "sso")
+	return res, err
+}
+
+// ssoAccount matches the person a provider vouched for (an address it vouches for, already lower-case) to an account: by the
+// provider's subject, then by the address; or creates one when the provider allows it. A deactivated account stays out.
+func (s *Service) ssoAccount(ctx context.Context, p SSOProvider, jit bool, sub, email, name string, meta ClientMeta) (uid string, created bool, err error) {
+	if sub == "" || !strings.Contains(email, "@") {
+		return "", false, ErrForbidden
 	}
 	if len(p.AllowedDomains) > 0 {
 		dom := email[strings.LastIndex(email, "@")+1:]
@@ -543,10 +583,13 @@ func (s *Service) ssoSignIn(ctx context.Context, res SSOResult, p SSOProvider, j
 			ok = ok || d == dom
 		}
 		if !ok {
-			return res, ErrForbidden
+			return "", false, ErrForbidden
 		}
 	}
-	var uid string
+	source := "sso"
+	if p.Protocol == "ldap" {
+		source = "ldap"
+	}
 	var active bool
 	err = s.tx(ctx, func(tx pgx.Tx) error {
 		e := tx.QueryRow(ctx, `SELECT u.id::text,u.active FROM sso_identity i JOIN app_user u ON u.id=i.user_id WHERE i.provider_id=$1 AND i.subject=$2`, p.ID, sub).Scan(&uid, &active)
@@ -559,10 +602,10 @@ func (s *Service) ssoSignIn(ctx context.Context, res SSOResult, p SSOProvider, j
 				if name == "" {
 					name = email[:strings.Index(email, "@")]
 				}
-				if e := tx.QueryRow(ctx, `INSERT INTO app_user(email,name,source) VALUES($1,$2,'sso') RETURNING id::text`, email, name).Scan(&uid); e != nil {
+				if e := tx.QueryRow(ctx, `INSERT INTO app_user(email,name,source) VALUES($1,$2,$3) RETURNING id::text`, email, name, source).Scan(&uid); e != nil {
 					return e
 				}
-				active, res.Created = true, true
+				active, created = true, true
 			} else if e != nil {
 				return e
 			}
@@ -575,14 +618,10 @@ func (s *Service) ssoSignIn(ctx context.Context, res SSOResult, p SSOProvider, j
 		if !active {
 			return ErrForbidden // a deprovisioned person stays out, whatever the provider says
 		}
-		return s.audit(ctx, tx, Actor{ID: uid, Label: name}, "security.sso_login", uid, map[string]any{"provider": p.Name, "created": res.Created, "ip": meta.IP})
+		return s.audit(ctx, tx, Actor{ID: uid, Label: name}, "security.sso_login", uid, map[string]any{"provider": p.Name, "created": created, "ip": meta.IP})
 	})
 	if err != nil {
-		return res, ErrForbidden
+		return "", false, ErrForbidden
 	}
-	if err := s.DB.QueryRow(ctx, `SELECT id::text,email,name,kind,is_admin FROM app_user WHERE id::text=$1`, uid).Scan(&res.User.ID, &res.User.Email, &res.User.Name, &res.User.Kind, &res.User.Admin); err != nil {
-		return res, err
-	}
-	res.Token, err = s.newSessionVia(ctx, uid, ttl, meta, "sso")
-	return res, err
+	return uid, created, nil
 }

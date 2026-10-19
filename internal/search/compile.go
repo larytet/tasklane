@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/larytet/tasklane/internal/search/tql"
 )
@@ -135,7 +136,7 @@ func (c *compiler) cmp(x tql.Cmp) (string, error) {
 		isNeg = true
 	}
 	switch x.Field {
-	case "text", "summary", "description", "comment":
+	case "text", "summary", "description", "comment", "any":
 		return c.textClause(x)
 	case "project", "key", "issuekey", "type", "issuetype", "status", "priority", "parent":
 		col := map[string]string{"project": "upper(p.key)", "key": "i.key", "issuekey": "i.key", "type": "lower(t.name)", "issuetype": "lower(t.name)",
@@ -344,6 +345,19 @@ func (c *compiler) textClause(x tql.Cmp) (string, error) {
 		branches = append(branches, "SELECT s.issue_id FROM issue_search s WHERE s.tsv @@ "+tsq)
 	case "comment":
 		branches = append(branches, c.commentBranch(tsq))
+	case "any": // text, a summary substring, and people: the field the plain search box (tql.FromText) uses
+		if keyLike.MatchString(term) {
+			branches = append(branches, "SELECT k.id FROM issue k WHERE k.key = upper("+q+")")
+		}
+		branches = append(branches, "SELECT s.issue_id FROM issue_search s WHERE s.tsv @@ "+tsq, c.commentBranch(tsq))
+		if utf8.RuneCountInString(term) >= 3 {
+			branches = append(branches, "SELECT s.issue_id FROM issue_search s WHERE s.summary_norm LIKE '%' || lower(unaccent("+q+")) || '%'")
+		}
+		people := "SELECT u.id FROM app_user u WHERE " + peopleMatch("u", c.arg(likeEscape(term)))
+		branches = append(branches, "SELECT k.id FROM issue k WHERE k.assignee_id IN ("+people+")", "SELECT k.id FROM issue k WHERE k.reporter_id IN ("+people+")")
+		if c.rank == 0 && x.Op == "~" {
+			c.rank = qi
+		}
 	default: // text: summary, labels, description and comments, plus an exact key match
 		if keyLike.MatchString(term) {
 			branches = append(branches, "SELECT k.id FROM issue k WHERE k.key = upper("+q+")")
@@ -354,6 +368,16 @@ func (c *compiler) textClause(x tql.Cmp) (string, error) {
 		}
 	}
 	return negate(x.Op == "!~", "i.id IN ("+strings.Join(branches, " UNION ALL ")+")"), nil
+}
+
+// peopleMatch is the condition on app_user alias a for "a word of the name, or the email, starts with" the LIKE-escaped term
+// in arg: Alan finds Alan Polevoi and alan@example.com, not Catalan.
+func peopleMatch(a, arg string) string {
+	return "((' ' || lower(unaccent(" + a + ".name))) LIKE '% ' || lower(unaccent(" + arg + ")) || '%' OR lower(" + a + ".email) LIKE lower(" + arg + ") || '%')"
+}
+
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(s)
 }
 
 // commentBranch never matches internal comments for users who cannot see them.

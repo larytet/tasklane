@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"strings"
@@ -158,6 +159,9 @@ func TestSEC04_TwoFactorEnrolmentSignInReplayAndRecovery(t *testing.T) {
 	setup, err := e.Svc.SetupMFA(ctx, e.Alice)
 	if err != nil || !strings.HasPrefix(setup.URL, "otpauth://totp/") || !strings.Contains(setup.URL, "secret="+setup.Secret) {
 		t.Fatalf("%+v %v", setup, err)
+	}
+	if svg, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(setup.QR, "data:image/svg+xml;base64,")); err != nil || !strings.HasPrefix(setup.QR, "data:image/svg+xml;base64,") || !strings.HasPrefix(string(svg), "<svg ") {
+		t.Fatalf("no QR code for the address: %.60q %v", setup.QR, err)
 	}
 	// until a code is confirmed nothing changes
 	if _, err := e.Svc.LoginWith(ctx, "alice@example.com", "password123", time.Hour, meta); err != nil {

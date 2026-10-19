@@ -10,6 +10,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/search"
+	"github.com/larytet/tasklane/internal/search/tql"
 	"github.com/larytet/tasklane/internal/testutil"
 )
 
@@ -410,6 +411,49 @@ func TestTQL22_TokenizationContract(t *testing.T) {
 	// the exact key is listed first (TQL-22)
 	if got := f.keys(f.Alice, `text ~ "ABC-2"`); got[0] != "ABC-2" {
 		t.Errorf("key match not first: %v", got)
+	}
+}
+
+// The plain search box (tql.FromText) runs as any ~: text, a summary substring, the key, and people by a word of the name or the
+// start of the email.
+func TestTQL_PlainTextSearch(t *testing.T) {
+	f := newFx(t)
+	mk := func(email, name string) string {
+		u, err := f.Svc.CreateUser(ctx, email, name, "password123", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Svc.AddMember(ctx, f.Admin, "ABC", u.ID, "member")
+		return u.ID
+	}
+	alan, catalan := mk("alan@example.com", "Alan Polevoi"), mk("cq@example.com", "Catalan Q.")
+	f.create(f.Alice, domain.CreateIn{Project: "ABC", Summary: "Checkout fails", Description: "ask arkady", Assignee: alan})
+	f.create(f.Alice, domain.CreateIn{Project: "ABC", Summary: "Dana's report", Description: "for arkady", Assignee: catalan})
+	f.create(f.Alice, domain.CreateIn{Project: "ABC", Summary: "Rollover 100% done"})
+	f.index()
+	cases := []struct{ q, want string }{
+		{`Alan`, "ABC-1"},           // a word of the assignee's name, not Catalan
+		{`polevoi`, "ABC-1"},        // any word of it
+		{`"Alan Polevoi"`, "ABC-1"}, // the full name
+		{`alan@example`, "ABC-1"},   // the start of the email
+		{`alice`, "ABC-1,ABC-2,ABC-3"},
+		{`Alan AND (Arkady OR Dana)`, "ABC-1"},
+		{`arkady -alan`, "ABC-2"},
+		{`arkady OR rollover`, "ABC-1,ABC-2,ABC-3"},
+		{`heckou`, "ABC-1"}, // summary substring
+		{`abc-2`, "ABC-2"},  // key
+		{`_`, ""},           // LIKE wildcards are literal
+		{`%`, ""},
+		{``, "ABC-1,ABC-2,ABC-3"},
+	}
+	for _, c := range cases {
+		q, err := tql.FromText(c.q)
+		if err != nil {
+			t.Fatalf("%q: %v", c.q, err)
+		}
+		if got := f.sortedKeys(f.Alice, q); got != c.want {
+			t.Errorf("%q (%s): got %q want %q", c.q, q, got, c.want)
+		}
 	}
 }
 

@@ -162,7 +162,7 @@
     const provList = h('div', { role: 'list' }), tokList = h('div', { role: 'list' });
     const section = (title, ...kids) => h('section', { class: 'card', style: 'padding:12px;margin:12px 0', 'aria-label': title }, h('h2', { style: 'margin:0 0 8px' }, title), ...kids);
     app.append(topbar(), adminTabs('identity'), h('div', { class: 'page' },
-      section('Single sign-on (OpenID Connect and SAML)', h('p', { class: 'muted' }, 'People sign in at your identity provider; Tasklane never sees their password. For OpenID Connect register the redirect address ' + location.origin + '/api/v1/auth/sso/callback; for SAML give the identity provider the metadata address and assertion consumer address shown on the provider.'), provList, h('button', { class: 'btn primary', onclick: () => editProvider(null) }, 'Add a provider')),
+      section('Single sign-on (OpenID Connect, SAML and LDAP)', h('p', { class: 'muted' }, 'People sign in at your identity provider; Tasklane never sees their password. For OpenID Connect register the redirect address ' + location.origin + '/api/v1/auth/sso/callback; for SAML give the identity provider the metadata address and assertion consumer address shown on the provider. An LDAP directory (Active Directory, OpenLDAP) is different: people type their directory name and password into the ordinary sign-in form, and Tasklane checks them against the directory.'), provList, h('button', { class: 'btn primary', onclick: () => editProvider(null) }, 'Add a provider')),
       section('SCIM provisioning', h('p', { class: 'muted' }, 'Point your identity provider at ' + location.origin + '/scim/v2 with one of these tokens. Deactivating a person there ends their sessions and tokens here at once.'), tokList,
         h('button', { class: 'btn', onclick: newToken }, 'Create a SCIM token'))));
     async function loadProviders() {
@@ -170,15 +170,15 @@
       const r = await api('GET', '/api/v1/admin/sso/providers');
       if (r.status !== 200) { provList.append(h('div', { class: 'row', role: 'listitem' }, errText(r))); return; }
       if (!r.data.length) provList.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'muted' }, 'No providers yet.')));
-      for (const p of r.data) provList.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, p.label), ' ', h('span', { class: 'muted' }, (p.protocol === 'saml' ? 'SAML · ' : 'OpenID Connect · ') + p.issuer + (p.enabled ? '' : ' (off)'))),
+      for (const p of r.data) provList.append(h('div', { class: 'row', role: 'listitem' }, h('span', { class: 'sum' }, h('strong', {}, p.label), ' ', h('span', { class: 'muted' }, ({ saml: 'SAML · ', ldap: 'LDAP · ' }[p.protocol] || 'OpenID Connect · ') + p.issuer + (p.enabled ? '' : ' (off)'))),
         h('button', { class: 'btn ghost', 'aria-label': 'Edit ' + p.label, onclick: () => editProvider(p) }, 'Edit'),
         h('button', { class: 'btn ghost', 'aria-label': 'Delete ' + p.label, onclick: () => { const close = modal(h('div', {}, h('h2', {}, 'Delete ' + p.label + '?'), h('p', {}, 'People who sign in only through it will not be able to until another is set up.'),
           h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Keep it'), h('button', { class: 'btn primary', onclick: async () => { const x = await api('DELETE', '/api/v1/admin/sso/providers/' + p.id); close(); if (x.status === 200) loadProviders(); else toast(errText(x)); } }, 'Delete')))); } }, 'Delete')));
     }
     function editProvider(p) {
       const f = (label, value, type) => { const i = h('input', { type: type || 'text', 'aria-label': label, value: value || '', style: 'width:100%' }); return i; };
-      const proto = h('select', { 'aria-label': 'Protocol' }, h('option', { value: 'oidc' }, 'OpenID Connect'), h('option', { value: 'saml' }, 'SAML 2.0'));
-      proto.value = p && p.protocol === 'saml' ? 'saml' : 'oidc';
+      const proto = h('select', { 'aria-label': 'Protocol' }, h('option', { value: 'oidc' }, 'OpenID Connect'), h('option', { value: 'saml' }, 'SAML 2.0'), h('option', { value: 'ldap' }, 'LDAP (Active Directory)'));
+      proto.value = p ? p.protocol || 'oidc' : 'oidc';
       if (p) proto.disabled = true; // a provider keeps its protocol
       const name = f('Name', p && p.name), label = f('Button label', p && p.label), issuer = f(proto.value === 'saml' ? 'Identity provider entity id' : 'Issuer address', p && p.issuer), client = f('Client id', p && p.client_id), secret = f('Client secret', '', 'password');
       secret.placeholder = p && p.secret_set ? 'unchanged' : '';
@@ -194,15 +194,38 @@
         row('Email attribute (empty: the usual names, then the NameID)', emailAttr), row('Name attribute (empty: the usual names)', nameAttr),
         p ? h('p', { class: 'muted' }, 'Give the identity provider: metadata ' + p.metadata_url + ' · assertion consumer service ' + p.acs_url + ' · entity id ' + p.client_id) : h('p', { class: 'muted' }, 'After saving, the metadata address and assertion consumer service address to give the identity provider are shown here.'),
         (p && p.certificates || []).length ? h('p', { class: 'muted' }, 'Trusted certificate' + (p.certificates.length > 1 ? 's' : '') + ': ' + p.certificates.map(c => c.subject + ' until ' + new Date(c.expires).toLocaleDateString()).join('; ')) : null);
-      const show = () => { oidcRows.hidden = proto.value === 'saml'; samlRows.hidden = proto.value !== 'saml'; };
+      const check = (label, on) => h('input', { type: 'checkbox', 'aria-label': label, checked: !!on });
+      const lUrls = f('Server addresses', p && p.protocol === 'ldap' ? p.issuer : ''), lTLS = check('StartTLS', p ? p.ldap_start_tls : true), lSkip = check('Do not verify the certificate', p && p.ldap_skip_verify);
+      const lCA = h('textarea', { 'aria-label': 'CA certificate', rows: 3, style: 'width:100%', placeholder: '-----BEGIN CERTIFICATE----- (empty: the system authorities)' });
+      lCA.value = p && p.ldap_ca_pem || '';
+      const lBind = f('Search account DN', p && p.ldap_bind_dn), lPw = f('Search account password', '', 'password'), lBase = f('Base DN', p && p.ldap_base_dn);
+      lPw.placeholder = p && p.protocol === 'ldap' && p.secret_set ? 'unchanged' : '';
+      const lFilter = f('User filter', p && p.ldap_user_filter), lEmail = f('LDAP email attribute', p && p.ldap_email_attr), lName = f('LDAP name attribute', p && p.ldap_name_attr);
+      lFilter.placeholder = '(|(sAMAccountName={user})(userPrincipalName={user})(uid={user})(mail={user}))';
+      lEmail.placeholder = 'mail'; lName.placeholder = 'displayName';
+      const tLogin = f('Test name'), tPw = f('Test password', '', 'password'), tOut = h('div', { class: 'muted', role: 'status' });
+      const tryIt = h('button', { class: 'btn', type: 'button', onclick: async () => {
+        tOut.textContent = 'Asking the directory…';
+        const r = await api('POST', '/api/v1/admin/sso/providers/' + p.id + '/check', { login: tLogin.value, password: tPw.value });
+        if (r.status !== 200) { tOut.textContent = errText(r); return; }
+        tOut.textContent = r.data.ok ? 'Found ' + r.data.dn + ' (' + r.data.email + ', ' + r.data.name + '); account: ' + r.data.account : 'Refused: ' + r.data.error + (r.data.dn ? ' (' + r.data.dn + ')' : '');
+      } }, 'Try a sign-in');
+      const ldapRows = h('div', {}, row('Server addresses (ldaps://dc1.example.com, or ldap:// with StartTLS; several are tried in order)', lUrls),
+        h('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:6px' }, lTLS, 'StartTLS on ldap:// addresses'), h('label', { style: 'display:flex;gap:6px;align-items:center' }, lSkip, 'Do not verify the server certificate (only for a directory whose CA you cannot give)'),
+        row('CA certificate (PEM, optional)', lCA), row('Search account DN (empty: search anonymously)', lBind), row('Search account password', lPw), row('Base DN (where people are searched for)', lBase),
+        row('User filter ({user} is what the person typed; add a group or a disabled-account rule here to limit who may sign in)', lFilter), row('Email attribute', lEmail), row('Name attribute', lName),
+        p && p.protocol === 'ldap' ? h('div', { style: 'margin-top:8px' }, h('span', { class: 'muted' }, 'Try a name and password (nobody is signed in):'), row('Name', tLogin), row('Password', tPw), tryIt, tOut) : h('p', { class: 'muted' }, 'After saving, you can try a name and password here.'));
+      const show = () => { oidcRows.hidden = proto.value !== 'oidc'; samlRows.hidden = proto.value !== 'saml'; ldapRows.hidden = proto.value !== 'ldap'; };
       proto.addEventListener('change', show); show();
       const entity = samlRows.querySelector('input[aria-label="Entity id"]');
-      const close = modal(h('div', {}, h('h2', {}, p ? 'Edit ' + p.label : 'Add a provider'), row('Protocol', proto), row('Name (letters, digits, hyphens)', name), row('Button label', label), oidcRows, samlRows,
+      const close = modal(h('div', {}, h('h2', {}, p ? 'Edit ' + p.label : 'Add a provider'), row('Protocol', proto), row('Name (letters, digits, hyphens)', name), row('Button label', label), oidcRows, samlRows, ldapRows,
         row('Allowed email domains (empty: any the provider vouches for)', domains),
         h('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:6px' }, jit, 'Create accounts at first sign-in'), h('label', { style: 'display:flex;gap:6px;align-items:center' }, on, 'Enabled'), msg,
         h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
           const saml = proto.value === 'saml';
-          const body = saml ? { protocol: 'saml', name: name.value, label: label.value, issuer: entity.value, saml_metadata: meta.value, saml_sso_url: sso.value, saml_certs: cert.value.trim() ? [cert.value] : [], saml_email_attr: emailAttr.value, saml_name_attr: nameAttr.value, allowed_domains: domains.value.split(/[\s,]+/).filter(Boolean), jit: jit.checked, enabled: on.checked }
+          const ldap = proto.value === 'ldap' && { protocol: 'ldap', name: name.value, label: label.value, issuer: lUrls.value, ldap_start_tls: lTLS.checked, ldap_skip_verify: lSkip.checked, ldap_ca_pem: lCA.value, ldap_bind_dn: lBind.value, client_secret: lPw.value,
+            ldap_base_dn: lBase.value, ldap_user_filter: lFilter.value, ldap_email_attr: lEmail.value, ldap_name_attr: lName.value, allowed_domains: domains.value.split(/[\s,]+/).filter(Boolean), jit: jit.checked, enabled: on.checked };
+          const body = ldap ? ldap : saml ? { protocol: 'saml', name: name.value, label: label.value, issuer: entity.value, saml_metadata: meta.value, saml_sso_url: sso.value, saml_certs: cert.value.trim() ? [cert.value] : [], saml_email_attr: emailAttr.value, saml_name_attr: nameAttr.value, allowed_domains: domains.value.split(/[\s,]+/).filter(Boolean), jit: jit.checked, enabled: on.checked }
             : { protocol: 'oidc', name: name.value, label: label.value, issuer: issuer.value, client_id: client.value, client_secret: secret.value, scopes: scopes.value, allowed_domains: domains.value.split(/[\s,]+/).filter(Boolean), jit: jit.checked, enabled: on.checked };
           const r = p ? await api('PUT', '/api/v1/admin/sso/providers/' + p.id, body) : await api('POST', '/api/v1/admin/sso/providers', body);
           if (r.status === 200 || r.status === 201) { close(); toast('Provider saved'); loadProviders(); } else msg.textContent = errText(r);

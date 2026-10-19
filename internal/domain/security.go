@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/larytet/tasklane/internal/qr"
 )
 
 // Account security (SEC-04): sign-in with lockout, two-factor authentication (TOTP and recovery codes), sessions and API
@@ -136,15 +139,23 @@ func (s *Service) LoginWith(ctx context.Context, email, password string, ttl tim
 	var u User
 	var hash *string
 	var active bool
+	via := "password"
 	err := s.DB.QueryRow(ctx, `SELECT id,email,name,kind,is_admin,password_hash,active FROM app_user WHERE email=$1`, email).Scan(&u.ID, &u.Email, &u.Name, &u.Kind, &u.Admin, &hash, &active)
-	if err != nil || hash == nil || !active {
+	local := err == nil && hash != nil && active
+	if !local {
 		bcrypt.CompareHashAndPassword([]byte("$2a$10$7EqJtq98hPqEX7fNZaFWoOhi5BUAdfHnVbCySeS0W5iuEQ2sYD8mS"), []byte(password)) // constant-ish time
-		s.recordAttempt(ctx, email, meta, false)
-		return LoginResult{}, ErrForbidden
 	}
-	if bcrypt.CompareHashAndPassword([]byte(*hash), []byte(password)) != nil {
-		s.recordAttempt(ctx, email, meta, false)
-		return LoginResult{}, ErrForbidden
+	if !local || bcrypt.CompareHashAndPassword([]byte(*hash), []byte(password)) != nil {
+		// no local password matched: a directory may know the person (what they typed may be their directory name, not an address)
+		uid, lerr := s.ldapSignIn(ctx, email, password, meta)
+		if lerr == nil {
+			lerr = s.DB.QueryRow(ctx, `SELECT id,email,name,kind,is_admin FROM app_user WHERE id::text=$1`, uid).Scan(&u.ID, &u.Email, &u.Name, &u.Kind, &u.Admin)
+		}
+		if lerr != nil {
+			s.recordAttempt(ctx, email, meta, false)
+			return LoginResult{}, ErrForbidden
+		}
+		via = "ldap"
 	}
 	var org string
 	var inst bool
@@ -164,7 +175,7 @@ func (s *Service) LoginWith(ctx context.Context, email, password string, ttl tim
 		return LoginResult{User: u}, &MFARequired{Token: pt, TOTP: enabled, Key: keyOpts}
 	}
 	s.recordAttempt(ctx, email, meta, true)
-	tok, err := s.newSession(ctx, u.ID, ttl, meta)
+	tok, err := s.newSessionVia(ctx, u.ID, ttl, meta, via)
 	return LoginResult{Token: tok, User: u}, err
 }
 
@@ -204,6 +215,7 @@ func verifyTOTP(secret []byte, code string, now time.Time, lastStep int64) (int6
 type MFASetup struct {
 	Secret string `json:"secret"`  // base32, to type into an authenticator
 	URL    string `json:"otpauth"` // the same as a QR-code address
+	QR     string `json:"qr"`      // that address as a QR code, an SVG data: URI drawn here so the secret goes nowhere else
 }
 
 // SetupMFA starts enrolment: a new secret that does nothing until a code from it is confirmed.
@@ -228,7 +240,11 @@ func (s *Service) SetupMFA(ctx context.Context, a Actor) (MFASetup, error) {
 	}
 	b32 := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(secret)
 	q := url.Values{"secret": {b32}, "issuer": {"Tasklane"}, "algorithm": {"SHA1"}, "digits": {"6"}, "period": {"30"}}
-	return MFASetup{Secret: b32, URL: "otpauth://totp/" + url.PathEscape("Tasklane:"+email) + "?" + q.Encode()}, nil
+	setup := MFASetup{Secret: b32, URL: "otpauth://totp/" + url.PathEscape("Tasklane:"+email) + "?" + q.Encode()}
+	if code, err := qr.Encode(setup.URL); err == nil { // only an address too long for a code fails; the key still works
+		setup.QR = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(code.SVG()))
+	}
+	return setup, nil
 }
 
 func (s *Service) mfaSecret(ctx context.Context, userID string) ([]byte, int64, bool, error) {

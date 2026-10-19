@@ -891,6 +891,9 @@ func rows() []row {
 		{"PUT /api/v1/admin/sso/providers/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
 			return J("PUT", "/api/v1/admin/sso/providers/999999", map[string]any{"name": "x", "issuer": "https://idp.example.com", "client_id": "abc"})
 		}},
+		{"POST /api/v1/admin/sso/providers/{id}/check", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/admin/sso/providers/999999/check", map[string]any{"login": "x", "password": "y"})
+		}},
 		{"DELETE /api/v1/admin/sso/providers/{id}", exp{anon: codes(401), outsider: codes(403), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/admin/sso/providers/999999", nil) }},
 		{"GET /api/v1/auth/sso/providers", exp{anon: codes(200), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/auth/sso/providers", nil) }},
 		{"GET /api/v1/auth/sso/{name}/start", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/auth/sso/nosuch/start", nil) }},

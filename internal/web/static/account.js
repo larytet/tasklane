@@ -31,7 +31,8 @@
       if (r.status !== 200) { toast(errText(r)); return; }
       const code = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', 'aria-label': 'Code from the app' }), msg = h('div', { class: 'err', role: 'alert' });
       const close = modal(h('div', {}, h('h2', {}, 'Set up two-factor authentication'),
-        h('p', {}, 'In your authenticator app add an account with this key, then enter the code it shows.'),
+        h('p', {}, r.data.qr ? 'Scan this code with your authenticator app, or add an account with the key below, then enter the code it shows.' : 'In your authenticator app add an account with this key, then enter the code it shows.'),
+        r.data.qr ? h('p', {}, h('img', { src: r.data.qr, alt: 'QR code for your authenticator app', width: 200, height: 200, style: 'image-rendering:pixelated' })) : null,
         h('p', {}, h('code', { 'aria-label': 'Setup key', style: 'user-select:all' }, r.data.secret)), h('p', { class: 'muted' }, r.data.otpauth), code, msg,
         h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
           const x = await api('POST', '/api/v1/me/2fa/enable', { code: code.value });
