@@ -141,6 +141,26 @@ func (s *Service) TierStatus(ctx context.Context, a Actor) (TierStatus, error) {
 	return st, nil
 }
 
+// blobPaused reports whether a pause covers the whole instance or any project whose attachments refer to the object (it may be shared by several).
+func (s *Service) blobPaused(ctx context.Context, sha string) bool {
+	if s.blockedBy(ctx, "") != nil { // only an instance-wide lease covers no project in particular
+		return true
+	}
+	rows, err := s.DB.Query(ctx, `SELECT DISTINCT p.key FROM blob b JOIN attachment a ON (a.blob_id=b.id OR a.thumb_blob_id=b.id) JOIN issue i ON i.id=a.issue_id JOIN project p ON p.id=i.project_id WHERE b.sha256=$1`, sha)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		rows.Scan(&k)
+		if s.blockedBy(ctx, k) != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // RunTiering moves up to limit objects that match a rule from the hot tier to the cold one. Without a cold tier configured, or
 // without rules, it does nothing. Several nodes may run it: an object is claimed by a row lock, and one already claimed is skipped.
 func (s *Service) RunTiering(ctx context.Context, limit int) (TierRun, error) {
@@ -196,6 +216,9 @@ func (s *Service) RunTiering(ctx context.Context, limit int) (TierRun, error) {
 	for _, sha := range shas {
 		if ctx.Err() != nil {
 			break
+		}
+		if s.blobPaused(ctx, sha) {
+			continue // a pause covers the instance, or a project that refers to this object: tiering stands still and a later pass moves it
 		}
 		moved, size, err := s.tierOne(ctx, t, sha)
 		switch {

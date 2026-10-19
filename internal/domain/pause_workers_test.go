@@ -11,6 +11,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/egress"
+	"github.com/larytet/tasklane/internal/testutil"
 	"github.com/larytet/tasklane/internal/testutil/gitmock"
 )
 
@@ -268,5 +269,53 @@ func TestPAUSE13_AutoArchiveWaitsForThePause(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	if n, err := e.Svc.AutoArchive(ctx, 100); err != nil || n != 1 {
 		t.Fatalf("after the pause: %d %v", n, err)
+	}
+}
+
+// The thumbnailer leaves the attachments of a paused project alone and makes their thumbnails after the pause.
+func TestPAUSE13_ThumbnailsWaitForThePause(t *testing.T) {
+	e := testutil.New(t)
+	e.Project()
+	e.WithBlobs()
+	is := e.Issue("shots", "")
+	attach(t, e, e.Alice, is.Key, "shot.png", "image/png", pngBytes(300, 200))
+	lease, err := e.Svc.RequestPause(ctx, e.Admin, domain.PauseIn{Scope: "project:ABC", Owner: "restore:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := e.Svc.ThumbnailsOnce(ctx); err != nil || n != 0 {
+		t.Fatalf("%d thumbnail(s) made in a paused project: %v", n, err)
+	}
+	if err := e.Svc.ReleasePause(ctx, e.Admin, lease.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if n, err := e.Svc.ThumbnailsOnce(ctx); err != nil || n != 1 {
+		t.Fatalf("after the pause: %d %v", n, err)
+	}
+}
+
+// Tiering moves nothing while a pause covers the instance or a project that refers to the object, and moves it afterwards.
+func TestPAUSE13_TieringWaitsForThePause(t *testing.T) {
+	for _, scope := range []string{"project:ABC", "instance"} {
+		t.Run(scope, func(t *testing.T) {
+			e := newTierEnv(t, nil)
+			sha, _ := e.attach("old.log", 2000, 90)
+			e.rules(domain.TierRule{Name: "logs", Class: cls("log"), MinAgeDays: 30, Enabled: true})
+			lease, err := e.Svc.RequestPause(ctx, e.Admin, domain.PauseIn{Scope: scope, Owner: "restore:test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run, err := e.Svc.RunTiering(ctx, 10); err != nil || run.Moved != 0 || e.tier(sha) != "hot" {
+				t.Fatalf("moved %d under a %s pause: %+v %v", run.Moved, scope, run, err)
+			}
+			if err := e.Svc.ReleasePause(ctx, e.Admin, lease.ID); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(1100 * time.Millisecond)
+			if run, err := e.Svc.RunTiering(ctx, 10); err != nil || run.Moved != 1 || e.tier(sha) != "cold" {
+				t.Fatalf("after the pause: %+v %v", run, err)
+			}
+		})
 	}
 }

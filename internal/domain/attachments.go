@@ -731,7 +731,8 @@ func (s *Service) ThumbnailsOnce(ctx context.Context) (int, error) {
 	if err := s.blobsReady(); err != nil {
 		return 0, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT a.id,b.sha256 FROM attachment a JOIN blob b ON b.id=a.blob_id WHERE a.thumb_state='pending' AND b.scan_state='clean' ORDER BY a.created_at LIMIT 50`)
+	rows, err := s.DB.Query(ctx, `SELECT a.id,b.sha256,p.key FROM attachment a JOIN blob b ON b.id=a.blob_id JOIN issue i ON i.id=a.issue_id JOIN project p ON p.id=i.project_id
+		WHERE a.thumb_state='pending' AND b.scan_state='clean' ORDER BY a.created_at LIMIT 50`)
 	if err != nil {
 		return 0, err
 	}
@@ -739,7 +740,11 @@ func (s *Service) ThumbnailsOnce(ctx context.Context) (int, error) {
 	var jobs []job
 	for rows.Next() {
 		var j job
-		rows.Scan(&j.id, &j.sha)
+		var pkey string
+		rows.Scan(&j.id, &j.sha, &pkey)
+		if s.blockedBy(ctx, pkey) != nil {
+			continue // a pause covers the project: the thumbnailer stands still (SPEC 18.2) and the next pass makes it
+		}
 		jobs = append(jobs, j)
 	}
 	rows.Close()
