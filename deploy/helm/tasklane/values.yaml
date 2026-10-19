@@ -1,0 +1,152 @@
+# Tasklane on Kubernetes: the application, an optional ingress, and references to services you run yourself (PostgreSQL, an SMTP relay, an
+# S3-compatible store). Nothing here installs a database: PostgreSQL 15 or newer, with the pg_trgm and unaccent extensions created once.
+
+image:
+  repository: ghcr.io/larytet/tasklane
+  tag: ""                       # empty: the chart's appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# More than one replica works (sessions and state are in PostgreSQL), but live updates then reach only the people connected to the node
+# that handled a change; the page catches up by polling within about 30 seconds. Attachments must then be in S3 or on a ReadWriteMany volume.
+replicaCount: 1
+
+# Settings that are not secret, as in docs/CONFIGURATION.md: the key without the TASKLANE_ prefix, lower case. base_url is required (or give
+# an ingress host): sign-in links, WebAuthn and mail links are built from it.
+config:
+  base_url: ""
+  # trusted_proxies: 10.0.0.0/8       # the networks whose X-Forwarded-For is believed (your ingress controller's)
+  # max_upload_mb: "100"
+
+database:                       # PostgreSQL, one of two ways
+  existingSecret: ""            # a Secret holding the whole connection URL, postgres://user:password@host:5432/tasklane?sslmode=require
+  existingSecretKey: url
+  host: ""                      # or the parts: the password then comes from passwordSecret and is handed over as PGPASSWORD
+  port: 5432
+  name: tasklane
+  user: tasklane
+  sslmode: require
+  passwordSecret:
+    name: ""
+    key: password
+
+admin:                          # the first administrator, made at first start when none exists (optional: `tasklane create-admin` does it by hand)
+  existingSecret: ""
+  emailKey: email
+  passwordKey: password
+
+secretKey:                      # 32 bytes (base64 or hex) that encrypt stored credentials; without one a key kept in the database is used
+  existingSecret: ""
+  key: secret-key
+
+smtp:                           # outbound mail; leave host empty to send none
+  host: ""
+  port: 587
+  tls: starttls                 # none, starttls or tls
+  from: "Tasklane <tasklane@example.com>"
+  user: ""
+  passwordSecret:
+    name: ""
+    key: password
+
+blobs:                          # attachments
+  backend: fs                   # fs (a volume) or s3
+  persistence:                  # for fs
+    enabled: true
+    existingClaim: ""
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce   # with more than one replica use ReadWriteMany, or S3
+  s3:
+    endpoint: ""                # empty: AWS S3
+    region: us-east-1
+    bucket: ""
+    prefix: ""
+    pathStyle: false
+    existingSecret: ""          # holds the access key and the secret key
+    accessKeyKey: access-key
+    secretKeyKey: secret-key
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:                        # your proxy must pass WebSocket upgrades and allow long-lived connections
+  enabled: false
+  className: ""
+  annotations: {}               # for ingress-nginx: nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: tasklane.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []                       # - secretName: tasklane-tls
+                                #   hosts: [tasklane.example.com]
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 1Gi}
+
+# Stopping: the pod fails its readiness check, waits drainDelay for the load balancer to stop sending, tells open pages to reconnect, then
+# finishes in-flight requests. The grace period must be longer than the drain delay plus the longest request.
+lifecycle:
+  drainDelay: 5s
+terminationGracePeriodSeconds: 45
+
+probes:
+  startup: {failureThreshold: 60, periodSeconds: 2}   # migrations run at start
+  liveness: {periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 3}
+  readiness: {periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 2}
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+podDisruptionBudget:
+  enabled: false                # worth turning on with more than one replica
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  ingressFrom: []               # extra `from` entries; the namespace of the ingress controller, for example
+  # egress is not restricted by this chart: Tasklane makes calls to the hosts an administrator configures (webhooks, Git, Jira, identity providers)
+
+migrations:
+  job:
+    enabled: false              # run `tasklane migrate` as a hook before install and upgrade (the app also migrates on start, one node at a time)
+
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+tests:
+  image: busybox:1.36           # the helm test pod checks the service answers

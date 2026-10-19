@@ -1,0 +1,37 @@
+{{- include "tasklane.validate" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tasklane.fullname" . }}
+  labels:
+    {{- include "tasklane.labels" . | nindent 4 }}
+data:
+  TASKLANE_BASE_URL: {{ include "tasklane.baseURL" . | quote }}
+  TASKLANE_BLOB_BACKEND: {{ .Values.blobs.backend | quote }}
+  TASKLANE_BLOB_DIR: "/data/blobs"
+  TASKLANE_SHUTDOWN_DRAIN_DELAY: {{ .Values.lifecycle.drainDelay | quote }}
+  {{- if .Values.smtp.host }}
+  TASKLANE_SMTP_HOST: {{ .Values.smtp.host | quote }}
+  TASKLANE_SMTP_PORT: {{ .Values.smtp.port | quote }}
+  TASKLANE_SMTP_TLS: {{ .Values.smtp.tls | quote }}
+  TASKLANE_SMTP_FROM: {{ .Values.smtp.from | quote }}
+  {{- if .Values.smtp.user }}
+  TASKLANE_SMTP_USER: {{ .Values.smtp.user | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if eq .Values.blobs.backend "s3" }}
+  {{- if .Values.blobs.s3.endpoint }}
+  TASKLANE_S3_ENDPOINT: {{ .Values.blobs.s3.endpoint | quote }}
+  {{- end }}
+  TASKLANE_S3_REGION: {{ .Values.blobs.s3.region | quote }}
+  TASKLANE_S3_BUCKET: {{ .Values.blobs.s3.bucket | quote }}
+  {{- if .Values.blobs.s3.prefix }}
+  TASKLANE_S3_PREFIX: {{ .Values.blobs.s3.prefix | quote }}
+  {{- end }}
+  TASKLANE_S3_PATH_STYLE: {{ .Values.blobs.s3.pathStyle | quote }}
+  {{- end }}
+  {{- range $k, $v := .Values.config }}
+  {{- if ne $k "base_url" }}
+  TASKLANE_{{ upper $k }}: {{ $v | toString | quote }}
+  {{- end }}
+  {{- end }}

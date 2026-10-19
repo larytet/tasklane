@@ -1,0 +1,9 @@
+apiVersion: v2
+name: tasklane
+description: "Tasklane issue tracker: the application, an optional ingress, and references to an external PostgreSQL, SMTP relay and S3-compatible object storage."
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+keywords: [issue-tracker, jira-alternative]
+home: https://github.com/larytet/tasklane

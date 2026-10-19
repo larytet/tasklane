@@ -1,0 +1,16 @@
+Tasklane {{ .Chart.AppVersion }} is installed as {{ include "tasklane.fullname" . }}.
+
+Address: {{ include "tasklane.baseURL" . }}
+{{- if not .Values.admin.existingSecret }}
+
+No first administrator was configured. Make one:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "tasklane.fullname" . }} -- tasklane create-admin
+{{- end }}
+{{- if not .Values.ingress.enabled }}
+
+Reach it without an ingress:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "tasklane.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+Check it: helm test {{ .Release.Name }}
+Back up with `tasklane backup` (database and attachments together): see docs/OPERATIONS.md.

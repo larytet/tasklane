@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "tasklane.fullname" . }}-test
+  labels:
+    {{- include "tasklane.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  containers:
+    - name: probe
+      image: {{ .Values.tests.image }}
+      command: ["sh", "-c", "wget -qO- http://{{ include "tasklane.fullname" . }}:{{ .Values.service.port }}/readyz"]
