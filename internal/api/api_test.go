@@ -322,3 +322,26 @@ func TestHTTP_PAUSE04_WritersGet503WithRetryAfter(t *testing.T) {
 		t.Fatalf("%v", v["issue"])
 	}
 }
+
+// LIFE-16 over HTTP: a bulk job is accepted (202), a worker does it, and the person who started it reads the progress.
+func TestHTTP_LIFE16_BulkJob(t *testing.T) {
+	e, alice, _, key := setup(t)
+	code, out, _ := alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"keys": []string{key}, "op": map[string]any{"op": "delete"}})
+	if code != 202 || out["state"] != "pending" || out["total"] != float64(1) {
+		t.Fatalf("%d %v", code, out)
+	}
+	id := fmt.Sprint(int64(out["id"].(float64)))
+	if n, err := e.Svc.ProcessBulk(testutil.Ctx(), 10); err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	code, out, _ = alice.do("GET", "/api/v1/bulk/"+id, nil)
+	if code != 200 || out["state"] != "done" || out["done"] != float64(1) || out["failed"] != float64(0) {
+		t.Fatalf("%d %v", code, out)
+	}
+	if code, _, _ := alice.do("GET", "/api/v1/issues/"+key+"/view", nil); code != 410 && code != 404 {
+		t.Fatalf("the issue is still there: %d", code)
+	}
+	if code, _, _ := alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"keys": []string{key}, "op": map[string]any{"op": "purge"}}); code != 400 {
+		t.Fatalf("purge in bulk: %d", code)
+	}
+}

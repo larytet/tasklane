@@ -699,7 +699,7 @@ containers) nightly for the Helm chart.
 | LIFE-13 | Races: move vs transition, delete vs edit, double move, clone of an issue being edited, convert vs move | Defined winner; no corrupted issue; documents consistent |
 | LIFE-14 | Audit, events, webhooks, automation triggers, notifications for every operation; MCP exposes no delete or purge | Events complete and ordered |
 | LIFE-15 | Mirror mode: convert, move, clone, delete and restore unavailable on mirrored issues; Jira-side delete and key change | Behavior and warnings as specified; compatibility check lists limits |
-| LIFE-16 | Bulk move, delete and clone of 10,000 issues as a resumable job; node killed mid-job | Resumes without duplicates; interactive p95 within budgets; progress and ETA shown |
+| LIFE-16 | Bulk move, delete and clone of 10,000 issues as a resumable job; node killed mid-job | Resumes without duplicates; interactive p95 within budgets; progress and ETA shown | | **partial (M5.53)** `TestLIFE16_*` and `TestHTTP_LIFE16_BulkJob`: 60 clones by four racing workers make exactly 60 (149 without the lease and the in-transaction marker), a dead worker's job is taken over after its lease and does only what was left, failures are per item with the reason, progress and ETA, only the owner or an administrator sees or cancels, cancel, a pause stops the job without failing items and it goes on after; mutation-checked. Not measured: 10,000 issues, interactive latency while a job runs, a real killed process |
 | LIFE-17 | Import and export: trash excluded by default and optional; aliases and key map round trip | Round trip preserves aliases and removed-value records |
 
 **Work calendars** (extends CORE-06; rows are CORE ids)

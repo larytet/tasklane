@@ -474,6 +474,23 @@ func (s *Server) Handler() http.Handler {
 		plan, err := s.Svc.Lifecycle(r.Context(), actorOf(r), r.PathValue("key"), in)
 		s.reply(w, plan, err)
 	}))
+	s.handle(mux, "POST /api/v1/bulk/lifecycle", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.BulkIn
+		if !s.decode(w, r, &in) {
+			return
+		}
+		j, err := s.Svc.StartBulk(r.Context(), actorOf(r), in)
+		s.replyStatus(w, 202, j, err)
+	}))
+	s.handle(mux, "GET /api/v1/bulk/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		j, err := s.Svc.BulkStatus(r.Context(), actorOf(r), id)
+		s.reply(w, j, err)
+	}))
+	s.handle(mux, "POST /api/v1/bulk/{id}/cancel", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.CancelBulk(r.Context(), actorOf(r), id))
+	}))
 	s.handle(mux, "GET /api/v1/projects/{key}/trash", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		t, err := s.Svc.Trash(r.Context(), actorOf(r), r.PathValue("key"))
 		s.reply(w, t, err)

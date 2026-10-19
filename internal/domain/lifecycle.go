@@ -71,7 +71,8 @@ type LifecycleIn struct {
 	StatusMap map[string]string `json:"status_map"` // convert and move: source status -> target status
 	Clone     CloneOpts         `json:"clone"`
 	// ExpectKey guards a bulk or stale plan: the operation refuses to run if the issue is no longer under this key.
-	ExpectKey string `json:"expect_key"`
+	ExpectKey string    `json:"expect_key"`
+	bulk      *bulkMark // set by the bulk worker: the item is finished in this operation's own transaction
 }
 
 const (
@@ -199,6 +200,15 @@ func (s *Service) Lifecycle(ctx context.Context, a Actor, key string, in Lifecyc
 	}
 	if in.DryRun {
 		return plan, nil // the deferred rollback discards everything the operation did
+	}
+	if in.bulk != nil {
+		tag, err := tx.Exec(ctx, `UPDATE bulk_job_item SET state='done',result_key=$3,done_at=$4 WHERE job_id=$1 AND idx=$2 AND state='pending'`, in.bulk.job, in.bulk.idx, plan.Key2, s.Now())
+		if err != nil {
+			return plan, err
+		}
+		if tag.RowsAffected() == 0 {
+			return plan, errBulkItemTaken
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return plan, err
