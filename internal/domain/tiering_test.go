@@ -52,7 +52,7 @@ func (e *tierEnv) attach(name string, size int, ageDays int) (sha string, body [
 		e.T.Fatal(err)
 	}
 	sha = at.SHA256
-	e.Store.Pool.Exec(ctx, `UPDATE blob SET created_at=now() - make_interval(days => $2) WHERE sha256=$1`, sha, ageDays)
+	e.Store.Pool.Exec(ctx, `UPDATE blob SET created_at=$3::timestamptz - make_interval(days => $2) WHERE sha256=$1`, sha, ageDays, e.Clock.Now())
 	return
 }
 
@@ -293,7 +293,7 @@ func TestBLOB15_GarbageCollectionRemovesColdObjectsToo(t *testing.T) {
 	}
 	v, _ := e.Svc.View(ctx, e.Alice, e.issue.Key)
 	e.Svc.DeleteAttachment(ctx, e.Alice, e.issue.Key, v.Attachments[0].ID)
-	e.Store.Pool.Exec(ctx, `UPDATE blob SET zero_since=now() - interval '3 hours' WHERE sha256=$1`, sha)
+	e.Store.Pool.Exec(ctx, `UPDATE blob SET zero_since=$2 WHERE sha256=$1`, sha, e.Clock.Now().Add(-3*time.Hour))
 	if n, err := e.Svc.GC(ctx); err != nil || n != 1 || e.tiered.Where(sha) != "" {
 		t.Fatalf("%d %v %q", n, err, e.tiered.Where(sha))
 	}

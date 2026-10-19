@@ -465,6 +465,9 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 		if err == nil {
 			key, err = s.createFromMail(ctx, act, *v.create, v.body)
 		}
+		if pausedErr(err) {
+			return s.deferMail(ctx, id, err)
+		}
 		if err != nil {
 			v.outcome, v.reason = "quarantined", "the issue was refused: "+err.Error()
 		} else {
@@ -472,7 +475,9 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 			s.DB.QueryRow(ctx, `SELECT id FROM issue WHERE key=$1`, key).Scan(&v.issueID)
 		}
 	} else if v.outcome == "accepted" && v.customerID != "" {
-		if err := s.customerCommentFromMail(ctx, v.customerID, v.issueKey, v.body, id); err != nil {
+		if err := s.customerCommentFromMail(ctx, v.customerID, v.issueKey, v.body, id); pausedErr(err) {
+			return s.deferMail(ctx, id, err)
+		} else if err != nil {
 			v.outcome, v.reason = "quarantined", "the reply was refused: "+err.Error()
 		}
 	} else if v.outcome == "accepted" {
@@ -480,6 +485,9 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 		c, err := Comment{}, aerr
 		if aerr == nil {
 			c, err = s.AddComment(ctx, act, v.issueKey, v.body, false)
+		}
+		if pausedErr(err) {
+			return s.deferMail(ctx, id, err)
 		}
 		if err != nil {
 			v.outcome, v.reason = "quarantined", "the sender may not comment on that issue"
@@ -512,6 +520,17 @@ func (s *Service) IngestMail(ctx context.Context, sourceID string, trusted bool,
 	}
 	_, err := s.DB.Exec(ctx, `UPDATE mail_inbound SET outcome=$2,reason=$3,issue_id=$4,user_id=$5,body=$6,kind=$7,detail=$8,customer_id=$9 WHERE id=$1`, id, v.outcome, v.reason, iss, usr, keep, kind, detail, cust)
 	return InboundResult{ID: id, Outcome: v.outcome, Reason: v.reason}, err
+}
+
+// pausedErr reports whether a pause covering the project refused the write.
+func pausedErr(err error) bool { var p *ErrPaused; return errors.As(err, &p) }
+
+// deferMail gives a message back to its sender or reader because a pause covers where it belongs: the claim is dropped and the error
+// returned, so the SMTP listener answers with a temporary failure (the sending server retries) and the mailbox reader does not move
+// past the message. It is neither lost nor put in quarantine.
+func (s *Service) deferMail(ctx context.Context, id int64, err error) (InboundResult, error) {
+	s.DB.Exec(ctx, `DELETE FROM mail_inbound WHERE id=$1 AND outcome='pending'`, id)
+	return InboundResult{}, err
 }
 
 func singleSender(h netmail.Header) (*netmail.Address, error) {

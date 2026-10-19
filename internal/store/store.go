@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,6 +23,9 @@ type Store struct {
 	Pool *pgxpool.Pool
 	// Source supplies the migrations; nil means the ones embedded in the binary. Tests set it to inject failures and releases.
 	Source func() ([]Migration, error)
+	// PlainIndexes builds `CREATE INDEX CONCURRENTLY` migrations as ordinary index builds. A concurrent build waits for every transaction in the
+	// database, which a test database shared by many parallel tests never lacks; the tables there are empty, so nothing is gained by it.
+	PlainIndexes bool
 }
 
 func (s *Store) migrations() ([]Migration, error) {
@@ -243,10 +248,28 @@ func (s *Store) migrate(ctx context.Context, finalize bool) (applied []int, err 
 			return applied, nil // nothing after a held migration is applied either: the order of the schema is the order of the files
 		}
 		if hasNoTx(m.SQL) {
-			if _, err = conn.Exec(ctx, `SET lock_timeout = '1s'`); err == nil {
-				_, err = conn.Exec(ctx, m.SQL)
+			// A concurrent index build waits for every other transaction in the database and gives up after the lock time-out; a build that
+			// gave up leaves an invalid index behind, which `IF NOT EXISTS` would take for the real one on the next run, so it is dropped
+			// before each attempt and after the last. A few attempts: a busy moment is not a failed upgrade.
+			for attempt := 1; ; attempt++ {
+				dropInvalidIndexes(ctx, conn)
+				if _, err = conn.Exec(ctx, fmt.Sprintf(`SET lock_timeout = '%dms'`, ConcurrentIndexLockTimeout.Milliseconds())); err == nil {
+					sql := m.SQL
+					if s.PlainIndexes {
+						sql = strings.ReplaceAll(sql, "INDEX CONCURRENTLY", "INDEX")
+					}
+					_, err = conn.Exec(ctx, sql)
+				}
+				conn.Exec(ctx, `RESET lock_timeout`)
+				if err == nil {
+					break
+				}
+				var pe *pgconn.PgError
+				if !errors.As(err, &pe) || pe.Code != "55P03" || attempt >= 3 {
+					dropInvalidIndexes(ctx, conn)
+					break
+				}
 			}
-			conn.Exec(ctx, `RESET lock_timeout`)
 			if err == nil {
 				_, err = conn.Exec(ctx, `INSERT INTO schema_migration(version,name,checksum,phase) VALUES($1,$2,$3,$4)`, m.Version, m.Name, checksum(m.SQL), string(ph))
 			}
@@ -297,4 +320,27 @@ func OpenSchema(ctx context.Context, dsn, schema string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{Pool: pool}, nil
+}
+
+// ConcurrentIndexLockTimeout is how long one attempt at a concurrent index build waits for the other transactions of the database (it takes
+// no lock that blocks anyone, so it may wait longer than the time-out of an ordinary migration step); the migration tries three times.
+var ConcurrentIndexLockTimeout = 5 * time.Second
+
+// dropInvalidIndexes removes the indexes of the current schema that a failed concurrent build left unusable.
+func dropInvalidIndexes(ctx context.Context, conn *pgxpool.Conn) {
+	rows, err := conn.Query(ctx, `SELECT quote_ident(n.nspname)||'.'||quote_ident(c.relname) FROM pg_index x JOIN pg_class c ON c.oid=x.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+		WHERE NOT x.indisvalid AND n.nspname=current_schema() AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid=x.indexrelid)`)
+	if err != nil {
+		return
+	}
+	var names []string
+	for rows.Next() {
+		var n string
+		rows.Scan(&n)
+		names = append(names, n)
+	}
+	rows.Close()
+	for _, n := range names {
+		conn.Exec(ctx, `DROP INDEX IF EXISTS `+n)
+	}
 }

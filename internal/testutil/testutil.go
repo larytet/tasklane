@@ -57,6 +57,7 @@ func New(t *testing.T) *Env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	st.PlainIndexes = true // see store.Store: concurrent builds wait for every other test's transactions
 	t.Cleanup(func() {
 		st.Close()
 		admin.Exec(context.Background(), `DROP SCHEMA `+schema+` CASCADE`)

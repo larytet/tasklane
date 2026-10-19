@@ -171,3 +171,31 @@ func TestPAUSE13_SLASweepWaitsForThePause(t *testing.T) {
 		t.Fatalf("after the pause: %d %v", n, err)
 	}
 }
+
+// An email reply for an issue in a paused project is given back to the sender or the mailbox reader (a temporary failure), not quarantined; the
+// same message is accepted when it comes again after the pause.
+func TestPAUSE13_InboundMailIsDeferredNotQuarantined(t *testing.T) {
+	e := newInbound(t)
+	addr := e.replyAddr("bob@example.com")
+	raw := e.eml("Bob R. <bob@example.com>", addr, "Re: [ABC-1] Printer is on fire", []string{authOK}, "Thanks, I will look today."+quoted)
+	lease, err := e.Svc.RequestPause(ctx, e.Admin, domain.PauseIn{Scope: "project:ABC", Owner: "restore:test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Svc.IngestMail(ctx, e.trusted.ID, true, raw)
+	if !isPaused(err) {
+		t.Fatalf("a message for a paused project was %v, want the pause refusal", err)
+	}
+	var rows int
+	e.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM mail_inbound WHERE message_id='<m1@mail.example.com>'`).Scan(&rows)
+	if rows != 0 {
+		t.Fatalf("the refused message left %d row(s) behind: a repeat would be taken for a duplicate", rows)
+	}
+	if err := e.Svc.ReleasePause(ctx, e.Admin, lease.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if r := e.ingest(true, raw); r.Outcome != "accepted" || len(e.comments()) != 1 {
+		t.Fatalf("after the pause: %+v, %d comment(s)", r, len(e.comments()))
+	}
+}

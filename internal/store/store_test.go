@@ -233,8 +233,56 @@ func TestUPG01_ConcurrentIndexMigrationRuns(t *testing.T) {
 		t.Fatal("the concurrent index was not built")
 	}
 	var valid bool
-	st.Pool.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relname='issue_history_field_idx'`).Scan(&valid)
+	st.Pool.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE c.relname='issue_history_field_idx' AND c.relnamespace=current_schema()::regnamespace`).Scan(&valid)
 	if !valid {
 		t.Fatal("the index is not valid")
+	}
+}
+
+// UPG-01: a concurrent index build that gives up on a busy database (it waits for every other transaction, and the migration's lock time-out is
+// one second) must not leave an invalid index that the next run takes for the real one.
+func TestUPG01_AFailedConcurrentIndexBuildIsNotLeftBehindAsValid(t *testing.T) {
+	st := freshSchema(t, "mig_invalid_idx")
+	ctx := context.Background()
+	defer func(d time.Duration) { store.ConcurrentIndexLockTimeout = d }(store.ConcurrentIndexLockTimeout)
+	store.ConcurrentIndexLockTimeout = 700 * time.Millisecond
+	other, err := pgxpool.New(ctx, testutil.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	blocker, err := other.Begin(ctx) // an open transaction with a snapshot: the index build cannot finish while it lasts
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blocker.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`); err != nil {
+		t.Fatal(err)
+	}
+	blocker.Exec(ctx, `SELECT count(*) FROM pg_class`)
+	start := time.Now()
+	if _, err := st.Migrate(ctx); err == nil || !strings.Contains(err.Error(), "lock timeout") {
+		t.Fatalf("migrating beside an open transaction: %v", err)
+	}
+	if d := time.Since(start); d < 2*time.Second {
+		t.Fatalf("gave up after %s: the build is attempted three times", d)
+	}
+	invalid := func() (n int) {
+		st.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_index x JOIN pg_class c ON c.oid=x.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT x.indisvalid AND n.nspname='mig_invalid_idx'`).Scan(&n)
+		return
+	}
+	if n := invalid(); n != 0 {
+		t.Fatalf("%d invalid index(es) left behind", n)
+	}
+	blocker.Rollback(ctx)
+	if _, err := st.Migrate(ctx); err != nil {
+		t.Fatalf("migrating again: %v", err)
+	}
+	if n := invalid(); n != 0 {
+		t.Fatalf("%d invalid index(es) after the second run", n)
+	}
+	var have int
+	st.Pool.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='mig_invalid_idx' AND indexname='mail_inbound_received_idx'`).Scan(&have)
+	if have != 1 {
+		t.Fatalf("the index of migration 0049 exists %d time(s)", have)
 	}
 }
