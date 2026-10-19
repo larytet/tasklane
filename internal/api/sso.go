@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/larytet/tasklane/internal/domain"
 )
@@ -18,6 +19,25 @@ func (s *Server) registerSSO(mux *http.ServeMux) {
 		})
 	}
 	ok := map[string]bool{"ok": true}
+	// the portal's own provider, kept by an administrator of the project
+	s.handle(mux, "GET /api/v1/projects/{key}/portal/sso", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.GetPortalSSO(r.Context(), actorOf(r), r.PathValue("key"))
+		if err == nil && v == nil {
+			s.json(w, 200, map[string]any{"configured": false})
+			return
+		}
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "PUT /api/v1/projects/{key}/portal/sso", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		in := domain.SSOProvider{Enabled: true}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.SavePortalSSO(r.Context(), actorOf(r), r.PathValue("key"), in)
+			s.reply(w, v, err)
+		}
+	}))
+	s.handle(mux, "DELETE /api/v1/projects/{key}/portal/sso", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, ok, s.Svc.DeletePortalSSO(r.Context(), actorOf(r), r.PathValue("key")))
+	}))
 	s.handle(mux, "GET /api/v1/admin/sso/providers", adm(func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Svc.ListSSOProviders(r.Context(), actorOf(r))
 		s.reply(w, v, err)
@@ -69,12 +89,7 @@ func (s *Server) registerSSO(mux *http.ServeMux) {
 			return
 		}
 		res, err := s.Svc.SSOCallback(r.Context(), q.Get("state"), q.Get("code"), s.SessionTTL, s.clientMeta(r))
-		if err != nil {
-			http.Redirect(w, r, "/?sso=denied", http.StatusFound) // the reason is not shown: it would help a guesser
-			return
-		}
-		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: res.Token, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
-		http.Redirect(w, r, res.Redirect, http.StatusFound) // a path on this server: the domain only stores addresses that start with one slash
+		s.ssoDone(w, r, res, err)
 	})
 	// SAML 2.0: the metadata an identity provider's administrator needs, and the address the identity provider posts its signed response to
 	s.handle(mux, "GET /api/v1/auth/saml/{name}/metadata", func(w http.ResponseWriter, r *http.Request) {
@@ -95,12 +110,7 @@ func (s *Server) registerSSO(mux *http.ServeMux) {
 			return
 		}
 		res, err := s.Svc.SAMLCallback(r.Context(), r.PostForm.Get("RelayState"), r.PostForm.Get("SAMLResponse"), s.SessionTTL, s.clientMeta(r))
-		if err != nil {
-			http.Redirect(w, r, "/?sso=denied", http.StatusFound)
-			return
-		}
-		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: res.Token, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
-		http.Redirect(w, r, res.Redirect, http.StatusFound)
+		s.ssoDone(w, r, res, err)
 	})
 	s.handle(mux, "GET /api/v1/admin/scim/tokens", adm(func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Svc.ListSCIMTokens(r.Context(), actorOf(r))
@@ -127,4 +137,24 @@ func (s *Server) registerSSO(mux *http.ServeMux) {
 			s.fail(w, 404, "not_found", "not found", nil)
 		}
 	}))
+}
+
+// ssoDone ends a sign-in through an identity provider: the session cookie of the side it belongs to (staff, or a portal's customers) and a
+// redirect to a path on this server. A refusal sends the person back to where they started, with no reason: it would help a guesser.
+func (s *Server) ssoDone(w http.ResponseWriter, r *http.Request, res domain.SSOResult, err error) {
+	if err != nil {
+		to := "/?sso=denied"
+		if strings.HasPrefix(res.Redirect, "/portal/") {
+			to = res.Redirect + "?sso=denied"
+		}
+		http.Redirect(w, r, to, http.StatusFound)
+		return
+	}
+	if res.PortalToken != "" {
+		http.SetCookie(w, &http.Cookie{Name: portalCookie, Value: res.PortalToken, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: 12 * 3600})
+		http.Redirect(w, r, res.Redirect, http.StatusFound)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: res.Token, Path: "/", HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode, MaxAge: int(s.SessionTTL.Seconds())})
+	http.Redirect(w, r, res.Redirect, http.StatusFound) // a path on this server: the domain only stores addresses that start with one slash
 }

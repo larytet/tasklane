@@ -132,3 +132,21 @@ SHA-256 of `challenge:counter` start with that many zero bits, and sends both wi
 challenge it signed itself, for this portal, unexpired (5 minutes), made at the portal's current difficulty or harder, solved, and not used
 before. A failed check says so (400) and costs the address nothing against its hourly allowance; the honeypot still answers as if all were
 well. Scripts that call the API directly must do the same work.
+
+## Sign-in through your customers' identity provider
+
+A portal can offer a button that signs customers in through their company's identity provider, OpenID Connect or SAML 2.0, set up under the
+portal's settings (`GET`, `PUT` and `DELETE /api/v1/projects/{key}/portal/sso`; administrators of the project). It is the same sign-in code as the
+staff one (docs/IDENTITY.md has the fields: issuer, client id and secret for OpenID Connect; the identity provider's metadata for SAML; the
+address to register is shown after saving), with three differences:
+
+- it ends in a customer session, the portal's own cookie; it never creates or matches a staff account and opens nothing of the staff side;
+- it must name the address domains it speaks for. A provider's own administrator decides which addresses it vouches for, so without this rule the
+  provider of one company could sign in as another company's customer in the same portal. An address outside the list is refused, as is one the
+  portal's block or allow list refuses, and a closed portal refuses everyone;
+- customers are matched by their verified address (a provider's subject is not kept), and a first sign-in makes the customer as a code would.
+
+A portal has one provider. Its button appears on the portal's sign-in page; emailed codes keep working. A refusal sends the person back to the
+portal with a short notice and no reason; the reason (domain or portal rules, or a SAML check that failed) is in the audit log
+(`security.portal_sso_refused`, `security.saml_refused`). A provider of a portal does not appear in the staff sign-in or in the administrator's list
+of providers.

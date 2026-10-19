@@ -673,6 +673,11 @@ func rows() []row {
 		{"POST /api/v1/approvals/{id}/cancel", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req {
 			return J("POST", "/api/v1/approvals/"+f.approval()+"/cancel", nil)
 		}},
+		{"GET /api/v1/projects/{key}/portal/sso", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(200)}, func(f *fixture) req { return J("GET", "/api/v1/projects/ABC/portal/sso", nil) }},
+		{"PUT /api/v1/projects/{key}/portal/sso", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(400)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/projects/ABC/portal/sso", map[string]any{"protocol": "oidc"})
+		}},
+		{"DELETE /api/v1/projects/{key}/portal/sso", exp{anon: codes(401), outsider: codes(404), viewer: codes(403), member: codes(403), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/projects/ABC/portal/sso", nil) }},
 		{"GET /api/v1/portal/{key}/challenge", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/challenge", nil) }},
 		{"GET /api/v1/portal/{key}", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC", nil) }}, // the portal is off until its administrator turns it on
 		{"POST /api/v1/portal/{key}/code", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {

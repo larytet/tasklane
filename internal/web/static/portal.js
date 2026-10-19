@@ -67,7 +67,7 @@
     }
     const me = await api('GET', '/api/v1/portal/me');
     if (me.status === 200) return home(info.data, me.data);
-    return signIn(info.data);
+    return signIn(info.data, new URLSearchParams(location.search).get('sso') === 'denied' ? 'That sign-in was not accepted. Use another way below, or ask your administrator.' : '');
   }
 
   function signIn(info, notice) {
@@ -92,6 +92,7 @@
       if (r.status === 200) { codeRow.hidden = false; code.focus(); msg.className = 'muted'; msg.textContent = 'If that address can use this portal, a code is on its way.'; }
       else { msg.className = 'err'; msg.textContent = r.status === 429 ? 'Too many tries. Please wait a while and try again.' : errText(r); }
     });
+    const sso = info.sso ? h('p', {}, h('a', { class: 'btn primary', id: 'psso', href: '/api/v1/auth/sso/' + encodeURIComponent(info.sso.name) + '/start?redirect=' + encodeURIComponent('/portal/' + key) }, 'Sign in with ' + info.sso.label), h('span', { class: 'muted' }, ' or with an emailed code:')) : null;
     const form = h('form', { onsubmit: async e => {
       e.preventDefault();
       msg.textContent = ''; msg.className = 'err';
@@ -103,7 +104,7 @@
       h('label', { for: 'pe' }, 'Your email address'), email, trap, h('div', { class: 'chips' }, ask), codeRow,
       h('details', {}, h('summary', {}, 'I have a password'), h('label', { for: 'pp' }, 'Password'), pw, h('button', { class: 'btn', type: 'submit' }, 'Sign in with a password')),
       msg);
-    add(clear(root), h('h1', {}, info.name), info.welcome ? h('p', {}, info.welcome) : null, h('h2', {}, 'Sign in'), form, notices(info));
+    add(clear(root), h('h1', {}, info.name), info.welcome ? h('p', {}, info.welcome) : null, h('h2', {}, 'Sign in'), sso, form, notices(info));
   }
 
   function notices(info) {

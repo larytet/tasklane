@@ -668,7 +668,7 @@ containers) nightly for the Helm chart.
 
 | Id | Case | Pass criterion |
 |---|---|---|
-| PORT-01 | **M5.6, code and link, optional password: built; OIDC and SAML open.** Customer authentication: one-time code and magic link (expiry, reuse, brute force limits), optional password, customer OIDC and SAML | Works as specified; throttled; codes single-use |
+| PORT-01 | **M5.6, code and link, optional password: built. M5.20: customer OIDC and SAML built per portal (PORT01_SSO_*: administration, SAML and OIDC sign-in ending in a customer session only, domain and portal rules, mutation-tested; e2e).** Customer authentication: one-time code and magic link (expiry, reuse, brute force limits), optional password, customer OIDC and SAML | Works as specified; throttled; codes single-use |
 | PORT-02 | **M5.6: built** (domain, the matrix, e2e). Session isolation: customer session against staff UI, REST and MCP; staff session against the portal | Neither crosses; separate cookies and lifetimes |
 | PORT-03 | **M5.7, M5.10: own requests, hidden fields and comments, key guessing, other-organization, customer organizations, sharing with the company and with named people, revoking at once (ORG01..03, e2e): built.** Visibility: own requests, shared requests, customer organization; internal fields, comments, approvals, worklogs and Git data; key and id guessing | Only customer-visible data; enumeration and direct-object attacks fail |
 | PORT-04 | **M5.12: customers are never among the people or the seats, and promotion adds exactly one (PRIV04); hosted metering open.** Seats: customers in staff counts and hosted metering | Never counted as staff seats; active customers metered separately where configured |

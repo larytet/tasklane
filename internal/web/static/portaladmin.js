@@ -43,6 +43,41 @@
         const x = await api('PUT', '/api/v1/projects/' + key + '/portal', { enabled: enabled.checked, welcome: welcome.value, privacy_notice: privacy.value, consent_text: consent.value, allow: lines(allow.value), block: lines(block.value), captcha_bits: +cap.value, attach_enabled: af.checked, attach_max_mb: +amb.value, attach_max_files: +afn.value, attach_classes: acl.map(l => l.querySelector('input')).filter(i => i.checked).map(i => i.dataset.class) });
         msg.className = x.status === 200 ? 'muted' : 'err'; msg.textContent = x.status === 200 ? 'Saved.' : errText(x);
       } }, 'Save settings')));
+    // sign-in through the customers' own identity provider
+    const ssoBox = h('div', { id: 'pe-sso' });
+    async function drawSSO() {
+      clear(ssoBox);
+      const g = await api('GET', '/api/v1/projects/' + key + '/portal/sso');
+      const cur = g.status === 200 && g.data.configured !== false ? g.data : null;
+      const proto = h('select', { id: 'ps-proto', 'aria-label': 'Protocol' }, h('option', { value: 'oidc' }, 'OpenID Connect'), h('option', { value: 'saml' }, 'SAML 2.0'));
+      proto.value = cur && cur.protocol === 'saml' ? 'saml' : 'oidc';
+      const inp = (id, label, v, type) => { const i = h('input', { id, type: type || 'text', 'aria-label': label }); i.value = v || ''; return i; };
+      const label = inp('ps-label', 'Button label', cur && cur.label), doms = inp('ps-doms', 'Address domains', cur && (cur.allowed_domains || []).join(', '));
+      const issuer = inp('ps-issuer', 'Issuer address', cur && cur.issuer), client = inp('ps-client', 'Client id', cur && cur.client_id), secret = inp('ps-secret', 'Client secret', '', 'password');
+      const meta = h('textarea', { id: 'ps-meta', rows: 4, 'aria-label': 'Identity provider metadata', placeholder: 'Paste the identity provider\'s metadata XML' });
+      const on = h('input', { type: 'checkbox', id: 'ps-on', checked: !cur || cur.enabled });
+      const oidcRows = h('div', {}, h('label', { for: 'ps-issuer' }, 'Issuer address'), issuer, h('label', { for: 'ps-client' }, 'Client id'), client, h('label', { for: 'ps-secret' }, cur && cur.secret_set ? 'Client secret (leave empty to keep)' : 'Client secret'), secret);
+      const samlRows = h('div', {}, h('label', { for: 'ps-meta' }, 'Identity provider metadata'), meta);
+      const show = () => { oidcRows.hidden = proto.value === 'saml'; samlRows.hidden = proto.value !== 'saml'; };
+      proto.addEventListener('change', show); show();
+      const note = h('div', { role: 'status', class: 'muted' });
+      const where = c => { clear(note); if (!c) return; note.append(c.protocol === 'saml' ? h('p', {}, 'Give the identity provider this sign-in address (ACS): ' + c.acs_url + ' and this metadata: ' + c.metadata_url) : h('p', {}, 'Register this redirect address with the identity provider: ' + location.origin + '/api/v1/auth/sso/callback')); };
+      where(cur);
+      ssoBox.append(h('h3', {}, 'Sign-in through your customers\' identity provider'),
+        h('p', { class: 'muted' }, 'Customers whose company has an identity provider can sign in with it instead of a code. It may only vouch for the address domains you name here, and it signs in customers only, never staff.'),
+        h('label', { for: 'ps-proto' }, 'Protocol'), proto, h('label', { for: 'ps-label' }, 'Button label'), label,
+        h('label', { for: 'ps-doms' }, 'Address domains it speaks for (comma separated, at least one)'), doms, oidcRows, samlRows,
+        h('label', { for: 'ps-on' }, on, ' Offer it on the portal'), note,
+        h('div', { class: 'actions' }, h('button', { class: 'btn primary', onclick: async () => {
+          const saml = proto.value === 'saml';
+          const body = { protocol: proto.value, label: label.value, allowed_domains: doms.value.split(/[\s,]+/).filter(Boolean), enabled: on.checked };
+          if (saml) body.saml_metadata = meta.value; else { body.issuer = issuer.value; body.client_id = client.value; if (secret.value) body.client_secret = secret.value; }
+          const x = await api('PUT', '/api/v1/projects/' + key + '/portal/sso', body);
+          if (x.status === 200) { await drawSSO(); toast('Saved'); } else { clear(note); note.append(h('p', { class: 'err', role: 'alert' }, errText(x))); }
+        } }, 'Save sign-in provider'), cur ? h('button', { class: 'btn ghost', onclick: async () => { const x = await api('DELETE', '/api/v1/projects/' + key + '/portal/sso'); if (x.status === 200) drawSSO(); } }, 'Remove it') : null));
+    }
+    body.append(ssoBox);
+    drawSSO();
     // customers as data subjects: find, export, erase, promote (administrators of the organization)
     const cq = h('input', { type: 'search', 'aria-label': 'Find a customer', placeholder: 'Find a customer by address or name' });
     const clist = h('div', { class: 'list', role: 'list', 'aria-label': 'Customers' });

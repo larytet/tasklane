@@ -46,6 +46,7 @@ type SSOProvider struct {
 	SAMLEmailAttr string   `json:"saml_email_attr"`
 	SAMLNameAttr  string   `json:"saml_name_attr"`
 	SAMLMetadata  string   `json:"saml_metadata,omitempty"` // accepted on save: the identity provider's metadata fills in the entity id, address and certificates
+	PortalKey     string   `json:"portal,omitempty"`        // the project whose portal this provider signs customers in to (empty: the staff sign-in)
 	// shown, not saved
 	ACSURL      string     `json:"acs_url,omitempty"`
 	MetadataURL string     `json:"metadata_url,omitempty"`
@@ -68,6 +69,11 @@ func (s *Service) SaveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 	if err := adminOnly(a); err != nil {
 		return in, err
 	}
+	return s.saveSSOProvider(ctx, a, id, in, "")
+}
+
+// saveSSOProvider checks and stores a provider; portalPID is the project it belongs to when it signs customers in.
+func (s *Service) saveSSOProvider(ctx context.Context, a Actor, id int64, in SSOProvider, portalPID string) (SSOProvider, error) {
 	in.Name = strings.ToLower(strings.TrimSpace(in.Name))
 	for _, r := range in.Name {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
@@ -130,8 +136,8 @@ func (s *Service) SaveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 			return err
 		}
 		if id == 0 {
-			if err := dup(tx.QueryRow(ctx, `INSERT INTO sso_provider(name,label,issuer,client_id,client_secret_enc,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
-				in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr).Scan(&id)); err != nil {
+			if err := dup(tx.QueryRow(ctx, `INSERT INTO sso_provider(name,label,issuer,client_id,client_secret_enc,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr,portal_project_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::uuid) RETURNING id`,
+				in.Name, in.Label, strings.TrimRight(in.Issuer, "/"), in.ClientID, enc, in.Scopes, in.AllowedDomains, in.JIT, in.Enabled, in.Protocol, in.SAMLSSOURL, in.SAMLCerts, in.SAMLEmailAttr, in.SAMLNameAttr, nilIfEmpty(portalPID)).Scan(&id)); err != nil {
 				return err
 			}
 		} else {
@@ -149,32 +155,46 @@ func (s *Service) SaveSSOProvider(ctx context.Context, a Actor, id int64, in SSO
 	if err != nil {
 		return in, err
 	}
-	ps, err := s.ListSSOProviders(ctx, a)
-	for _, p := range ps {
-		if p.ID == id {
-			return p, err
-		}
+	p, err := s.loadSSOProvider(ctx, id)
+	if err != nil {
+		return in, err
 	}
-	return in, err
+	return p, nil
+}
+
+const ssoProviderCols = `id,name,label,issuer,client_id,client_secret_enc IS NOT NULL,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr,COALESCE((SELECT key FROM project WHERE id=portal_project_id),'')`
+
+type rowScanner interface{ Scan(...any) error }
+
+func (s *Service) scanSSOProvider(r rowScanner) (SSOProvider, error) {
+	var p SSOProvider
+	if err := r.Scan(&p.ID, &p.Name, &p.Label, &p.Issuer, &p.ClientID, &p.SecretSet, &p.Scopes, &p.AllowedDomains, &p.JIT, &p.Enabled, &p.Protocol, &p.SAMLSSOURL, &p.SAMLCerts, &p.SAMLEmailAttr, &p.SAMLNameAttr, &p.PortalKey); err != nil {
+		return p, err
+	}
+	if p.Protocol == "saml" {
+		p.ACSURL, p.MetadataURL, p.CertInfo = s.samlACS(), s.samlMetadataURL(p.Name), certInfo(p.SAMLCerts)
+	}
+	return p, nil
+}
+
+func (s *Service) loadSSOProvider(ctx context.Context, id int64) (SSOProvider, error) {
+	return s.scanSSOProvider(s.DB.QueryRow(ctx, `SELECT `+ssoProviderCols+` FROM sso_provider WHERE id=$1`, id))
 }
 
 func (s *Service) ListSSOProviders(ctx context.Context, a Actor) ([]SSOProvider, error) {
 	if err := adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT id,name,label,issuer,client_id,client_secret_enc IS NOT NULL,scopes,allowed_domains,jit,enabled,protocol,saml_sso_url,saml_certs,saml_email_attr,saml_name_attr FROM sso_provider ORDER BY name`)
+	rows, err := s.DB.Query(ctx, `SELECT `+ssoProviderCols+` FROM sso_provider WHERE portal_project_id IS NULL ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []SSOProvider{}
 	for rows.Next() {
-		var p SSOProvider
-		if err := rows.Scan(&p.ID, &p.Name, &p.Label, &p.Issuer, &p.ClientID, &p.SecretSet, &p.Scopes, &p.AllowedDomains, &p.JIT, &p.Enabled, &p.Protocol, &p.SAMLSSOURL, &p.SAMLCerts, &p.SAMLEmailAttr, &p.SAMLNameAttr); err != nil {
+		p, err := s.scanSSOProvider(rows)
+		if err != nil {
 			return nil, err
-		}
-		if p.Protocol == "saml" {
-			p.ACSURL, p.MetadataURL, p.CertInfo = s.samlACS(), s.samlMetadataURL(p.Name), certInfo(p.SAMLCerts)
 		}
 		out = append(out, p)
 	}
@@ -186,7 +206,7 @@ func (s *Service) DeleteSSOProvider(ctx context.Context, a Actor, id int64) erro
 		return err
 	}
 	return s.tx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `DELETE FROM sso_provider WHERE id=$1`, id)
+		tag, err := tx.Exec(ctx, `DELETE FROM sso_provider WHERE id=$1 AND portal_project_id IS NULL`, id)
 		if err != nil {
 			return err
 		}
@@ -199,7 +219,7 @@ func (s *Service) DeleteSSOProvider(ctx context.Context, a Actor, id int64) erro
 
 // SSOChoices are the sign-in buttons: enabled providers only, nothing else about them.
 func (s *Service) SSOChoices(ctx context.Context) []map[string]string {
-	rows, err := s.DB.Query(ctx, `SELECT name,label FROM sso_provider WHERE enabled ORDER BY name`)
+	rows, err := s.DB.Query(ctx, `SELECT name,label FROM sso_provider WHERE enabled AND portal_project_id IS NULL ORDER BY name`)
 	out := []map[string]string{}
 	if err != nil {
 		return out
@@ -443,10 +463,11 @@ func (s *Service) SSOStart(ctx context.Context, name, redirect string) (string, 
 }
 
 type SSOResult struct {
-	Token    string
-	User     User
-	Redirect string
-	Created  bool
+	PortalToken string // a customer's session, when the provider belongs to a portal (Token is then empty)
+	Token       string
+	User        User
+	Redirect    string
+	Created     bool
 }
 
 // SSOCallback finishes a sign-in: the state is used once, the code is exchanged, the id token is verified, and the person
@@ -464,7 +485,7 @@ func (s *Service) SSOCallback(ctx context.Context, state, code string, ttl time.
 	var p SSOProvider
 	var enc []byte
 	var jit bool
-	err = s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,client_secret_enc,allowed_domains,jit FROM sso_provider WHERE id=$1 AND enabled`, pid).Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &enc, &p.AllowedDomains, &jit)
+	err = s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,client_secret_enc,allowed_domains,jit,COALESCE((SELECT key FROM project WHERE id=portal_project_id),'') FROM sso_provider WHERE id=$1 AND enabled`, pid).Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &enc, &p.AllowedDomains, &jit, &p.PortalKey)
 	if err != nil {
 		return res, ErrForbidden
 	}
@@ -511,6 +532,9 @@ func (s *Service) ssoSignIn(ctx context.Context, res SSOResult, p SSOProvider, j
 	email = strings.ToLower(strings.TrimSpace(email))
 	if sub == "" || email == "" || !verified || !strings.Contains(email, "@") {
 		return res, ErrForbidden // an address the provider does not vouch for is not an identity
+	}
+	if p.PortalKey != "" {
+		return s.portalSSOSignIn(ctx, res, p, email, meta)
 	}
 	if len(p.AllowedDomains) > 0 {
 		dom := email[strings.LastIndex(email, "@")+1:]

@@ -534,3 +534,58 @@ test('PORT-05: the sign-in check: a code is mailed only after the browser does t
   await page.getByRole('button', { name: 'Sign in', exact: true }).first().click();
   await expect(page.getByText('Signed in as')).toContainText(addr);
 });
+
+test('PORT-01 (identity provider): a portal offers sign-in through its customers\' identity provider; it needs address domains; a forged response is refused and lands back on the portal', async ({ browser }) => {
+  const adm = await browser.newContext();
+  adm.on('page', watch);
+  const ap = await adm.newPage();
+  await ap.goto('/');
+  await ap.getByLabel('Email').fill('admin@example.com');
+  await ap.getByLabel('Password').fill('adminpass1');
+  await ap.getByRole('button', { name: 'Sign in' }).click();
+  await expect(ap.getByRole('button', { name: '+ Create' })).toBeVisible();
+  const pk = 'S' + uniq().toUpperCase();
+  expect((await adm.request.post('/api/v1/projects', { headers: H, data: { key: pk, name: 'Sso desk' } })).status()).toBe(201);
+  expect((await adm.request.put(`/api/v1/projects/${pk}/portal`, { headers: H, data: { enabled: true } })).status()).toBe(200);
+  await ap.goto(`/#/portal-admin/${pk}`);
+  const box = ap.locator('#pe-sso');
+  await expect(box).toBeVisible();
+  const axe = await new AxeBuilder({ page: ap }).analyze();
+  expect(axe.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
+  await box.getByLabel('Protocol').selectOption('saml');
+  await box.getByLabel('Button label').fill('Acme login');
+  await box.getByLabel('Identity provider metadata').fill(readFileSync('../internal/saml/testdata/idp_metadata.xml', 'utf8'));
+  await box.getByRole('button', { name: 'Save sign-in provider' }).click();
+  await expect(box.getByRole('alert')).toContainText('domains');
+  await box.getByLabel('Address domains', { exact: true }).fill('example.com');
+  await box.getByRole('button', { name: 'Save sign-in provider' }).click();
+  await expect(box).toContainText('/api/v1/auth/saml/portal-' + pk.toLowerCase() + '/metadata');
+  // the staff sign-in page does not offer it
+  const out = await browser.newContext();
+  const sp = await out.newPage();
+  await sp.goto('/');
+  await expect(sp.getByRole('link', { name: 'Sign in with Acme login' })).toHaveCount(0);
+  // the portal does
+  const page = await out.newPage();
+  await page.goto('/portal/' + pk);
+  const link = page.getByRole('link', { name: 'Sign in with Acme login' });
+  await expect(link).toBeVisible();
+  const start = await out.request.get(`/api/v1/auth/sso/portal-${pk.toLowerCase()}/start?redirect=/portal/${pk}`, { maxRedirects: 0 });
+  expect(start.status()).toBe(302);
+  const to = new URL(start.headers()['location']);
+  expect(to.origin + to.pathname).toBe('https://idp.example/sso');
+  const relay = to.searchParams.get('RelayState');
+  // a response that is not signed by the provider is refused, and the person comes back to the portal
+  const forged = Buffer.from('<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"/>').toString('base64');
+  const post = await out.request.post('/api/v1/auth/saml/acs', { form: { SAMLResponse: forged, RelayState: relay }, maxRedirects: 0 });
+  expect(post.status()).toBe(302);
+  expect(post.headers()['location']).toBe(`/portal/${pk}?sso=denied`);
+  expect((await out.request.get('/api/v1/portal/me')).status()).toBe(401);
+  await page.goto(`/portal/${pk}?sso=denied`);
+  await expect(page.getByRole('alert')).toContainText('not accepted');
+  // removing it takes the button away
+  await ap.getByRole('button', { name: 'Remove it' }).click();
+  await page.goto('/portal/' + pk);
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Sign in with Acme login' })).toHaveCount(0);
+});

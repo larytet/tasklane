@@ -158,8 +158,8 @@ func (s *Service) SAMLCallback(ctx context.Context, relay, response string, ttl 
 	var p SSOProvider
 	var jit bool
 	var certs []string
-	err = s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,allowed_domains,jit,saml_certs,saml_email_attr,saml_name_attr FROM sso_provider WHERE id=$1 AND enabled AND protocol='saml'`, pid).
-		Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &p.AllowedDomains, &jit, &certs, &p.SAMLEmailAttr, &p.SAMLNameAttr)
+	err = s.DB.QueryRow(ctx, `SELECT id,name,issuer,client_id,allowed_domains,jit,saml_certs,saml_email_attr,saml_name_attr,COALESCE((SELECT key FROM project WHERE id=portal_project_id),'') FROM sso_provider WHERE id=$1 AND enabled AND protocol='saml'`, pid).
+		Scan(&p.ID, &p.Name, &p.Issuer, &p.ClientID, &p.AllowedDomains, &jit, &certs, &p.SAMLEmailAttr, &p.SAMLNameAttr, &p.PortalKey)
 	if err != nil {
 		return res, ErrForbidden
 	}

@@ -50,6 +50,7 @@ type PortalInfo struct {
 	Consent string           `json:"consent_text,omitempty"`
 	Files   *PortalFileRules `json:"files,omitempty"` // present when customers may add files
 	Check   bool             `json:"check,omitempty"` // the sign-in asks for a proof of work first
+	SSO     *PortalSSOChoice `json:"sso,omitempty"`   // a way to sign in through the customer's own identity provider
 }
 
 // PortalFileRules is what the portal tells a customer about the files it takes.
@@ -117,6 +118,9 @@ func (s *Service) PortalInfoFor(ctx context.Context, projectKey string) (PortalI
 	}
 	info := PortalInfo{Project: strings.ToUpper(projectKey), Name: name, Welcome: set.Welcome, Privacy: set.Privacy, Consent: set.Consent}
 	info.Check = set.CaptchaBits > 0
+	if _, pid, _, _, e := s.portalOf(ctx, projectKey); e == nil {
+		info.SSO = s.portalSSOChoice(ctx, pid)
+	}
 	if set.AttachEnabled {
 		info.Files = &PortalFileRules{MaxMB: set.AttachMaxMB, MaxFiles: set.AttachMaxFiles, Classes: set.AttachClasses}
 	}
