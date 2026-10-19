@@ -45,3 +45,12 @@ measures its clock against the database as it always does and corrects for it. `
 every stored time and expiry means the same on both: the cluster status reports and warns about both offsets; a session or API token made on one node works on
 the other; a pause taken on one holds writes on both and ends at the same moment (not an hour early or late); a campaign through both is clean under the
 reconciler; and no history entry, text version, comment, audit entry, heartbeat or session is stamped away from the database's own clock.
+
+### The reliability campaign at scale
+
+`make soak DURATION=30m` (optionally `SOAK_USERS=24`) runs the SPEC 21 campaign for as long as asked: rounds of simulated people saving into shared texts through the real
+HTTP server while a quarter of the acknowledgements are lost, each round judged by the reconciler (E1, E2, E4 and gaps in the sequence), together with editing sessions that
+save server drafts, lose acknowledgements, crash at random and are judged on recovery (E3). It prints what it counted and what that proves: with no error in N trials the
+rate of each class is below 3/N with 95% confidence (the rule of three), set against the targets (1 in 10^8 saves for E1 and E4, 1 in 10^9 for E2, 1 in 10^6 editing sessions
+for E3) and against the sample sizes SPEC 21 asks for (3x10^8 saves and 3x10^6 sessions). The run fails if it counted anything. On a development machine it makes about 380 saves a second,
+so the full sample is about nine days of one machine; the harness is built to be run for as long as there is machine time, and a short run says how little it proves.

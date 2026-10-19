@@ -1,7 +1,7 @@
 GO ?= go
 export TASKLANE_TEST_DATABASE_URL ?= postgres://tl:tl@localhost:55432/tasklane
 
-.PHONY: build test vet db notice dist perf e2e e2e-update interop interop-matrix upgrade upgrade-bus chaos
+.PHONY: build test vet db notice dist perf e2e e2e-update interop interop-matrix upgrade upgrade-bus chaos soak
 build:
 	$(GO) build -o bin/tasklane ./cmd/tasklane
 vet:
@@ -51,3 +51,7 @@ upgrade-bus:
 # the campaign through a bad network with a node killed, Redis stopped and PostgreSQL restarted (needs Docker)
 chaos:
 	./scripts/chaos.sh
+
+# the reliability campaign for as long as you like: make soak DURATION=30m (SOAK_USERS=24); prints the counts and what they prove
+soak:
+	SOAK_DURATION=$${DURATION:-2m} $(GO) test -tags soak ./internal/api -run LIVE09_Soak -count=1 -v -timeout 24h

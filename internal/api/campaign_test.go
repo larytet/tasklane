@@ -25,7 +25,7 @@ func dropAcks(next http.Handler, p float64, dropped *int64) http.Handler {
 	var mu sync.Mutex
 	rng := rand.New(rand.NewSource(7))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "PUT" || !strings.Contains(r.URL.Path, "/text/") {
+		if r.Method != "PUT" || !(strings.Contains(r.URL.Path, "/text/") || strings.Contains(r.URL.Path, "/drafts/")) {
 			next.ServeHTTP(w, r)
 			return
 		}
