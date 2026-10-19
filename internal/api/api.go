@@ -130,6 +130,31 @@ func (s *Server) Handler() http.Handler {
 		v, err := s.Svc.ListOrganizations(r.Context(), actorOf(r))
 		s.reply(w, v, err)
 	}))
+	// the hosted edition: an organization's plan (the operator's) and its usage (the operator's, and the organization's own administrator's); they do not exist unless `hosted` is on
+	s.handle(mux, "GET /api/v1/orgs/{id}/plan", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.GetOrgPlan(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "PUT /api/v1/orgs/{id}/plan", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.OrgPlan
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.SetOrgPlan(r.Context(), actorOf(r), r.PathValue("id"), in)
+			s.reply(w, v, err)
+		}
+	}))
+	s.handle(mux, "DELETE /api/v1/orgs/{id}/plan", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, map[string]bool{"ok": true}, s.Svc.ClearOrgPlan(r.Context(), actorOf(r), r.PathValue("id")))
+	}))
+	s.handle(mux, "GET /api/v1/orgs/{id}/usage", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		if h := r.URL.Query().Get("history"); h != "" {
+			days, _ := strconv.Atoi(h)
+			v, err := s.Svc.UsageHistory(r.Context(), actorOf(r), r.PathValue("id"), days)
+			s.reply(w, v, err)
+			return
+		}
+		v, err := s.Svc.OrgUsage(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
+	}))
 	s.handle(mux, "POST /api/v1/orgs", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name          string `json:"name"`
@@ -764,6 +789,7 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		ep  *domain.ErrPaused
 		ce  *domain.ConflictError
 		qe  *domain.QuotaError
+		pl  *domain.PlanLimitError
 		nd  *domain.NotDownloadable
 	)
 	switch {
@@ -771,6 +797,8 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.json(w, ok, v)
 	case errors.As(err, &inv):
 		s.fail(w, 400, "invalid", inv.Msg, nil)
+	case errors.As(err, &pl):
+		s.fail(w, 402, "plan_limit", pl.Error(), map[string]any{"resource": pl.Resource, "limit": pl.Limit, "used": pl.Used})
 	case errors.As(err, &qe):
 		s.fail(w, 413, "quota_exceeded", qe.Error(), map[string]int64{"quota": qe.Quota, "used": qe.Used})
 	case errors.Is(err, domain.ErrForbidden):

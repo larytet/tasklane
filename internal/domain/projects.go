@@ -86,7 +86,7 @@ func (s *Service) CreateProject(ctx context.Context, a Actor, key, name string) 
 		}
 		return outbox(ctx, tx, "project:"+p.Key, "project.created", p)
 	})
-	return p, err
+	return p, planErr(err)
 }
 
 func (s *Service) AddMember(ctx context.Context, a Actor, projectKey, userID, role string) error {

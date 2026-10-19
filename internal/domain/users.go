@@ -67,6 +67,9 @@ func (s *Service) createUser(ctx context.Context, email, name, password string, 
 		cerr := s.DB.QueryRow(ctx, `UPDATE app_user SET name=$2,password_hash=$3,is_admin=$4,instance_admin=$6,active=true WHERE email=$1 AND NOT active AND password_hash IS NULL AND kind='human' AND org_id::text=$5 RETURNING id`,
 			email, name, string(h), admin, org, instance).Scan(&u.ID)
 		if cerr != nil {
+			if pl := planErr(cerr); pl != cerr {
+				return User{}, pl
+			}
 			return User{}, invalid("a user with this email already exists")
 		}
 		err = nil

@@ -263,6 +263,7 @@ func serve(ctx context.Context, cfg config.Config) {
 	go svc.RunNotifier(ctx, log.Printf)
 	go svc.RunApprovals(ctx, log.Printf)
 	go svc.RunSLA(ctx, log.Printf)
+	go svc.RunMetering(ctx, log.Printf)
 	go svc.RunWorkflowMigrations(ctx, log.Printf)
 	dom := "tasklane.local"
 	if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() != "" {
@@ -277,6 +278,7 @@ func serve(ctx context.Context, cfg config.Config) {
 		log.Printf("warning: this machine's clock is %s from the database's; times are corrected, but fix the machine's time synchronisation", off.Round(time.Second))
 	}
 	svc.WebAuthnRPID, svc.WebAuthnOrigins, svc.WebAuthnRequireUV = cfg.WebAuthnRPID, cfg.WebAuthnOrigins, cfg.WebAuthnRequireUV
+	svc.Hosted, svc.HostedRegion = cfg.Hosted, cfg.HostedRegion
 	for _, c := range cfg.TrustedProxies {
 		if _, n, err := net.ParseCIDR(c); err == nil {
 			svc.TrustedProxies = append(svc.TrustedProxies, n)

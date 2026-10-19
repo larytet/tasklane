@@ -634,7 +634,7 @@ containers) nightly for the Helm chart.
 | LIC-04 | Fonts and icons licence and attribution | Licences recorded; attribution present |
 | LIC-05 | Self-hosted build has no licence-key check, seat enforcement or phone-home | Zero outbound connections at idle; hosted-only code inactive |
 | LIC-06 | Names and trademarks in UI and packages | Third-party marks used only nominatively |
-| HOST-01 | Hosted configuration: tenant isolation, plan quotas, metering accuracy, limit errors, region selection | Isolation per SEC-09; metering within tolerance; clear errors |
+| HOST-01 | Hosted configuration: tenant isolation, plan quotas, metering accuracy, limit errors, region selection | Isolation per SEC-09; metering within tolerance; clear errors | **covered (M5.22)** `TestHOST01_*`: a self-hosted installation has no plans, limits, snapshots or endpoints; plan administration, region refusal, audit; seats and projects enforced by the database on every path (screens, SCIM, reactivation; agents and customers are not seats; another organization unaffected; a freed seat is usable; clearing lifts them); storage limit with numbers and inactive when hosting is off; metering equals the facts (seats, projects, issues, storage, active customers by 30-day window), one snapshot a day rewritten while open; mutation-tested. Billing integration, a plan screen and real multi-region operation are not built |
 
 ### 5.15 Issue lifecycle and work calendars
 

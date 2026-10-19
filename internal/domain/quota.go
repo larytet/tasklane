@@ -38,6 +38,9 @@ func (s *Service) storageUsed(ctx context.Context, projectID string) int64 {
 
 // checkQuota refuses an upload that would take the project past its quota.
 func (s *Service) checkQuota(ctx context.Context, projectKey string, add int64) error {
+	if err := s.checkOrgStorage(ctx, projectKey, add); err != nil {
+		return err
+	}
 	var quota *int64
 	var pid string
 	if err := s.DB.QueryRow(ctx, `SELECT id::text,storage_quota_bytes FROM project WHERE key=$1`, strings.ToUpper(projectKey)).Scan(&pid, &quota); err != nil || quota == nil {

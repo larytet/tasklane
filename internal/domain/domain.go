@@ -22,11 +22,14 @@ import (
 )
 
 type Service struct {
-	DB       *pgxpool.Pool
-	Now      func() time.Time
-	Presence *Presence
-	Blobs    *Blobs
-	Mail     *MailConfig
+	// Hosted turns on the hosted edition's plans, quotas and metering (SPEC 17.9); HostedRegion is the region this deployment serves. Off, none of it exists.
+	Hosted       bool
+	HostedRegion string
+	DB           *pgxpool.Pool
+	Now          func() time.Time
+	Presence     *Presence
+	Blobs        *Blobs
+	Mail         *MailConfig
 	// InboundDomain is the reply domain when email is received but not sent by this server (the outbound mail settings carry it otherwise).
 	InboundDomain string
 	// DNS answers TXT lookups for DKIM keys; when nil Tasklane does not verify DKIM and relies on a trusted receiver's verdict.
@@ -162,6 +165,9 @@ func (s *Service) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 // mapRestriction turns the database's refusal of an address outside an organization's allowed domains into an ordinary invalid-input
 // error with the words the database chose, so every path that makes an account says the same thing.
 func mapRestriction(err error) error {
+	if pl := planErr(err); pl != err {
+		return pl
+	}
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) && pe.Code == "23514" && strings.Contains(pe.Message, "allowed domains") {
 		return invalid("%s", pe.Message)
