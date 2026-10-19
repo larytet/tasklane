@@ -96,4 +96,4 @@ Pauses accept three scopes: `instance`, `org:<organization id>` and `project:<KE
 
 Once a month ends, the first node to look (every hour) makes the invoice of the month just past for every organization that has a plan and a price and
 recorded usage, and delivers it if a billing endpoint is configured; an invoice that could not be delivered is delivered at a later look, and a month that
-already has a live invoice is left alone.
+already has a live invoice is left alone. Months that were missed while no node was running (up to a year back) are made at the next look when usage was recorded in them and they have no invoice at all; a voided month is never made again by the job (make it by hand).

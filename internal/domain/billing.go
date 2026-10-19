@@ -362,7 +362,7 @@ type UpstreamError struct{ Msg string }
 func (e *UpstreamError) Error() string { return e.Msg }
 
 // RunBillingOnce makes and delivers the invoices that are owed: for every organization with a plan and a price, the month before this one, once, as soon as
-// the month is over. An invoice that was made but could not be delivered is delivered at a later call. Nothing is made for an organization with no
+// the month is over, and the earlier months (up to a year back) in which usage was recorded and nothing was invoiced. An invoice that was made but could not be delivered is delivered at a later call. Nothing is made for an organization with no
 // prices (nothing to charge) or no recorded usage in that month. Safe from every node: the one live invoice per month is the database's rule.
 func (s *Service) RunBillingOnce(ctx context.Context) (made, sent int) {
 	if !s.Hosted {
@@ -382,6 +382,17 @@ func (s *Service) RunBillingOnce(ctx context.Context) (made, sent int) {
 	}
 	rows.Close()
 	for _, org := range orgs {
+		// months missed while no node was running (up to a year back): usage was recorded and no invoice, not even a voided one, exists
+		for _, month := range s.unbilledMonths(ctx, org, prev) {
+			if inv, gerr := s.GenerateInvoice(ctx, operator, org, month); gerr == nil {
+				made++
+				if s.Billing != nil {
+					if _, err := s.SendInvoice(ctx, operator, org, inv.Number); err == nil {
+						sent++
+					}
+				}
+			}
+		}
 		var have string
 		var status string
 		err := s.DB.QueryRow(ctx, `SELECT number,status FROM invoice WHERE org_id::text=$1 AND period=$2 AND status<>'void'`, org, prev).Scan(&have, &status)
@@ -400,6 +411,26 @@ func (s *Service) RunBillingOnce(ctx context.Context) (made, sent int) {
 		}
 	}
 	return
+}
+
+// unbilledMonths lists, oldest first, the months before prev (back to twelve months before it) in which the organization has usage
+// recorded and no invoice at all.
+func (s *Service) unbilledMonths(ctx context.Context, org, prev string) []string {
+	rows, err := s.DB.Query(ctx, `SELECT to_char(m,'YYYY-MM') FROM (
+		SELECT DISTINCT date_trunc('month', day) AS m FROM usage_snapshot WHERE org_id::text=$1
+			AND day >= (to_date($2||'-01','YYYY-MM-DD') - interval '12 months') AND day < to_date($2||'-01','YYYY-MM-DD')) u
+		WHERE NOT EXISTS (SELECT 1 FROM invoice i WHERE i.org_id::text=$1 AND i.period=to_char(u.m,'YYYY-MM')) ORDER BY m`, org, prev)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var m string
+		rows.Scan(&m)
+		out = append(out, m)
+	}
+	return out
 }
 
 // RunBilling runs RunBillingOnce every hour (hosted installations only).

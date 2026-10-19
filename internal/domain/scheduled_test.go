@@ -253,3 +253,41 @@ func TestHOST05_ScheduledBilling(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+// Months missed while no node was running are invoiced when one starts again; a voided month is not made again, and a month with no usage is not invoiced.
+func TestHOST06_MissedMonthsAreCaughtUp(t *testing.T) {
+	e, org, _ := hostedEnv(t)
+	e.Svc.SetOrgPlan(ctx, e.Admin, org, domain.OrgPlan{Plan: "team"})
+	e.Svc.SetPrices(ctx, e.Admin, org, domain.Prices{BaseCents: 1000, SeatCents: 100})
+	snapshot(t, e, org, "2026-06-10", 2, 0, 0)
+	snapshot(t, e, org, "2026-08-10", 3, 0, 0) // July has no usage
+	snapshot(t, e, org, "2026-09-10", 4, 0, 0)
+	e.Clock.T = time.Date(2026, 10, 3, 8, 0, 0, 0, time.UTC) // October: nobody ran the job in July, August, September
+	if made, _ := e.Svc.RunBillingOnce(ctx); made != 3 {
+		t.Fatalf("made %d, want June, August and September", made)
+	}
+	l, _ := e.Svc.ListInvoices(ctx, e.Admin, org)
+	got := map[string]bool{}
+	for _, i := range l {
+		got[i.Period] = true
+	}
+	if len(l) != 3 || !got["2026-06"] || !got["2026-08"] || !got["2026-09"] {
+		t.Fatalf("%+v", l)
+	}
+	// a month whose invoice was voided stays voided in the catch-up (only the month just ended is made again)
+	for _, i := range l {
+		if i.Period == "2026-06" {
+			if _, err := e.Svc.VoidInvoice(ctx, e.Admin, org, i.Number, "wrong prices"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if made, _ := e.Svc.RunBillingOnce(ctx); made != 0 {
+		t.Fatalf("a second call made %d", made)
+	}
+	// older than a year is left alone
+	snapshot(t, e, org, "2025-01-10", 2, 0, 0)
+	if made, _ := e.Svc.RunBillingOnce(ctx); made != 0 {
+		t.Fatalf("a month more than a year old made %d", made)
+	}
+}
