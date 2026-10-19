@@ -37,3 +37,11 @@ measurement is known to be able to fail.
 `make chaos` also runs the same campaign with the faults made by [toxiproxy](https://github.com/Shopify/toxiproxy) between the people and each node, at the TCP level and not
 in an HTTP wrapper: every packet delayed with jitter in both directions, the answer stream cut into small pieces, 5% of connections reset as they open, and 5% of
 answers cut off after 40 bytes. The node kill, the Redis stop and the PostgreSQL restart are in the same run, and the reconciler judges the shared texts the same way.
+
+### Clock skew between real nodes
+
+`fault_clock_skew` (for resilience tests only; empty by default) makes a node's own clock read ahead of the truth, or behind it with a minus sign. The node still
+measures its clock against the database as it always does and corrects for it. `make chaos` starts two nodes an hour apart in opposite directions and checks that
+every stored time and expiry means the same on both: the cluster status reports and warns about both offsets; a session or API token made on one node works on
+the other; a pause taken on one holds writes on both and ends at the same moment (not an hour early or late); a campaign through both is clean under the
+reconciler; and no history entry, text version, comment, audit entry, heartbeat or session is stamped away from the database's own clock.

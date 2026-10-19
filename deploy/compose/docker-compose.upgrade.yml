@@ -43,8 +43,8 @@ services:
 
   old1: {<<: *node, image: "${UPGRADE_OLD_IMAGE:?set by scripts/upgrade.sh}"}
   old2: {<<: *node, image: "${UPGRADE_OLD_IMAGE}"}
-  new1: {<<: *node, image: "${UPGRADE_NEW_IMAGE:?set by scripts/upgrade.sh}"}
-  new2: {<<: *node, image: "${UPGRADE_NEW_IMAGE}"}
+  new1: {<<: *node, image: "${UPGRADE_NEW_IMAGE:?set by scripts/upgrade.sh}", environment: {<<: *env, TASKLANE_FAULT_CLOCK_SKEW: "${UPGRADE_SKEW1:-}"}}
+  new2: {<<: *node, image: "${UPGRADE_NEW_IMAGE}", environment: {<<: *env, TASKLANE_FAULT_CLOCK_SKEW: "${UPGRADE_SKEW2:-}"}}
   migrate-new:
     image: "${UPGRADE_NEW_IMAGE}"
     command: ["migrate"]

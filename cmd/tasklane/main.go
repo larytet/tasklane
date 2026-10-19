@@ -275,6 +275,14 @@ func serve(ctx context.Context, cfg config.Config) {
 	host, _ := os.Hostname()
 	nb := make([]byte, 4)
 	rand.Read(nb)
+	if cfg.ClockSkew != "" { // fault injection: the node's own clock is wrong on purpose; SyncClock right after corrects it as it would a real one
+		d, err := time.ParseDuration(cfg.ClockSkew)
+		if err != nil {
+			log.Fatalf("fault_clock_skew: %v", err)
+		}
+		svc.Clock = func() time.Time { return time.Now().Add(d) }
+		log.Printf("warning: fault injection is on: this node's clock reads %s off the truth (fault_clock_skew)", d)
+	}
 	if off, err := svc.SyncClock(ctx); err != nil {
 		log.Printf("warning: could not compare this machine's clock with the database's: %v", err)
 	} else if off > domain.ClockWarnAt || off < -domain.ClockWarnAt {

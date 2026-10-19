@@ -18,6 +18,6 @@ trap cleanup EXIT
 start=$(date +%s)
 docker build -q -f scripts/upgrade/Dockerfile --build-arg VERSION=0.1.0 -t "$UPGRADE_NEW_IMAGE" . >/dev/null
 export UPGRADE_COMPOSE="$C --profile tools"
-go test -tags chaos ./internal/upgrade -run 'TestCHAOS0[35]' -count=1 -timeout 20m "$@"
+go test -tags chaos ./internal/upgrade -run 'TestCHAOS0[358]' -count=1 -timeout 20m "$@"
 rc=0
 echo "chaos test passed in $(( $(date +%s) - start )) s"
