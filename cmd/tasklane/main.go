@@ -280,6 +280,9 @@ func serve(ctx context.Context, cfg config.Config) {
 	}
 	svc.WebAuthnRPID, svc.WebAuthnOrigins, svc.WebAuthnRequireUV = cfg.WebAuthnRPID, cfg.WebAuthnOrigins, cfg.WebAuthnRequireUV
 	svc.Hosted, svc.HostedRegion = cfg.Hosted, cfg.HostedRegion
+	if cfg.Hosted && cfg.BillingURL != "" {
+		svc.Billing = domain.WebhookBilling{URL: cfg.BillingURL, Secret: cfg.BillingSecret, AllowPrivate: cfg.WebhookAllowPrivate}
+	}
 	for _, c := range cfg.TrustedProxies {
 		if _, n, err := net.ParseCIDR(c); err == nil {
 			svc.TrustedProxies = append(svc.TrustedProxies, n)

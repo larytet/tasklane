@@ -35,3 +35,25 @@ one, so clear plans before switching hosting off.
 (portal customers who signed in during the last 30 days; metered apart from seats and never counted against them), with the plan. The operator may
 ask about any organization and an organization's administrator about their own. A snapshot of every organization is written every hour and kept
 one row a day (the day's row is rewritten while the day is open): `GET /api/v1/orgs/{id}/usage?history=30` lists them, newest first, for billing.
+
+## Prices and invoices
+
+Tasklane does not take payment; it prices what an organization used and hands the invoice to whatever bills the customer.
+
+```
+PUT  /api/v1/orgs/{id}/prices                      {"currency":"eur","price_base_cents":2900,"price_seat_cents":850,"price_gib_cents":50,"price_customer_cents":25}
+POST /api/v1/orgs/{id}/invoices                    {"period":"2026-09"}
+GET  /api/v1/orgs/{id}/invoices                    (and /{number}, or /{number}?format=csv)
+POST /api/v1/orgs/{id}/invoices/{number}/send      hand it to the billing endpoint
+POST /api/v1/orgs/{id}/invoices/{number}/void      {"reason":"..."}
+```
+
+Prices belong to the plan (set a plan first) and are in whole cents; they are zero until set. An invoice covers one calendar month and is made from the daily
+usage snapshots of that month: the **base** price, the **average seats** over the days recorded, the **average GiB** of attachments, and the **most active
+customers** in the month (customers are priced apart from seats). Each line is rounded half up on its own. The invoice keeps the plan and prices it was made
+under and is never recalculated; there is one live invoice per organization and month, and a voided one (with a reason) lets the month be invoiced again.
+Numbers are `TL-YYYYMM-NNNN`.
+
+With `billing_webhook_url` (and `billing_webhook_secret`) set, `send` posts the invoice as JSON, signed with HMAC-SHA-256 of the body in
+`X-Tasklane-Signature`, with the number as `Idempotency-Key` so the receiver can recognise a repeat; a failed delivery (502) leaves the invoice open to send
+again. The operator makes, sends and voids; an organization's administrators read their own. Creating, voiding, sending and setting prices are audited.

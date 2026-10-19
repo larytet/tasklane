@@ -112,7 +112,11 @@ func TestLIC05_NoPhoneHome(t *testing.T) {
 				}
 				// the hosted edition's plans (SPEC 17.9) are the one place seats are counted: that code answers not found and does nothing unless the operator
 				// turned hosting on, which TestHOST01_SelfHostedHasNoPlansNoLimitsNoMetering checks; its setting is described in the configuration schema
-				if m == "seat" && (strings.HasSuffix(p, "internal/domain/hosted.go") || (strings.HasSuffix(p, "internal/config/config.go") && strings.Contains(line, `Name: "hosted"`))) {
+				if m == "seat" && (strings.HasSuffix(p, "internal/domain/hosted.go") || strings.HasSuffix(p, "internal/domain/billing.go") || (strings.HasSuffix(p, "internal/config/config.go") && strings.Contains(line, `Name: "hosted"`))) {
+					continue
+				}
+				// the hosted edition's invoices go to the billing endpoint the operator configured (billing_webhook_url), through the egress policy, and nowhere else
+				if strings.HasSuffix(p, "internal/domain/billing.go") && strings.Contains(m, "http.NewRequest") {
 					continue
 				}
 				// the cluster bus connects to the Redis or Valkey server the operator configured (redis_url) and nothing else

@@ -63,6 +63,7 @@ type OrgPlan struct {
 	MaxStorageMiB *int64     `json:"max_storage_mib"`
 	Region        string     `json:"region"`
 	Updated       *time.Time `json:"updated,omitempty"`
+	Prices        *Prices    `json:"prices,omitempty"`
 }
 
 func (s *Service) hostedOnly(a Actor) error {
@@ -95,6 +96,9 @@ func (s *Service) orgPlan(ctx context.Context, orgID string) OrgPlan {
 	var upd time.Time
 	if s.DB.QueryRow(ctx, `SELECT plan,max_seats,max_projects,max_storage_bytes,region,updated_at FROM org_plan WHERE org_id::text=$1`, orgID).Scan(&p.Plan, &p.MaxSeats, &p.MaxProjects, &bytes, &p.Region, &upd) == nil {
 		p.Updated = &upd
+		if pr, ok := s.pricesOf(ctx, orgID); ok {
+			p.Prices = &pr
+		}
 		if bytes != nil {
 			m := *bytes >> 20
 			p.MaxStorageMiB = &m

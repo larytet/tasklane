@@ -685,6 +685,18 @@ func rows() []row {
 		}},
 		{"DELETE /api/v1/orgs/{id}/plan", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("DELETE", "/api/v1/orgs/"+domain.DefaultOrg+"/plan", nil) }},
 		{"GET /api/v1/orgs/{id}/usage", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/orgs/"+domain.DefaultOrg+"/usage", nil) }},
+		{"PUT /api/v1/orgs/{id}/prices", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/orgs/"+domain.DefaultOrg+"/prices", map[string]any{"currency": "usd"})
+		}},
+		{"POST /api/v1/orgs/{id}/invoices", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/orgs/"+domain.DefaultOrg+"/invoices", map[string]any{"period": "2026-10"})
+		}},
+		{"GET /api/v1/orgs/{id}/invoices", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/orgs/"+domain.DefaultOrg+"/invoices", nil) }},
+		{"GET /api/v1/orgs/{id}/invoices/{number}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/orgs/"+domain.DefaultOrg+"/invoices/TL-1", nil) }},
+		{"POST /api/v1/orgs/{id}/invoices/{number}/send", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("POST", "/api/v1/orgs/"+domain.DefaultOrg+"/invoices/TL-1/send", nil) }},
+		{"POST /api/v1/orgs/{id}/invoices/{number}/void", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("POST", "/api/v1/orgs/"+domain.DefaultOrg+"/invoices/TL-1/void", map[string]any{"reason": "x"})
+		}},
 		{"GET /api/v1/portal/{key}/challenge", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC/challenge", nil) }},
 		{"GET /api/v1/portal/{key}", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("GET", "/api/v1/portal/ABC", nil) }}, // the portal is off until its administrator turns it on
 		{"POST /api/v1/portal/{key}/code", exp{anon: codes(404), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {

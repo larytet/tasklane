@@ -29,11 +29,13 @@ type Service struct {
 	// Hosted turns on the hosted edition's plans, quotas and metering (SPEC 17.9); HostedRegion is the region this deployment serves. Off, none of it exists.
 	Hosted       bool
 	HostedRegion string
-	DB           *pgxpool.Pool
-	Now          func() time.Time
-	Presence     *Presence
-	Blobs        *Blobs
-	Mail         *MailConfig
+	// Billing receives invoices the operator sends (see billing.go); nil: none is configured.
+	Billing  BillingSink
+	DB       *pgxpool.Pool
+	Now      func() time.Time
+	Presence *Presence
+	Blobs    *Blobs
+	Mail     *MailConfig
 	// InboundDomain is the reply domain when email is received but not sent by this server (the outbound mail settings carry it otherwise).
 	InboundDomain string
 	// DNS answers TXT lookups for DKIM keys; when nil Tasklane does not verify DKIM and relies on a trusted receiver's verdict.

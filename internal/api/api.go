@@ -163,6 +163,50 @@ func (s *Server) Handler() http.Handler {
 		v, err := s.Svc.OrgUsage(r.Context(), actorOf(r), r.PathValue("id"))
 		s.reply(w, v, err)
 	}))
+	// billing (hosted only): prices, and invoices made from the month's usage and handed to the billing endpoint
+	s.handle(mux, "PUT /api/v1/orgs/{id}/prices", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in domain.Prices
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.SetPrices(r.Context(), actorOf(r), r.PathValue("id"), in)
+			s.reply(w, v, err)
+		}
+	}))
+	s.handle(mux, "POST /api/v1/orgs/{id}/invoices", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Period string `json:"period"`
+		}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.GenerateInvoice(r.Context(), actorOf(r), r.PathValue("id"), in.Period)
+			s.replyStatus(w, 201, v, err)
+		}
+	}))
+	s.handle(mux, "GET /api/v1/orgs/{id}/invoices", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.ListInvoices(r.Context(), actorOf(r), r.PathValue("id"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "GET /api/v1/orgs/{id}/invoices/{number}", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.GetInvoice(r.Context(), actorOf(r), r.PathValue("id"), r.PathValue("number"))
+		if err == nil && r.URL.Query().Get("format") == "csv" {
+			w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+			w.Header().Set("Content-Disposition", `attachment; filename="`+v.Number+`.csv"`)
+			w.Write([]byte(domain.InvoiceCSV(v)))
+			return
+		}
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/orgs/{id}/invoices/{number}/send", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.SendInvoice(r.Context(), actorOf(r), r.PathValue("id"), r.PathValue("number"))
+		s.reply(w, v, err)
+	}))
+	s.handle(mux, "POST /api/v1/orgs/{id}/invoices/{number}/void", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Reason string `json:"reason"`
+		}
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.VoidInvoice(r.Context(), actorOf(r), r.PathValue("id"), r.PathValue("number"), in.Reason)
+			s.reply(w, v, err)
+		}
+	}))
 	s.handle(mux, "POST /api/v1/orgs", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Name          string `json:"name"`
@@ -801,6 +845,7 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		ce  *domain.ConflictError
 		qe  *domain.QuotaError
 		pl  *domain.PlanLimitError
+		ue  *domain.UpstreamError
 		nd  *domain.NotDownloadable
 	)
 	switch {
@@ -808,6 +853,8 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.json(w, ok, v)
 	case errors.As(err, &inv):
 		s.fail(w, 400, "invalid", inv.Msg, nil)
+	case errors.As(err, &ue):
+		s.fail(w, 502, "upstream", ue.Msg, nil)
 	case errors.As(err, &pl):
 		s.fail(w, 402, "plan_limit", pl.Error(), map[string]any{"resource": pl.Resource, "limit": pl.Limit, "used": pl.Used})
 	case errors.As(err, &qe):
