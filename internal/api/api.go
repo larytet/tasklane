@@ -412,6 +412,9 @@ func (s *Server) Handler() http.Handler {
 	}))
 	if s.MCP == nil {
 		s.MCP = mcp.New(s.Svc, s.Search)
+		if k, err := s.Svc.DerivedKey(context.Background(), "mcp-session"); err == nil {
+			s.MCP.SessionKey = k // a session id any node of the cluster accepts
+		}
 	}
 	for _, m := range []string{"POST", "GET", "DELETE"} {
 		s.handle(mux, m+" /mcp", s.MCP.Handler())

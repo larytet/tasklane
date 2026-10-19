@@ -5,8 +5,10 @@ package mcp
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -34,6 +36,10 @@ type Server struct {
 	CallsPerMinute int // per agent, default 120
 	WritesPerHour  int // per agent, default 200
 	MaxResultChars int // per tool result, default 24000
+	// SessionKey makes session ids self-contained and signed, so that a session started on one node continues on any node of the cluster (and
+	// survives a restart); without it ids are random and known to the node that issued them only.
+	SessionKey     []byte
+	SessionTTL     time.Duration // default 24 hours
 	AllowedOrigins []string
 	Now            func() time.Time
 
@@ -182,10 +188,8 @@ func (s *Server) Handler() http.HandlerFunc {
 		sid := r.Header.Get("Mcp-Session-Id")
 		var sess session
 		if sid != "" && req.Method != "initialize" {
-			s.mu.Lock()
 			var ok bool
-			sess, ok = s.sessions[sid]
-			s.mu.Unlock()
+			sess, ok = s.sessionFor(sid, actor)
 			if !ok {
 				http.Error(w, "unknown session: initialize again", http.StatusNotFound)
 				return
@@ -237,11 +241,10 @@ func (s *Server) initialize(w http.ResponseWriter, r *http.Request, req rpcReq, 
 	if supportedVersions[p.ProtocolVersion] {
 		ver = p.ProtocolVersion // negotiate down to what the client asked for when we support it
 	}
-	b := make([]byte, 16)
-	rand.Read(b)
-	sid := hex.EncodeToString(b)
+	sess := session{clientName: p.ClientInfo.Name, clientVersion: p.ClientInfo.Version, agent: actor.ID}
+	sid := s.newSessionID(sess)
 	s.mu.Lock()
-	s.sessions[sid] = session{clientName: p.ClientInfo.Name, clientVersion: p.ClientInfo.Version, agent: actor.ID}
+	s.sessions[sid] = sess
 	s.streams[sid] = newStream(actor.ID)
 	s.mu.Unlock()
 	w.Header().Set("Mcp-Session-Id", sid)
@@ -655,4 +658,79 @@ func (s *Server) readSearch(w http.ResponseWriter, r *http.Request, req rpcReq, 
 		b.WriteString("(no issue matches)\n")
 	}
 	s.writeJSON(w, 200, map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"contents": []any{map[string]any{"uri": uri, "mimeType": "text/markdown", "text": b.String()}}}})
+}
+
+// ---- session ids that any node accepts
+
+type sessionClaims struct {
+	Agent   string `json:"a"`
+	Client  string `json:"n"`
+	Version string `json:"v"`
+	Expires int64  `json:"x"`
+	Nonce   string `json:"r"`
+}
+
+func (s *Server) sessionTTL() time.Duration {
+	if s.SessionTTL > 0 {
+		return s.SessionTTL
+	}
+	return 24 * time.Hour
+}
+
+func (s *Server) sign(payload string) string {
+	m := hmac.New(sha256.New, s.SessionKey)
+	m.Write([]byte("mcp-session|" + payload))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+
+func (s *Server) newSessionID(sess session) string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	if len(s.SessionKey) == 0 {
+		return hex.EncodeToString(b)
+	}
+	c, _ := json.Marshal(sessionClaims{Agent: sess.agent, Client: sess.clientName, Version: sess.clientVersion, Expires: s.now().Add(s.sessionTTL()).Unix(), Nonce: hex.EncodeToString(b[:8])})
+	p := base64.RawURLEncoding.EncodeToString(c)
+	return "tls1." + p + "." + s.sign(p)
+}
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+// sessionFor finds a session: one this node knows, or a signed one another node (or an earlier run of this one) issued to this very person, which this
+// node then takes on. What is not carried over is node-local: an event stream and subscriptions have to be opened again.
+func (s *Server) sessionFor(sid string, actor domain.Actor) (session, bool) {
+	s.mu.Lock()
+	sess, ok := s.sessions[sid]
+	s.mu.Unlock()
+	if ok {
+		return sess, sess.agent == actor.ID // a session id is its owner's alone, whoever else learns it
+	}
+	if len(s.SessionKey) == 0 || !strings.HasPrefix(sid, "tls1.") {
+		return session{}, false
+	}
+	parts := strings.Split(sid, ".")
+	if len(parts) != 3 || !hmac.Equal([]byte(s.sign(parts[1])), []byte(parts[2])) {
+		return session{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return session{}, false
+	}
+	var c sessionClaims
+	if json.Unmarshal(raw, &c) != nil || c.Agent != actor.ID || s.now().Unix() > c.Expires {
+		return session{}, false // another person's session is not even acknowledged
+	}
+	sess = session{clientName: c.Client, clientVersion: c.Version, agent: c.Agent}
+	s.mu.Lock()
+	s.sessions[sid] = sess
+	if s.streams[sid] == nil {
+		s.streams[sid] = newStream(actor.ID)
+	}
+	s.mu.Unlock()
+	return sess, true
 }

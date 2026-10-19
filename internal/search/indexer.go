@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -54,7 +55,14 @@ func (ix *Indexer) RunOnce(ctx context.Context) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	// in one order, always: indexers on several nodes take batches that overlap on issues, and rows taken in a map's random order can be waited
+	// for in a circle (a deadlock the rolling-upgrade test saw in its log)
+	order := make([]string, 0, len(keys))
 	for k := range keys {
+		order = append(order, k)
+	}
+	sort.Strings(order)
+	for _, k := range order {
 		if err := indexIssue(ctx, tx, k); err != nil {
 			return 0, err
 		}

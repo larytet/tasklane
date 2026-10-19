@@ -99,3 +99,14 @@ saved is missing at the end, or if a socket stays down for more than 15 seconds.
 `UPGRADE_FROM`), a Redis that both releases share, fifty simulated people, and the second old node killed instead of stopped. While the cluster holds two
 releases it also checks, in both directions, that a change and a person's presence announced on a node of one release reach a socket on a node of the
 other; it runs a 150-row import then; and it checks at the end that every row of the import is there and that the new nodes still talk to each other.
+
+The same run adds the other traffic and faults a real upgrade meets: six agents using MCP through the balancer (their sessions started on a node of the old
+release have to be started again when another node answers, as the protocol allows; sessions of the new release are signed and continue on any node, which
+is checked directly), a Redis that stops for six seconds while the cluster holds two releases (the nodes stay ready, the links return by themselves, and events
+resume once both nodes are subscribed again: they are not replayed), sixty account emails owed through a relay both releases reach (each must arrive exactly
+once), and PostgreSQL restarted under the working crowd (the failures in that window are counted apart; the nodes recover by themselves and no acknowledged
+change is lost).
+
+**MCP sessions.** The id of an MCP session is now self-contained and signed with a key every node derives from the instance secret, so a session started
+on one node continues on any other (and survives a restart) for 24 hours. It belongs to the person it was issued to: another person's use of it is not
+acknowledged. What does not move is node-local: an event stream and subscriptions have to be opened again after the node changes.

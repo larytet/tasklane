@@ -161,8 +161,8 @@ func (s *Server) searchOne(ctx context.Context, a domain.Actor, q, onlyKey strin
 // streamHandler serves the GET of Streamable HTTP: the session's server-sent events.
 func (s *Server) streamHandler(w http.ResponseWriter, r *http.Request, actor domain.Actor, tok string) {
 	sid := r.Header.Get("Mcp-Session-Id")
+	sess, okSess := s.sessionFor(sid, actor)
 	s.mu.Lock()
-	sess, okSess := s.sessions[sid]
 	st := s.streams[sid]
 	s.mu.Unlock()
 	if sid == "" {

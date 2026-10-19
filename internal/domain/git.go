@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -54,6 +55,18 @@ func (s *Service) unseal(ctx context.Context, b []byte) (string, error) {
 		return "", errors.New("the stored credential cannot be decrypted (was the secret key changed?)")
 	}
 	return string(p), nil
+}
+
+// DerivedKey is a key for one purpose, derived from the instance secret so that every node derives the same one and no purpose shares a key with
+// another (signed session ids, for example).
+func (s *Service) DerivedKey(ctx context.Context, purpose string) ([]byte, error) {
+	k, err := s.secretKey(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := hmac.New(sha256.New, k)
+	m.Write([]byte("tasklane-derive|" + purpose))
+	return m.Sum(nil), nil
 }
 
 // secretKey is the configured key, or one generated once and kept in the database (a weaker arrangement that the

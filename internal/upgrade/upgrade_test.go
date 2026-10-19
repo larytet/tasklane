@@ -27,6 +27,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/larytet/tasklane/internal/testutil/smtpmock"
 )
 
 func need(t testing.TB, k string) string {
@@ -150,6 +152,8 @@ func (l *lb) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type stats struct {
 	total, ok, conflicts, failed atomic.Int64
+	excluded                     atomic.Bool // a deliberate outage (PostgreSQL restarting): failures in it are counted apart
+	outageFailed                 atomic.Int64
 	mu                           sync.Mutex
 	lat                          []time.Duration
 	failures                     []string
@@ -165,6 +169,8 @@ func (s *stats) record(d time.Duration, status int, err error, what string) {
 		s.mu.Unlock()
 	case err == nil && status == 409:
 		s.conflicts.Add(1)
+	case s.excluded.Load():
+		s.outageFailed.Add(1)
 	default:
 		s.failed.Add(1)
 		s.mu.Lock()
@@ -389,6 +395,11 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// the mail relay the nodes send through: a sink on this machine that every node of either release reaches as host.docker.internal
+	sink := smtpmock.New(t, smtpmock.Options{Bind: "0.0.0.0"})
+	os.Setenv("UPGRADE_SMTP_PORT", fmt.Sprint(sink.Port()))
+	var mailed []string // the addresses account mail was owed to
+
 	// the old release, one node first (it makes the schema), then the second
 	compose(t, "up -d --wait postgres redis")
 	compose(t, "up -d old1")
@@ -434,6 +445,7 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 			t.Fatalf("login %s: %d %v %s", email, code, err, b)
 		}
 		crowd = append(crowd, u)
+		mailed = append(mailed, email)
 	}
 	st.total.Store(0)
 	st.ok.Store(0)
@@ -449,6 +461,14 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	for i, u := range crowd {
 		wg.Add(1)
 		go func(u *user, seed int64) { defer wg.Done(); u.run(stop, rand.New(rand.NewSource(seed))) }(u, int64(i+1))
+	}
+	var agents []*mcpAgent
+	for i := 0; i < 6 && i < len(crowd); i++ {
+		tk := crowd[i].mustTokenJSON(t, "/api/v1/me/tokens", map[string]any{"name": "upgrade agent", "expires_in_days": 1})
+		a := &mcpAgent{base: front, token: tk, key: crowd[i].key, st: st, client: &http.Client{Timeout: 10 * time.Second}}
+		agents = append(agents, a)
+		wg.Add(1)
+		go func(a *mcpAgent, seed int64) { defer wg.Done(); a.run(stop, rand.New(rand.NewSource(seed))) }(a, int64(100+i))
 	}
 	watchers := make([]*watcher, 0, 4)
 	wctx, wcancel := context.WithCancel(ctx)
@@ -485,6 +505,34 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	if bus {
 		probe.check(t, old2, new1, "old to new")
 		probe.check(t, new1, old2, "new to old")
+	}
+	if bus { // Redis goes away for a few seconds while the cluster holds two releases: nodes stay ready and serving, the link comes back by itself, events resume
+		compose(t, "stop redis")
+		time.Sleep(6 * time.Second)
+		for _, n := range []string{old2, new1} {
+			r, err := http.Get(n + "/readyz")
+			if err != nil || r.StatusCode != 200 {
+				t.Fatalf("%s is not ready while Redis is down: %v", n, err)
+			}
+			r.Body.Close()
+		}
+		compose(t, "start redis")
+		// events are hints and are not replayed: wait until both nodes are subscribed again before asking for one
+		for _, n := range []string{new1, old2} {
+			ad := adminClient(t, n)
+			eventually(t, "the bus link of "+n+" to return", 40*time.Second, func() bool {
+				cl := ad.mustJSON(t, "GET", "/api/v1/admin/cluster", nil, 200)
+				ev, _ := cl["events"].(map[string]any)
+				return ev != nil && ev["connected"] == true
+			})
+		}
+		probe.check(t, old2, new1, "after the Redis outage")
+	}
+	// ten people are added while the cluster holds two releases: each is owed one account email, whichever node sends it
+	for i := 0; i < 10; i++ {
+		email := fmt.Sprintf("mail%02d@example.com", i)
+		a1.mustJSON(t, "POST", "/api/v1/users", map[string]any{"email": email, "name": fmt.Sprintf("Mail %02d", i), "password": "mailpass1"}, 201)
+		mailed = append(mailed, email)
 	}
 	// an import runs while the cluster holds two releases
 	var csv strings.Builder
@@ -533,17 +581,88 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	if bus {
 		probe.check(t, new1, new2, "new to new")
 	}
+	// an MCP session started on one node of the new release continues on the other (and the old release's did not have to: they started again)
+	ma := &mcpAgent{base: new1, token: agents[0].token, key: crowd[0].key, st: &stats{}, client: &http.Client{Timeout: 10 * time.Second}}
+	if !ma.initialize() || !strings.HasPrefix(ma.sid, "tls1.") {
+		t.Fatalf("a session of the new release is not self-contained: %q", ma.sid)
+	}
+	ma.base = new2
+	ma.call("get_issue", map[string]any{"key": crowd[0].key})
+	if ma.reinit.Load() != 0 || ma.st.failed.Load() != 0 || ma.calls.Load() != 1 {
+		t.Fatalf("the session did not continue on the other new node: %d restarts, %d failures", ma.reinit.Load(), ma.st.failed.Load())
+	}
+	// PostgreSQL restarts under the working crowd: failures in that window are expected and counted apart; the nodes recover by themselves and no acknowledged change is lost
+	st.excluded.Store(true)
+	compose(t, "restart postgres")
+	pool.Close()
+	pool, err = pgxpool.New(ctx, "postgres://tl:tl@127.0.0.1:"+port(t, "postgres", 5432)+"/tasklane?sslmode=disable") // the published port is new after a restart
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{new1, new2} {
+		waitReady(t, n, 90*time.Second)
+	}
+	time.Sleep(3 * time.Second)
+	st.excluded.Store(false)
+	okBefore := st.ok.Load()
+	phase("after the PostgreSQL restart", 6*time.Second)
+	if st.ok.Load()-okBefore < int64(users) {
+		t.Fatalf("only %d requests succeeded in the 6 s after PostgreSQL came back", st.ok.Load()-okBefore)
+	}
+	t.Logf("PostgreSQL restart: %d requests failed during the outage window", st.outageFailed.Load())
 	var imported int
-	pool.QueryRow(ctx, `SELECT count(*) FROM issue i JOIN project p ON p.id=i.project_id WHERE p.key='UPI'`).Scan(&imported)
+	eventually(t, "the import's rows to be counted (the test's own connection reconnects after the restart)", 30*time.Second, func() bool {
+		return pool.QueryRow(ctx, `SELECT count(*) FROM issue i JOIN project p ON p.id=i.project_id WHERE p.key='UPI'`).Scan(&imported) == nil
+	})
 	if imported != 150 {
 		t.Errorf("%d issues of the import are there, want 150", imported)
+	}
+	var reinitBefore int64
+	for _, a := range agents {
+		reinitBefore += a.reinit.Load()
+	}
+	phase("the new release alone, again, for the sessions", 6*time.Second)
+	// every email owed was sent, once: none lost and none twice, across the node replacements and the database restart
+	eventually(t, "every account email to arrive", 120*time.Second, func() bool {
+		got := map[string]int{}
+		for _, m := range sink.Messages() {
+			for _, r := range m.Rcpts {
+				got[strings.ToLower(strings.Trim(r, "<>"))]++
+			}
+		}
+		for _, e := range mailed {
+			if got[e] == 0 {
+				return false
+			}
+		}
+		return true
+	})
+	time.Sleep(5 * time.Second) // a duplicate would show up now
+	got := map[string]int{}
+	for _, m := range sink.Messages() {
+		for _, r := range m.Rcpts {
+			got[strings.ToLower(strings.Trim(r, "<>"))]++
+		}
+	}
+	for _, e := range mailed {
+		if got[e] != 1 {
+			t.Errorf("%s was sent %d account emails, want 1", e, got[e])
+		}
+	}
+	t.Logf("%d people were owed account mail; the relay accepted %d messages", len(mailed), len(sink.Messages()))
+	var reinitAfter int64
+	for _, a := range agents {
+		reinitAfter += a.reinit.Load()
+	}
+	if reinitAfter != reinitBefore {
+		t.Errorf("%d MCP sessions were started again on the new release alone: its sessions should continue on either node", reinitAfter-reinitBefore)
 	}
 
 	close(stop)
 	wg.Wait()
 
 	// ---- what the rolling upgrade must not have cost
-	total, failed := st.total.Load(), st.failed.Load()
+	total, failed := st.total.Load()-st.outageFailed.Load(), st.failed.Load() // the deliberate PostgreSQL outage is judged by its recovery, not by this rate
 	rate := 100 * float64(st.ok.Load()+st.conflicts.Load()) / float64(total)
 	sort.Slice(st.lat, func(i, j int) bool { return st.lat[i] < st.lat[j] })
 	p95 := st.lat[len(st.lat)*95/100]
@@ -602,6 +721,15 @@ func TestUPG02_RollingUpgradeUnderLoad(t *testing.T) {
 	if reconnects < 4 {
 		t.Errorf("only %d socket reconnections across two node replacements: the sockets were not on the nodes that were replaced", reconnects)
 	}
+	var reinit, mcpCalls int64
+	for _, a := range agents {
+		reinit += a.reinit.Load()
+		mcpCalls += a.calls.Load()
+	}
+	if mcpCalls < 100 {
+		t.Errorf("only %d MCP calls were made", mcpCalls)
+	}
+	t.Logf("%d MCP tool calls, %d sessions started again after their node was replaced", mcpCalls, reinit)
 	t.Logf("%d socket reconnections, longest outage %s", reconnects, longestOutage(watchers))
 }
 
@@ -704,6 +832,15 @@ func (p *busProbe) check(t testing.TB, listen, act, what string) {
 	actor := adminClient(t, act)
 	marker := fmt.Sprintf("bus probe %s %d", what, time.Now().UnixNano())
 	actor.mustJSON(t, "POST", "/api/v1/issues/"+p.key+"/comments", map[string]any{"body": marker}, 201)
+	defer func() {
+		if t.Failed() {
+			for _, n := range []string{listen, act} {
+				a := adminClient(t, n)
+				_, b, _ := a.do("GET", "/api/v1/admin/cluster", nil, false)
+				t.Logf("bus diagnostics %s: %.600s", n, b)
+			}
+		}
+	}()
 	eventually(t, what+": the change to reach the other release's socket", 15*time.Second, func() bool {
 		return s.has(func(m map[string]any) bool {
 			ev, _ := m["event"].(map[string]any)
@@ -725,4 +862,111 @@ func (p *busProbe) check(t testing.TB, listen, act, what string) {
 			return false
 		})
 	})
+}
+
+// ---- agents on MCP, through the balancer
+
+type mcpAgent struct {
+	base, token, key, sid string
+	n                     int
+	st                    *stats
+	client                *http.Client
+	reinit                atomic.Int64
+	calls                 atomic.Int64
+}
+
+func (m *mcpAgent) post(body any) (int, http.Header, []byte, error) {
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", m.base+"/mcp", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+m.token)
+	if m.sid != "" {
+		req.Header.Set("Mcp-Session-Id", m.sid)
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header, out, nil
+}
+
+func (m *mcpAgent) initialize() bool {
+	m.n++
+	st, h, _, err := m.post(map[string]any{"jsonrpc": "2.0", "id": m.n, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "upgrade-agent", "version": "1"}}})
+	if err != nil || st != 200 {
+		return false
+	}
+	m.sid = h.Get("Mcp-Session-Id")
+	return m.sid != ""
+}
+
+// call runs one tool. A session the node does not know (404: its node was replaced and it was issued by the old release) is started again, as an MCP
+// client must; that is counted apart and is not a failure. A tool result that is an error, a server error or a lost connection after a retry is.
+func (m *mcpAgent) call(tool string, args map[string]any) {
+	for attempt := 0; attempt < 3; attempt++ {
+		if m.sid == "" && !m.initialize() {
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		m.n++
+		start := time.Now()
+		st, _, body, err := m.post(map[string]any{"jsonrpc": "2.0", "id": m.n, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}})
+		switch {
+		case err == nil && st == 404:
+			m.sid = ""
+			m.reinit.Add(1)
+			continue
+		case err == nil && st == 200:
+			var r struct {
+				Result struct {
+					IsError bool `json:"isError"`
+				} `json:"result"`
+				Error any `json:"error"`
+			}
+			json.Unmarshal(body, &r)
+			if r.Error != nil || r.Result.IsError {
+				m.st.record(time.Since(start), 500, fmt.Errorf("tool %s: %s", tool, strings.TrimSpace(string(body))), "mcp "+tool)
+			} else {
+				m.st.record(time.Since(start), 200, nil, "mcp "+tool)
+			}
+			m.calls.Add(1)
+			return
+		case err != nil || st == 502 || st == 503 || st == 504:
+			if attempt < 2 {
+				time.Sleep(400 * time.Millisecond)
+				continue
+			}
+		}
+		m.st.record(time.Since(start), st, err, "mcp "+tool)
+		return
+	}
+}
+
+func (m *mcpAgent) run(stop <-chan struct{}, rng *rand.Rand) {
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		if rng.Intn(2) == 0 {
+			m.call("get_issue", map[string]any{"key": m.key})
+		} else {
+			m.call("search_issues", map[string]any{"query": "project = UPG"})
+		}
+		time.Sleep(time.Duration(80+rng.Intn(120)) * time.Millisecond)
+	}
+}
+
+func (u *user) mustTokenJSON(t testing.TB, path string, body any) string {
+	t.Helper()
+	m := u.mustJSON(t, "POST", path, body, 201)
+	tok, _ := m["token"].(string)
+	if tok == "" {
+		t.Fatalf("no token in %v", m)
+	}
+	return tok
 }
