@@ -447,6 +447,8 @@
         syncAll();
         drawPager(n);
       } finally { loading = false; }
+      // the marker came into view while this page was loading: the observer will not say so again, so go on from here
+      if (phone() && at < pages - 1 && !more.hidden && more.getBoundingClientRect().top < window.innerHeight) load(at + 1, false, true);
     };
     function drawPager(n) {
       clear(pager);
@@ -1110,6 +1112,12 @@
     }
 
     // ----- subject (editable in place; same save protocol as the description)
+    function readOnlyNote() {
+      if (canEdit()) return null;
+      const why = v.mirror ? 'This issue is mirrored from Jira and is edited there.' : v.issue.archived ? 'This issue is archived and read-only; unarchive it to change it.'
+        : v.role === 'viewer' ? 'You can view this project but not change its issues.' : 'You cannot change this issue.';
+      return h('p', { class: 'note ro-note', role: 'note' }, why);
+    }
     function subjectEl(is) {
       const inp = h('input', { class: 'subject-in', type: 'text', value: is.summary, 'aria-label': 'Summary', maxlength: 255, readonly: !canEdit() });
       const state = h('span', { class: 'state' });
@@ -1120,9 +1128,12 @@
         else { state.textContent = r.msg; }
       };
       inp.addEventListener('blur', commit);
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') inp.blur();
+        if (e.key === 'Escape' && inp.value !== v.issue.summary) { e.stopPropagation(); inp.value = v.issue.summary; inp.blur(); state.textContent = 'Not changed'; } // cancel: the saved text again
+      });
       inp.addEventListener('focus', () => heartbeat('summary'));
-      return h('div', {}, noteFor('summary', 'summary'), h('h1', { class: 'subject' }, inp), state);
+      return h('div', {}, noteFor('summary', 'summary'), h('h1', { class: 'subject' }, inp), state, readOnlyNote());
     }
 
     // ----- chip line: status transitions, priority, assignee, labels
@@ -1202,8 +1213,11 @@
     function descriptionEl(is) {
       const box = h('div', { class: 'card', style: 'padding:12px;margin:8px 0' });
       const head = h('div', { class: 'chips' }, h('strong', {}, 'Description'), noteFor('description', 'description'), h('span', { class: 'grow' }));
-      if (canEdit()) head.append(h('button', { class: 'btn', onclick: () => openEditor() }, 'Edit'));
-      box.append(head, is.description ? paragraphs(is.description) : h('p', { class: 'muted' }, 'No description.'));
+      if (canEdit()) head.append(h('button', { class: 'btn ghost', 'aria-label': 'Edit description', title: 'Edit description (or click the text)', onclick: () => openEditor() }, '✎'));
+      // the text itself opens the editor where it is; a link in it still opens the link
+      const body = h('div', { class: canEdit() ? 'desc-body editable' : 'desc-body', onclick: e => { if (canEdit() && !e.target.closest('a') && !String(window.getSelection() || '')) openEditor(); } },
+        is.description ? paragraphs(is.description) : h('p', { class: 'muted' }, canEdit() ? 'No description. Click to add one.' : 'No description.'));
+      box.append(head, body);
       if (st.changedBy && !st.editing) box.append(h('div', { class: 'banner info' }, 'The description was changed by ' + st.changedBy + '.'));
       // an unsaved draft from an earlier session is offered back
       const ld = localDraft(key, 'description');
@@ -1287,7 +1301,14 @@
         st.saving = true;
         try { await saveOnce(); } finally { st.saving = false; }
       };
-      ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) save(); } });
+      ta.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) save(); }
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+      });
+      // cancel keeps what was typed as a draft (offered back with "Continue editing"), without asking
+      const cancel = () => { if (st.dirty) { clearTimeout(st.localTimer); flushLocal(); } stopEditing(false); render(); };
+      // leaving the editor saves, unless focus went to its own buttons or banners (Save, Cancel, a conflict choice)
+      ta.addEventListener('blur', e => { if (st.editing && st.dirty && !st.saving && !(e.relatedTarget && box.contains(e.relatedTarget)) && document.hasFocus()) save(); });
       const saveOnce = async () => {
         clearTimeout(st.localTimer); st.localTimer = 0; setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); // never lose it
         state.textContent = 'Saving…';
@@ -1301,7 +1322,7 @@
         }
       };
       box.append(h('div', { class: 'chips' }, state, h('span', { class: 'grow' }),
-        h('button', { class: 'btn', onclick: () => { if (!st.dirty || confirm('Discard unsaved changes? Your draft is kept.')) stopEditing(false); render(); } }, 'Cancel'),
+        h('button', { class: 'btn', onclick: cancel }, 'Cancel'),
         h('button', { class: 'btn primary', onclick: save }, 'Save')));
       setTimeout(() => { ta.focus(); updatePresenceUI(); }, 0);
       return box;

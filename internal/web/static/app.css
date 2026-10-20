@@ -274,3 +274,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--raised);border:1px s
 .more-sentinel{height:1px}
 .settings .colpick{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:240px;overflow:auto}
 .settings .colpick li{display:flex;gap:6px;align-items:center}.settings .colpick .nm{flex:1}.settings .colpick .btn{min-height:28px;padding:0 8px}
+/* editing in place: the description's text is where to click */
+.desc-body.editable{cursor:text;border-radius:var(--r);margin:-4px;padding:4px}
+.desc-body.editable:hover{background:var(--hover);outline:1px dashed var(--border-input)}
+.ro-note{margin:4px 0}
