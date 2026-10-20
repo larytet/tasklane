@@ -37,3 +37,8 @@ Each transition can carry rules, edited in the transition's **Rules** dialog (JS
 - **Asynchronous post-functions** are queued in the same transaction and delivered by a worker with retries (growing delay, eight attempts, the last error kept). A webhook is a POST of `{event, key, project, from, to, actor, at}` with `X-Tasklane-Signature: sha256=<HMAC of the body with the secret>`; the secret is stored encrypted, and private or loopback targets are refused unless `webhook_allow_private` is on. `create_subtask` does nothing if a subtask with that summary already exists, so a retry never duplicates it.
 - **Transition screen:** the `screen` list names the fields a person is asked for before the transition. The interface saves them as an ordinary edit and then takes the transition, so a validator sees them; the two steps are not one transaction.
 - **Concurrency:** two people taking the same transition at once: one wins and the other is told it is not available from the current status.
+
+## Undo of a transition
+
+A person can undo their own transition within a few seconds, even where the workflow has no transition back; no conditions,
+validators or post-functions run and automation that already ran is not reversed. See [UNDO.md](UNDO.md).

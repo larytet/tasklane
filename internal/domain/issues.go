@@ -676,7 +676,8 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 		var cur int64
 		var raw []byte
 		var statusID string
-		if err := tx.QueryRow(ctx, `SELECT version,field_ver,status_id FROM issue WHERE id=$1 FOR UPDATE`, is.ID).Scan(&cur, &raw, &statusID); err != nil {
+		var wasResolved *time.Time
+		if err := tx.QueryRow(ctx, `SELECT version,field_ver,status_id,resolved_at FROM issue WHERE id=$1 FOR UPDATE`, is.ID).Scan(&cur, &raw, &statusID, &wasResolved); err != nil {
 			return err
 		}
 		var fv map[string]int64
@@ -740,7 +741,14 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 				return err
 			}
 		}
-		return outbox(ctx, tx, "issue:"+is.Key, "issue.transitioned", map[string]any{"key": is.Key, "from": fromName, "to": toName, "version": next, "actor": a.Label, "actor_id": a.ID})
+		if err := outbox(ctx, tx, "issue:"+is.Key, "issue.transitioned", map[string]any{"key": is.Key, "from": fromName, "to": toName, "version": next, "actor": a.Label, "actor_id": a.ID}); err != nil {
+			return err
+		}
+		var after int64 // post-functions may have changed the issue again in this transaction: the token holds where it ends
+		if err := tx.QueryRow(ctx, `SELECT version FROM issue WHERE id=$1`, is.ID).Scan(&after); err != nil {
+			return err
+		}
+		return s.recordUndo(ctx, tx, a, "transition", []undoItem{{IssueID: is.ID, Key: is.Key, Version: after, StatusID: statusID, Resolved: wasResolved}})
 	})
 	if err != nil {
 		return is, err

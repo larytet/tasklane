@@ -69,6 +69,33 @@
     document.getElementById('toasts').append(t);
     setTimeout(() => t.remove(), 12000);
   }
+  // Undo instead of confirm (SPEC 4.6): shown for 5 s, held while the pointer is on it or it has focus; Undo asks the server, which
+  // reverts only if nobody changed the issue since and says so otherwise. Toasts stack; the region says each one once.
+  const WANT_UNDO = { 'Tasklane-Want-Undo': '1' };
+  function undoToast(msg, r, after) {
+    const token = r && r.headers && r.headers.get('Tasklane-Undo');
+    if (!token) { toast(msg); return; }
+    const t = h('div', { class: 'toast' }, h('span', {}, msg));
+    let left = 5000, started = Date.now(), timer = 0, held = 0;
+    const gone = () => { clearTimeout(timer); t.remove(); };
+    const run = () => { started = Date.now(); timer = setTimeout(gone, left); };
+    const hold = () => { if (held++ === 0) { clearTimeout(timer); left -= Date.now() - started; } };
+    const release = () => { if (--held === 0) run(); };
+    t.addEventListener('mouseenter', hold); t.addEventListener('mouseleave', release);
+    t.addEventListener('focusin', hold); t.addEventListener('focusout', e => { if (!t.contains(e.relatedTarget)) release(); });
+    const undo = h('button', { class: 'btn', onclick: async () => {
+      undo.disabled = true;
+      const x = await api('POST', '/api/v1/undo/' + encodeURIComponent(token));
+      gone();
+      if (x.status === 200) { toast('Undone.'); if (after) after(x.data); }
+      else if (x.status === 409) toast((x.data && x.data.error) || 'It changed since, so it was not undone.');
+      else if (x.status === 404) toast('It is too late to undo that.');
+      else toast((x.data && x.data.error) || 'Could not undo.');
+    } }, 'Undo');
+    t.append(undo, h('button', { class: 'btn ghost', 'aria-label': 'Dismiss', onclick: gone }, '×'));
+    document.getElementById('toasts').append(t);
+    run();
+  }
   const initials = n => (n || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
   const PRES = ['#F27AA4', '#F4A261', '#E9C46A', '#7BD389', '#5FD0C5', '#7AAEF7', '#B39DF5', '#E58FE0'];
   const presColor = id => PRES[[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % 8];
@@ -917,7 +944,7 @@
           h('button', { class: 'btn', onclick: () => { close(); cloneDialog(); } }, 'Clone…'),
           h('button', { class: 'btn', onclick: () => { close(); moveDialog(); } }, 'Move to another project…'),
           h('button', { class: 'btn', onclick: () => { close(); convertDialog(); } }, 'Change issue type…'),
-          is.status_category === 'done' && !is.archived ? h('button', { class: 'btn', onclick: async () => { close(); const r = await api('POST', '/api/v1/issues/' + key + '/archive'); if (r.status === 200) { toast('Archived. It is hidden from boards and searches; find it with archived = true.'); await reloadAll(); } else toast((r.data && r.data.error) || 'Could not archive'); } }, 'Archive') : null,
+          is.status_category === 'done' && !is.archived ? h('button', { class: 'btn', onclick: async () => { close(); const r = await api('POST', '/api/v1/issues/' + key + '/archive', undefined, WANT_UNDO); if (r.status === 200) { undoToast(key + ' archived. It is hidden from boards and searches.', r, () => reloadAll()); await reloadAll(); } else toast((r.data && r.data.error) || 'Could not archive'); } }, 'Archive') : null,
           h('button', { class: 'btn', onclick: () => { close(); deleteDialog(); } }, 'Delete…')),
         h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Close'))));
     }
@@ -939,8 +966,19 @@
       const type = h('select', { 'aria-label': 'New type' }, ['Epic', 'Story', 'Task', 'Bug', 'Subtask'].filter(t => t !== v.issue.type).map(t => h('option', {}, t)));
       lifecycleDialog(key, 'convert', 'Change the type of ' + v.issue.key, [type], () => ({ type: type.value }), () => { toast('Type changed'); reloadAll(); });
     }
-    function deleteDialog() {
-      lifecycleDialog(key, 'delete', 'Delete ' + v.issue.key, [], () => ({}), () => { toast('Moved to the trash. It can be restored for 30 days.'); location.hash = '#/'; });
+    // a delete happens at once with Undo when its plan has nothing blocking and drops nothing; otherwise the plan is shown first (UNDO-06)
+    async function deleteDialog() {
+      const dry = await api('POST', '/api/v1/issues/' + key + '/lifecycle', { op: 'delete', dry_run: true });
+      const plan = dry.status === 200 ? dry.data : null;
+      if (!plan || plan.blockers.length || plan.drops.length) {
+        lifecycleDialog(key, 'delete', 'Delete ' + v.issue.key, [], () => ({}), () => { toast('Moved to the trash. It can be restored for 30 days.'); location.hash = '#/'; });
+        return;
+      }
+      const r = await api('POST', '/api/v1/issues/' + key + '/lifecycle', { op: 'delete', expect_key: key }, WANT_UNDO);
+      if (r.status !== 200) { toast((r.data && r.data.error) || 'Could not delete'); return; }
+      const k = v.issue.key;
+      undoToast(k + ' moved to the trash.', r, () => { location.hash = '#/issue/' + k; });
+      location.hash = '#/';
     }
 
     // ----- watching: the button shows whether you hear about this issue and flips your explicit choice
@@ -980,8 +1018,8 @@
         h('option', { value: '' }, 'Transition…'), v.transitions.map(t => h('option', { value: t.id }, t.name + ' → ' + t.to)));
       trans.addEventListener('change', async () => {
         if (!trans.value) return;
-        const r = await api('POST', '/api/v1/issues/' + key + '/transitions', { transition: trans.value, base_version: is.version });
-        if (r.status === 200) await reloadAll(); else scalarError(r, () => api('POST', '/api/v1/issues/' + key + '/transitions', { transition: trans.value }).then(reloadAll));
+        const r = await api('POST', '/api/v1/issues/' + key + '/transitions', { transition: trans.value, base_version: is.version }, WANT_UNDO);
+        if (r.status === 200) { undoToast(key + ' moved to ' + r.data.status + '.', r, () => reloadAll()); await reloadAll(); } else scalarError(r, () => api('POST', '/api/v1/issues/' + key + '/transitions', { transition: trans.value }).then(reloadAll));
       });
       const pri = h('select', { 'aria-label': 'Priority', disabled: !canEdit() }, Object.keys(PRI).map(p => h('option', { value: p, selected: p === is.priority }, PRI[p] + ' ' + p)));
       pri.addEventListener('change', () => patch({ priority: pri.value }, 'priority'));
@@ -1465,7 +1503,7 @@
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [], settings: null };
-  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS, createDialog, projectDialog };
+  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS, createDialog, projectDialog, undoToast, WANT_UNDO };
   window.addEventListener('hashchange', route);
   boot();
 })();

@@ -4,7 +4,9 @@ import "net/http"
 
 func (s *Server) registerArchive(mux *http.ServeMux) {
 	s.handle(mux, "POST /api/v1/issues/{key}/archive", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		is, err := s.Svc.ArchiveIssue(r.Context(), actorOf(r), r.PathValue("key"))
+		ctx, undo := s.wantUndo(r)
+		is, err := s.Svc.ArchiveIssue(ctx, actorOf(r), r.PathValue("key"))
+		s.giveUndo(w, undo, err)
 		s.reply(w, is, err)
 	}))
 	s.handle(mux, "DELETE /api/v1/issues/{key}/archive", s.auth(func(w http.ResponseWriter, r *http.Request) {

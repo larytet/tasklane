@@ -74,7 +74,13 @@ func (s *Service) setArchived(ctx context.Context, a Actor, key string, archive 
 		if err := s.hist(ctx, tx, is.ID, a, "archived", &before, &after); err != nil {
 			return err
 		}
-		return outbox(ctx, tx, "issue:"+is.Key, "issue.updated", map[string]any{"key": is.Key, "fields": []string{"archived"}, "version": next, "actor": a.Label, "actor_id": a.ID})
+		if err := outbox(ctx, tx, "issue:"+is.Key, "issue.updated", map[string]any{"key": is.Key, "fields": []string{"archived"}, "version": next, "actor": a.Label, "actor_id": a.ID}); err != nil {
+			return err
+		}
+		if !archive {
+			return nil
+		}
+		return s.recordUndo(ctx, tx, a, "archive", []undoItem{{IssueID: is.ID, Key: is.Key, Version: next}})
 	})
 	if err != nil {
 		return is, err

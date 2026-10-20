@@ -326,7 +326,9 @@ func (s *Server) Handler() http.Handler {
 		if !s.decode(w, r, &in) {
 			return
 		}
-		is, err := s.Svc.Transition(r.Context(), actorOf(r), r.PathValue("key"), in.Transition, in.BaseVersion)
+		ctx, undo := s.wantUndo(r)
+		is, err := s.Svc.Transition(ctx, actorOf(r), r.PathValue("key"), in.Transition, in.BaseVersion)
+		s.giveUndo(w, undo, err)
 		s.reply(w, is, err)
 	}))
 	s.handle(mux, "GET /api/v1/issues/{key}/history", s.auth(func(w http.ResponseWriter, r *http.Request) {
@@ -473,7 +475,9 @@ func (s *Server) Handler() http.Handler {
 		if !s.decode(w, r, &in) {
 			return
 		}
-		plan, err := s.Svc.Lifecycle(r.Context(), actorOf(r), r.PathValue("key"), in)
+		ctx, undo := s.wantUndo(r)
+		plan, err := s.Svc.Lifecycle(ctx, actorOf(r), r.PathValue("key"), in)
+		s.giveUndo(w, undo, err)
 		s.reply(w, plan, err)
 	}))
 	// converts rich text between Markdown and Atlassian Document Format (LIVE-06); nothing is stored
@@ -576,6 +580,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAudit(mux)
 	s.registerInbox(mux)
 	s.registerUIPrefs(mux)
+	s.registerUndo(mux)
 	s.registerAutomation(mux)
 	s.registerSecurity(mux)
 	s.registerSSO(mux)
@@ -949,6 +954,7 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		pl  *domain.PlanLimitError
 		ue  *domain.UpstreamError
 		nd  *domain.NotDownloadable
+		uch *domain.UndoChanged
 		upe *domain.UIPrefError
 		upc *domain.UIPrefConflict
 	)
@@ -957,6 +963,8 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.json(w, ok, v)
 	case errors.As(err, &inv):
 		s.fail(w, 400, "invalid", inv.Msg, nil)
+	case errors.As(err, &uch):
+		s.fail(w, 409, "changed_since", uch.Error(), uch.Result)
 	case errors.As(err, &upe):
 		s.fail(w, 400, "invalid", upe.Error(), map[string]string{"key": upe.Key})
 	case errors.As(err, &upc):

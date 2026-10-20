@@ -267,6 +267,7 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 			{"pending_sign_ins_removed", `DELETE FROM mfa_pending WHERE user_id::text=$1`},
 			{"preferences_removed", `DELETE FROM notification_pref WHERE user_id::text=$1`},
 			{"settings_removed", `DELETE FROM user_setting WHERE user_id::text=$1`},
+			{"undo_tokens_removed", `DELETE FROM undo_token WHERE user_id::text=$1`},
 			{"idempotency_keys_removed", `DELETE FROM idempotency_key WHERE user_id::text=$1`},
 		} {
 			if err := exec(q.count, q.sql, userID); err != nil {
@@ -337,6 +338,7 @@ func (s *Service) CleanExpired(ctx context.Context) (map[string]int64, error) {
 		{"pending_sign_ins", `DELETE FROM mfa_pending WHERE expires_at < $1`},
 		{"oauth_codes", `DELETE FROM oauth_code WHERE expires_at < $1`},
 		{"sso_states", `DELETE FROM sso_state WHERE expires_at < $1`},
+		{"undo_tokens", `DELETE FROM undo_token WHERE expires_at < $1`},
 		{"oauth_grants", `DELETE FROM oauth_grant WHERE revoked_at < $1::timestamptz - interval '30 days'`},
 		{"notifications", `DELETE FROM notification WHERE state IN ('read','archived') AND created_at < $1::timestamptz - interval '180 days'`},
 		{"automation_runs", `DELETE FROM automation_run WHERE started_at < $1::timestamptz - interval '90 days'`},

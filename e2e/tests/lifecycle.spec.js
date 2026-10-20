@@ -9,18 +9,16 @@ async function openActions(page, item) {
   await page.getByRole('button', { name: item }).click();
 }
 
-test('LIFE-09/10: delete shows a plan first, goes to the trash, is restorable from there', async ({ browser }) => {
+test('LIFE-09/10, UNDO-06: a delete with nothing blocking or dropped goes to the trash at once with Undo, and is restorable from there', async ({ browser }) => {
   const jana = await newUser(browser, 'jana@example.com');
   const key = await createIssue(jana.page, 'Trash me ' + Math.random().toString(36).slice(2, 6), 'body');
   await jana.page.goto(`/#/issue/${key}`);
   await openActions(jana.page, /Delete/);
-  const dlg = jana.page.getByRole('dialog');
-  await expect(dlg).toContainText('move ' + key + ' to the trash');   // the plan, before anything changed
-  await expect(dlg).toContainText('Warnings');
-  expect((await jana.page.request.get(`/api/v1/issues/${key}/view`)).status()).toBe(200); // still there while the plan is shown
-  await dlg.getByRole('button', { name: 'Apply' }).click();
+  // its plan (checked by a dry run) has no blockers and drops nothing, so no plan dialog: the toast offers Undo instead (SPEC 4.6)
   await expect(jana.page.getByRole('button', { name: 'Create new' })).toBeVisible();
-  await expect(jana.page.getByText('Moved to the trash')).toBeVisible();
+  await expect(jana.page.locator('#toasts')).toContainText(key + ' moved to the trash.');
+  await expect(jana.page.locator('#toasts').getByRole('button', { name: 'Undo' })).toBeVisible();
+  await expect(jana.page.getByRole('dialog')).toHaveCount(0);
   // gone from lists and search, gone (410) when opened directly
   await (await tqlBox(jana.page)).fill(`key = ${key}`);
   await (await tqlBox(jana.page)).press('Enter');
@@ -44,8 +42,7 @@ test('LIFE-09/18: a deletion reaches the other person with the editor open; the 
   for (const u of [jana, ark]) await u.page.goto(`/#/issue/${key}`);
   await ark.page.getByRole('button', { name: 'Edit' }).click();
   await ark.page.getByLabel('Description editor').fill('words typed while it is being deleted');
-  await openActions(jana.page, /Delete/);
-  await jana.page.getByRole('dialog').getByRole('button', { name: 'Apply' }).click();
+  await openActions(jana.page, /Delete/); // nothing blocks it, so it goes at once (UNDO-06)
   await expect(ark.page.getByRole('alert').filter({ hasText: 'This issue was deleted' })).toBeVisible();
   await expect(ark.page.getByLabel('Description editor')).toHaveValue('words typed while it is being deleted'); // never lost
   await ark.page.getByRole('button', { name: 'Save', exact: true }).click();

@@ -101,8 +101,8 @@
     if (!canWrite(v)) { toast(whyNot(v)); say(whyNot(v)); return; }
     const done = v.transitions.filter(t => t.to_category === 'done');
     const run = async t => {
-      const r = await api('POST', '/api/v1/issues/' + key + '/transitions', { transition: t.id, base_version: v.issue.version });
-      if (r.status === 200) { toast(key + ' moved to ' + t.to + '.'); say(key + ' moved to ' + t.to); refresh(); }
+      const r = await api('POST', '/api/v1/issues/' + key + '/transitions', { transition: t.id, base_version: v.issue.version }, A.WANT_UNDO);
+      if (r.status === 200) { A.undoToast(key + ' moved to ' + t.to + '.', r, refresh); refresh(); }
       else toast((r.data && r.data.error) || 'The transition was refused.');
     };
     if (!done.length) { const m = key + ' has no transition to a done status from ' + v.issue.status + '.'; toast(m); say(m); return; }

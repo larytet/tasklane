@@ -592,6 +592,7 @@ func rows() []row {
 		{"PUT /api/v1/me/settings", authed, func(f *fixture) req {
 			return J("PUT", "/api/v1/me/settings", map[string]any{"list_view": "long", "page_width": "wide", "snippet_chars": 500})
 		}},
+		{"POST /api/v1/undo/{token}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("POST", "/api/v1/undo/un_nothing", nil) }},
 		{"GET /api/v1/me/ui-prefs", authed, func(f *fixture) req { return J("GET", "/api/v1/me/ui-prefs", nil) }},
 		{"PUT /api/v1/me/ui-prefs", authed, func(f *fixture) req { return J("PUT", "/api/v1/me/ui-prefs", map[string]any{"density": "compact"}) }},
 		{"GET /api/v1/me/notification-prefs", authed, func(f *fixture) req { return J("GET", "/api/v1/me/notification-prefs", nil) }},

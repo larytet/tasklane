@@ -308,6 +308,15 @@ func (s *Service) opDelete(ctx context.Context, tx pgx.Tx, a Actor, key string, 
 		*ev = append(*ev, Event{Type: "issue.deleted", Issue: t.key, Actor: a.Label, ActorID: a.ID})
 	}
 	p.Counts["issues"] = len(trash)
+	if !in.DryRun && in.bulk == nil { // a dry run is rolled back, so it leaves no token
+		var ver int64
+		if err := tx.QueryRow(ctx, `SELECT version FROM issue WHERE id=$1`, r.ID).Scan(&ver); err != nil {
+			return err
+		}
+		if err := s.recordUndo(ctx, tx, a, "delete", []undoItem{{IssueID: r.ID, Key: r.Key, Version: ver}}); err != nil {
+			return err
+		}
+	}
 	p.change("move %s to the trash until %s; its key stays reserved", r.Key, purge.Format("2006-01-02"))
 	p.Warnings = append(p.Warnings, "links to this issue will show a deleted-issue placeholder")
 	return s.audit(ctx, tx, a, "issue.delete", r.Key, map[string]any{"issues": len(trash), "purge_after": purge})
