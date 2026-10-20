@@ -2,7 +2,7 @@
   'use strict';
   const L = window.TL;
   const $app = document.getElementById('app');
-  const S = { me: null, projects: [], users: [], q: '', syntax: 'text', tql: '', view: null, settings: { list_view: 'short', page_width: 'wide', snippet_chars: 500 }, timers: [], nav: { keys: [], q: null }, vcache: new Map() };
+  const S = { me: null, projects: [], users: [], q: '', syntax: 'text', tql: '', view: null, settings: null, timers: [], nav: { keys: [], q: null }, vcache: new Map() };
 
   // ---------- helpers ----------
   function h(tag, props, ...kids) {
@@ -114,15 +114,44 @@
 
   // ---------- shell ----------
   // the less used places, folded into one menu so the bar fits at any width (a disclosure, so it works with the keyboard and screen readers)
-  // ----- settings kept on the server for each person
+  // ----- the person's own settings (SPEC 4.6): held by the server (one row, versioned), applied here and cached for theme.js's first paint
+  const PREF_DEFAULTS = { list_view: 'short', page_width: 'wide', snippet_chars: 500, theme: '', density: 'default', columns: ['type', 'key', 'summary', 'priority', 'assignee', 'status', 'updated'], sort: { field: '', dir: 'asc' }, font_scale: 100, reduced_motion: 'system', high_contrast: false, shortcuts: true, hints_seen: [] };
+  const P = { version: 0, queue: Promise.resolve(), listeners: [] };
+  S.settings = Object.assign({}, PREF_DEFAULTS);
   function applyWidth() { document.body.dataset.width = S.settings.page_width; }
-  async function saveSettings(ch) {
+  function applyPrefs() {
+    const r = document.documentElement, p = S.settings;
+    if (p.theme === 'light' || p.theme === 'dark') theme(p.theme);
+    r.dataset.density = p.density;
+    if (p.font_scale === 100) delete r.dataset.fs; else r.dataset.fs = String(p.font_scale);
+    if (p.high_contrast) r.dataset.hc = ''; else delete r.dataset.hc;
+    r.dataset.motion = p.reduced_motion;
+    applyWidth();
+    try { localStorage.setItem('tl-ui', JSON.stringify(p)); } catch (e) { /* private mode: the server still has them */ }
+    for (const fn of P.listeners) fn(p);
+  }
+  function loadPrefs(doc) { S.settings = Object.assign({}, PREF_DEFAULTS, doc ? doc.prefs : {}); P.version = doc ? doc.version : 0; applyPrefs(); }
+  // the next person on this browser starts from the defaults, not the last person's settings (PREF-03)
+  function forgetPrefs() { try { localStorage.removeItem('tl-ui'); } catch (e) { /* nothing stored */ } S.settings = Object.assign({}, PREF_DEFAULTS); P.version = 0; const r = document.documentElement; for (const k of ['density', 'fs', 'hc', 'motion']) delete r.dataset[k]; }
+  // a change applies at once; saves go one at a time with If-Match, and when another tab saved first the 412 carries its settings:
+  // this change goes on top of them and is saved again, so neither tab's change is lost (PREF-02). Resolves true when it was saved.
+  function saveSettings(ch) {
     const before = Object.assign({}, S.settings);
-    Object.assign(S.settings, ch); applyWidth();
-    const r = await api('PUT', '/api/v1/me/settings', S.settings);
-    if (r.status === 200) { S.settings = r.data; return true; }
-    S.settings = before; applyWidth(); toast((r.data && r.data.error) || 'Could not save the settings');
-    return false;
+    Object.assign(S.settings, ch); applyPrefs();
+    const run = async () => {
+      for (let i = 0; i < 3; i++) {
+        const r = await api('PUT', '/api/v1/me/ui-prefs', ch, { 'If-Match': '"' + P.version + '"' });
+        if (r.status === 200) { P.version = r.data.version; return true; }
+        if (r.status === 412 && r.data && r.data.detail) { P.version = r.data.detail.version; S.settings = Object.assign({}, PREF_DEFAULTS, r.data.detail.prefs, ch); applyPrefs(); continue; }
+        for (const k of Object.keys(ch)) S.settings[k] = before[k]; // only this change is undone; a later one already applied stays
+        applyPrefs();
+        toast((r.data && r.data.error) || 'Could not save the settings'); return false;
+      }
+      return false;
+    };
+    const done = P.queue.then(run, run);
+    P.queue = done.catch(() => false);
+    return done;
   }
   const SVGNS = 'http://www.w3.org/2000/svg';
   // an icon is a list of [tag, attributes]; built with DOM calls, never from a string
@@ -149,29 +178,25 @@
       if (withRows) {
         box.append(h('span', { class: 'sep' }),
           btn('short', 'Short view: title, status, assignee', S.settings.list_view === 'short', async () => { if (await saveSettings({ list_view: 'short' })) { draw(); onRows(); } }),
-          btn('long', 'Long view: with the start of the description', S.settings.list_view === 'long', async () => { if (await saveSettings({ list_view: 'long' })) { draw(); onRows(); } }));
+          btn('long', 'Long view: with the start of the description', S.settings.list_view === 'long', async () => { if (await saveSettings({ list_view: 'long' })) { draw(); onRows(); } }),
+          h('span', { class: 'sep' }));
+        const den = h('span', { class: 'seg', role: 'group', 'aria-label': 'Density' });
+        for (const [v, label] of [['compact', 'Compact'], ['default', 'Default'], ['comfortable', 'Comfortable']])
+          den.append(h('button', { class: 'btn' + (S.settings.density === v ? '' : ' ghost'), 'aria-pressed': String(S.settings.density === v), title: label + ' rows', onclick: async () => { saveSettings({ density: v }); draw(); } }, label));
+        box.append(den);
       }
     };
     draw();
     return box;
   }
-  function settingsDialog() {
-    const view = h('select', { 'aria-label': 'List view' }, h('option', { value: 'short' }, 'Short: title, status, assignee'), h('option', { value: 'long' }, 'Long: also the start of the description'));
-    view.value = S.settings.list_view;
-    const width = h('select', { 'aria-label': 'Page width' }, h('option', { value: 'wide' }, 'Wide: the whole window'), h('option', { value: 'narrow' }, 'Narrow: like a printed page'));
-    width.value = S.settings.page_width;
-    const chars = h('input', { type: 'number', 'aria-label': 'Description length in the long view', min: 1, max: 5000, value: S.settings.snippet_chars });
-    formDialog('Settings', [field('List view', view), field('Page width', width), field('Characters of the description shown in the long view (1 to 5000, 500 by default)', chars)], 'Save',
-      async () => { const ok = await saveSettings({ list_view: view.value, page_width: width.value, snippet_chars: Number(chars.value) }); return ok ? { status: 200, data: {} } : { status: 400, data: { error: 'Could not save the settings' } }; },
-      () => { toast('Settings saved'); route(); });
-  }
+  function settingsDialog() { if (EXT.settings) EXT.settings(); }
 
   function moreMenu() {
     const d = h('details', { class: 'topmore' });
     const go = (label, hash) => h('a', { href: hash, class: 'topmore-item', onclick: () => d.removeAttribute('open') }, label);
     const first = S.projects[0] ? S.projects[0].key : '';
     d.append(h('summary', { class: 'btn ghost' }, 'More'),
-      h('div', { class: 'topmore-list' }, go('Dashboards', '#/dashboards'), go('Releases', '#/releases'), go('Approvals', '#/approvals'), go('Queues', '#/queues'), go('Import', '#/import'), go('Trash', '#/trash/' + first), h('button', { class: 'topmore-item', onclick: () => { d.removeAttribute('open'); settingsDialog(); } }, 'Settings')));
+      h('div', { class: 'topmore-list' }, go('Dashboards', '#/dashboards'), go('Releases', '#/releases'), go('Approvals', '#/approvals'), go('Queues', '#/queues'), go('Import', '#/import'), go('Trash', '#/trash/' + first)));
     d.addEventListener('keydown', e => { if (e.key === 'Escape') { d.removeAttribute('open'); d.querySelector('summary').focus(); } });
     return d;
   }
@@ -206,9 +231,10 @@
       h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } }, 'Boards'),
       moreMenu(),
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
-      h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => theme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') }, '◐'),
+      h('button', { class: 'btn ghost', id: 'settings-btn', 'aria-label': 'Settings', 'aria-haspopup': 'dialog', title: 'Settings', onclick: settingsDialog }, '⚙'),
+      h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => saveSettings({ theme: document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' }) }, '◐'),
       S.me ? h('button', { class: 'btn ghost', 'aria-label': 'Account and security', onclick: () => { location.hash = '#/account'; } }, S.me.label) : null,
-      h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/logout'); S.me = null; route(); } }, 'Sign out'));
+      h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/logout'); S.me = null; forgetPrefs(); route(); } }, 'Sign out'));
   }
 
   function loginView() {
@@ -840,7 +866,7 @@
         box.append(row);
       }
       if (canEdit() && !pending) {
-        const who = h('input', { type: 'text', 'aria-label': 'Approvers', placeholder: 'ana@example.com, group:Release managers, reporter', style: 'min-width:300px' });
+        const who = h('input', { type: 'text', 'aria-label': 'Approvers', placeholder: 'ana@example.com, group:Release managers, reporter', style: 'min-width:min(300px,100%)' });
         const rule = h('select', { 'aria-label': 'Approval rule' }, h('option', { value: 'all' }, 'Everyone'), h('option', { value: 'any' }, 'Any one'), h('option', { value: 'n' }, 'At least N'));
         const n = h('input', { type: 'number', 'aria-label': 'How many must approve', min: 1, value: 2, style: 'width:70px', hidden: true });
         rule.addEventListener('change', () => { n.hidden = rule.value !== 'n'; });
@@ -1417,21 +1443,20 @@
     const r = await api('GET', '/api/v1/bootstrap');
     if (r.status === 200) {
       S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect();
-      const st = await api('GET', '/api/v1/me/settings'); // kept on the server, so they follow the person to every browser
-      if (st.status === 200) S.settings = st.data;
+      loadPrefs(r.data.ui_prefs); // kept on the server, so they follow the person to every browser
     }
     else if (r.status === 403 && r.data && r.data.code === 'second_factor_required') {
       // signed in, but held to the pages that set a second factor up: who they are is all the page may load before that
       const m = await api('GET', '/api/v1/me');
       if (m.status === 200) { S.me = m.data; S.projects = []; S.users = []; } else S.me = null;
-    } else S.me = null;
+    } else { S.me = null; if (r.status === 401) forgetPrefs(); }
     applyWidth();
     route();
     if (S.me) showScheduled();
   }
   // the agile views (agile.js) plug in here
-  const EXT = { routes: [] };
-  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route };
+  const EXT = { routes: [], settings: null };
+  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS };
   window.addEventListener('hashchange', route);
   boot();
 })();

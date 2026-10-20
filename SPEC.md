@@ -70,7 +70,10 @@ clients. Only functionality and UX patterns are described; no Atlassian or Googl
 - Status category colors (To Do grey, In Progress blue, Done green) tuned separately for dark and light.
 - Attachments, images, code blocks and charts must remain legible in both themes (charts use a validated palette,
   images get no automatic inversion).
-- Density: `comfortable` and `compact`; compact is the default on mobile widths.
+- Density: `compact`, `default` and `comfortable` (per person, section 4.6); compact is the default on mobile widths.
+- Appearance and accessibility settings per person: font size (90, 100, 115, 130%), reduced motion (follows the system
+  setting unless overridden) and high contrast (a token set with raised contrast and borders, in both themes). All are
+  applied before first paint, like the theme.
 - Responsive: phone (single pane), tablet (list + detail), desktop (nav rail + list + detail); keyboard-first on desktop.
 
 ## 4. Ticket view (Gmail-compact reading UX)
@@ -81,10 +84,22 @@ The ticket view is a conversation: the issue is the thread, the description and 
 
 - One compact row per issue: type icon, key, summary (single line, ellipsized), status lozenge, assignee avatar,
   priority icon, updated-ago, attachment paperclip, comment count. Unread (updated since last seen) rows are bold.
-- Swipe actions (mobile) and hover actions (desktop), configurable: assign to me, transition, snooze, archive-from-list
-  (hide from my view), star (favourite).
-- Multi-select with a contextual top bar (bulk transition, assign, label, move, delete).
-- Pull to refresh; infinite scroll; sticky group headers (by status, assignee, sprint, epic) optional.
+- Swipe actions (mobile) and hover actions (desktop), configurable: assign, mark done, watch, transition, snooze,
+  archive-from-list (hide from my view), star (favourite). Hover actions also appear when the row has keyboard focus, act
+  without opening the issue, and are hidden (not failing) when the person may not take them. The first set is assign,
+  mark done (the transition into the done category; a picker when there are several) and watch.
+- Multi-select: a checkbox per row, `x` toggles the current row, shift-click selects a range, the header checkbox selects
+  the page and then offers "Select all N matching". A sticky bulk bar shows the count and the actions assign, transition,
+  label, move, archive and delete. Every bulk action is planned first (dry run, the same rules as MCP bulk tools, section
+  18.3); the plan is shown only when some issues would fail or lose data, otherwise it applies and offers Undo
+  (section 4.6). Failures are reported per issue. A selection of up to one page (100 issues) runs at once. "Select all N
+  matching" comes in a later milestone as a resumable background job (section 9.1); until then it is not offered.
+- Column chooser and sort: a person picks which columns show (built-in and custom fields; key and summary always) and their
+  order, and the sort column and direction. Saved in the person's settings (section 4.6). Restricted or trashed fields
+  drop out of the list for people who cannot see them.
+- Short and long views of the list, each at the three densities.
+- Pull to refresh; a sticky pager (pages of 100, page in the URL) on desktop, infinite scroll on phones; sticky group
+  headers (by status, assignee, sprint, epic) optional.
 - Top search bar always present: free text and TQL, with recent searches and saved filter chips.
 - Inline presets as chips: Assigned to me, Reported by me, Watching, Recently viewed, Open, Done this week.
 
@@ -96,10 +111,16 @@ The ticket view is a conversation: the issue is the thread, the description and 
   "to me" expander). Custom fields appear here, grouped by their screen tab.
 - Messages: description first, then comments chronologically. Older messages collapse into "N earlier comments";
   the newest comment and unread ones are expanded. Each message: avatar, name, relative time, body, reactions.
+- Reactions: a fixed set of eight emoji on comments (👍 👎 😄 🎉 😕 ❤️ 🚀 👀), one per person per emoji, with counts and who reacted on hover. They replace
+  "+1" replies: no notification, no change to the issue's version or updated time. Only people who can see the comment
+  can react; reactions follow the comment through move, trash, export and erasure.
 - Activity (field changes, transitions, links) is interleaved as slim one-line items, filterable: All, Comments, History, Work log.
 - Quoted / long content is trimmed with "show more".
 - Sticky reply bar at the bottom: tap opens an expanding composer with @mention, issue-key autocomplete, markdown and
-  rich text, attachments, internal-only toggle, "also transition to" selector.
+  rich text, attachments, internal-only toggle, "also transition to" selector. Ctrl+Enter (Cmd+Enter) sends.
+- Every field edits in place, without an Edit button: click (or Enter on) the summary, description, priority, assignee,
+  labels or a custom field to edit it there. Escape cancels and keeps the draft, Ctrl+Enter or leaving the field saves.
+  The draft, autosave and conflict rules of section 4.5 apply unchanged. Read-only fields show why.
 - Swipe between issues in the list; back returns to the same scroll position.
 - Subtasks and linked issues are a compact section with progress bar and per-row status, collapsed by default.
 
@@ -119,6 +140,44 @@ The ticket view is a conversation: the issue is the thread, the description and 
 
 Transition, assign, comment, log work, watch, vote, link, create subtask, flag/impediment, copy key. Everything else
 (schemes, fields, permissions) is deliberately absent from this view.
+
+### 4.6 Working fast: keyboard, command palette, undo, personal settings
+
+- **Shortcuts** (desktop), inert while typing in any field or while a dialog is open:
+
+  | Key | Action |
+  |---|---|
+  | `c` | Create issue |
+  | `/` | Focus the search box |
+  | `j` / `k` | Next / previous row in a list; next / previous issue of the current list on the issue page |
+  | `o`, Enter | Open the current row |
+  | `x` | Select the current row |
+  | `e` | Close or resolve (the transition into the done category; a picker when there are several) |
+  | `a` | Assign (people search, "me" first) |
+  | `g` then `i` | Go to the inbox |
+  | `g` then `b` | Go to boards |
+  | `?` | Shortcut cheat sheet |
+  | Ctrl/Cmd+K | Command palette |
+  | Ctrl/Cmd+Enter | Send a comment, save a field being edited |
+
+  Single-key shortcuts can be turned off in Settings (WCAG 2.2 SC 2.1.4). The cheat sheet lists every shortcut, grouped by
+  screen, from the same table the app uses, so it never drifts.
+- **Command palette** (Ctrl/Cmd+K, from anywhere): one box that jumps to an issue (by key, an old key after a move included,
+  or text), a project, a board or a settings or admin page, and runs actions such as "New project", "Create issue" and
+  every shortcut action. Recent items first. It never lists anything the person cannot see or do.
+- **Undo instead of confirm:** reversible actions (transition, archive, delete to trash, and the same in bulk) happen at
+  once and show a toast such as "Issue moved to Done. Undo" for 5 seconds (paused while hovered or focused). Undo is done
+  by the server: it reverts only if nobody changed the issue since, otherwise it says so and changes nothing. Undoing a
+  transition returns the issue to its previous status even when the workflow has no transition back or a condition would
+  refuse it: it corrects the person's own action seconds ago and is not a new transition. The undo is recorded in history
+  and audit as "undone". Automation that already ran is not reversed. Operations that can drop data (move, clone,
+  convert, a delete whose plan has blockers or drops) keep their plan dialog.
+- **Settings dialog** (top bar and palette): one place for the person's own settings, stored server side and following
+  them across devices: theme, density, short or long list view, columns and sort, font size, reduced motion, high
+  contrast, keyboard shortcuts on or off. Security, sessions and two-factor stay on the Account page.
+- **Onboarding hints:** a first-time user sees one tooltip each for `c`, the view buttons and Settings, at most one per
+  session; dismissed hints are remembered per person. Hints never cover a dialog or take focus, and the `c` hint is not
+  shown when shortcuts are off or on touch devices.
 
 ### 4.5 Concurrent editing: advisory presence and optimistic save
 
@@ -1416,8 +1475,8 @@ health, backfill progress, rate-limit usage, automation rules, smart-commit and 
 
 ## 20. Accessibility and i18n
 
-WCAG 2.2 AA, full keyboard navigation (shortcuts: `c` create, `/` search, `j/k` next/prev, `a` assign, `.` actions,
-`g` then `b` go to board), screen reader labels, reduced motion, high contrast. Localized UI strings, RTL support,
+WCAG 2.2 AA, full keyboard navigation (shortcuts and the command palette in section 4.6; `.` opens the actions of the
+current issue), screen reader labels, reduced motion, high contrast and font size as personal settings (section 3). Localized UI strings, RTL support,
 per-user locale and timezone, date and number formats.
 
 ## 21. Non-functional targets
@@ -1498,5 +1557,8 @@ per-user locale and timezone, date and number formats.
   budget (rationale and alternatives, including React, in DESIGN.md section 13.1). Not yet decided.
 - Search engine: resolved in section 10.1. PostgreSQL by default, OpenSearch (an extra service and a second, lagging copy)
   for large instances; the PostgreSQL limit is set at 100,000 issues per instance and verified by PERF-16.
+- Working fast (section 4.6): resolved. Undo of a transition always returns to the previous status, bypassing the
+  workflow; desktop lists use a sticky pager; the first bulk bar acts on up to one page, "select all matching" with
+  background jobs follows later; reactions use a fixed set of eight emoji.
 - Jira write-back (the outbound half of the mirror): when to build it and the conflict and echo policy; design notes are in
   section 18.1. Until then Tasklane never writes to Jira.

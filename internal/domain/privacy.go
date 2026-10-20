@@ -92,6 +92,10 @@ func (s *Service) ExportPersonalData(ctx context.Context, a Actor, userID string
 	if s.DB.QueryRow(ctx, `SELECT prefs FROM notification_pref WHERE user_id::text=$1`, userID).Scan(&prefs) == nil {
 		out["notification_preferences"] = string(prefs)
 	}
+	var ui []byte
+	if s.DB.QueryRow(ctx, `SELECT settings FROM user_setting WHERE user_id::text=$1`, userID).Scan(&ui) == nil {
+		out["ui_settings"] = string(ui)
+	}
 	var mfa bool
 	s.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_mfa WHERE user_id::text=$1 AND enabled)`, userID).Scan(&mfa)
 	out["two_factor_enabled"] = mfa

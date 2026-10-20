@@ -421,7 +421,8 @@ func (s *Server) Handler() http.Handler {
 			s.fail(w, 500, "internal", "internal error", nil)
 			return
 		}
-		s.json(w, 200, map[string]any{"me": actorOf(r), "projects": ps, "users": us})
+		ui, _ := s.Svc.MyUIPrefs(r.Context(), actorOf(r)) // the defaults when they cannot be read: settings never stop the page loading
+		s.json(w, 200, map[string]any{"me": actorOf(r), "projects": ps, "users": us, "ui_prefs": ui})
 	}))
 	s.handle(mux, "GET /api/v1/admin/mail", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		l, err := s.Svc.MailLog(r.Context(), actorOf(r), 100)
@@ -574,6 +575,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerArchive(mux)
 	s.registerAudit(mux)
 	s.registerInbox(mux)
+	s.registerUIPrefs(mux)
 	s.registerAutomation(mux)
 	s.registerSecurity(mux)
 	s.registerSSO(mux)
@@ -947,12 +949,19 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		pl  *domain.PlanLimitError
 		ue  *domain.UpstreamError
 		nd  *domain.NotDownloadable
+		upe *domain.UIPrefError
+		upc *domain.UIPrefConflict
 	)
 	switch {
 	case err == nil:
 		s.json(w, ok, v)
 	case errors.As(err, &inv):
 		s.fail(w, 400, "invalid", inv.Msg, nil)
+	case errors.As(err, &upe):
+		s.fail(w, 400, "invalid", upe.Error(), map[string]string{"key": upe.Key})
+	case errors.As(err, &upc):
+		w.Header().Set("ETag", strconv.Quote(strconv.FormatInt(upc.Current.Version, 10)))
+		s.fail(w, 412, "precondition_failed", upc.Error(), upc.Current)
 	case errors.As(err, &ue):
 		s.fail(w, 502, "upstream", ue.Msg, nil)
 	case errors.As(err, &pl):

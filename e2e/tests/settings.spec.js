@@ -38,22 +38,24 @@ test('UI-08: view buttons and Settings are saved on the server and follow the pe
   await page.getByRole('button', { name: /^Narrow view/ }).click();
   await expect.poll(() => page.locator('.page.fluid').evaluate(e => e.getBoundingClientRect().width)).toBeLessThanOrEqual(900);
   expect(wide).toBeGreaterThan(900);
-  // Settings: cut the description at 50 characters
-  await page.getByText('More', { exact: true }).click();
+  // Settings: cut the description at 50 characters (each setting is saved as it changes)
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'List' }).click();
   await page.getByLabel('Description length in the long view').fill('50');
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Settings saved')).toBeVisible();
+  await page.getByLabel('Description length in the long view').press('Tab');
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Saved');
+  await page.getByRole('button', { name: 'Done' }).click();
   await expect(row.locator('.snip')).toContainText('start-abcdefghij');
   await expect(row.locator('.snip')).not.toContainText('-END');
   expect((await row.locator('.snip').innerText()).length).toBeLessThanOrEqual(51);
   // a bad value is refused by the server and nothing changes
-  await page.getByText('More', { exact: true }).click();
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('tab', { name: 'List' }).click();
   await page.getByLabel('Description length in the long view').fill('0');
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Could not save the settings').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByLabel('Description length in the long view').press('Tab');
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Could not save the settings');
+  await expect(page.getByLabel('Description length in the long view')).toHaveValue('50');
+  await page.getByRole('button', { name: 'Done' }).click();
   // another browser, same person: the settings are there
   const ctx2 = await browser.newContext();
   const p2 = await ctx2.newPage();

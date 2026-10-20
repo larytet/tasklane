@@ -112,8 +112,10 @@ without clipping; rows grow, never truncate controls.
 - **Radius:** `r-sm` 4 (lozenges, inputs, small chips), `r-md` 8 (cards, buttons, composer), `r-lg` 16 (sheets, dialogs
   on phone), `r-full` (avatars, filter chips).
 - **Hit targets:** 44 px minimum on touch; 32 px minimum on pointer-only desktop density. Row actions never smaller.
-- **Density:** `comfortable` (row 56 px) and `compact` (row 44 px). Compact is the default at phone width, comfortable
-  at tablet and desktop.
+- **Density:** `compact` (row 36 px), `default` (row 44 px) and `comfortable` (row 56 px), a personal setting (SPEC 4.6)
+  switched beside the short/long view buttons and in Settings. On a phone rows wrap onto two lines and grow to fit.
+- **Font size and contrast:** 90, 100, 115 or 130 % (the whole interface scales, so controls grow with their text), and a
+  high-contrast token set per theme (text 7:1, input borders 4.5:1), both personal settings applied before the first paint.
 - **Motion:** 120 ms for state changes, 200 ms for panels and sheets, standard ease-out. Remote edit highlights fade
   over 1 s. `prefers-reduced-motion` replaces slides with fades and disables caret animation.
 - **Icons:** one outline set, 20 px (16 px in rows and chips), 1.5 px stroke, original artwork.

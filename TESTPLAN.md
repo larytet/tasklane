@@ -239,6 +239,7 @@ set, so the test runs the real code path, not a fallback. Images are pinned by d
 | 18.2 Pause state, consistency model | Integration under live load, chaos, restore round trip | 5.11 |
 | 19 Mobile, offline | E2E with network control, a11y | 5.8 |
 | 20 A11y, i18n | axe, manual, pseudo-locale | 5.8 |
+| 3 Density and appearance settings; 4.1 list settings, bulk, hover actions; 4.2 in-place editing, reactions; 4.6 keyboard, palette, undo, personal settings | E2E, integration, authorization matrix, visual, a11y | 5.18 |
 | 21 Non-functional targets | Perf, chaos, security | 5.2, 5.7 |
 | DESIGN Part I tokens | Visual regression, contrast checker | 5.8 |
 | DESIGN Part II architecture | Convergence, load, chaos | 5.1, 5.2, 5.3 |
@@ -760,6 +761,136 @@ owner decides whether to wait.
 
 **Output:** a report attached to the release candidate: cases run, not run (with reason), requests used against the budget, differences found between fake and real, and fixes made to the fake. A defect found here is severity 1 or 2 by the usual rules (section 8) and gets a regression test against `jira-fake` before it is closed, so it is caught on every PR from then on.
 
+### 5.18 Keyboard, command palette, undo, bulk and list settings
+
+The keyboard-first and list features (SPEC 3, 4.1, 4.2, 4.6, 20; DESIGN 1 density and toasts). Every UI row runs in Playwright in both
+themes with axe on the screens it touches, and with no uncaught page errors (`helpers.js`). Server rows run against real
+PostgreSQL. New routes get rows in the authorization matrix (`matrix_test.go`) and, where they write, in the audit list.
+The four design decisions (SPEC 23) are settled and the rows below follow them.
+
+**Per-person UI settings**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| PREF-01 | `GET` and `PUT /api/v1/me/ui-prefs`: every allowed key round-trips; an unknown key, a wrong type or an out-of-range value (density, font scale, column name) is refused | 400 with the offending key; nothing stored; defaults returned for a person who never saved |
+| PREF-02 | Two tabs save different settings with `If-Match` | The second save gets 412 with the current settings and the client merges; no setting silently lost |
+| PREF-03 | Settings follow the person: second browser, second device, after sign-out and sign-in; another person on the same browser | Same settings for the same person; nothing leaks to the next person (extends OFF-03) |
+| PREF-04 | Authorization and privacy: one person cannot read or write another's settings (matrix); the settings are in the person's GDPR export and gone after erasure | Denied; export and erasure complete |
+| PREF-05 | Settings dialog: opened from the top bar and from the palette, tabs by keyboard, focus trapped, Escape closes and returns focus, changes apply without a reload | Behaves as a modal per DESIGN; axe clean |
+
+**Keyboard shortcuts**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| KEY-01 | Each shortcut on the issue list: `c` create, `/` focus search, `j`/`k` move, `o` and Enter open, `e` close or resolve, `a` assign, `g` then `i` inbox, `g` then `b` boards | Each does exactly its action; `j` on the last row and `k` on the first stay put; the current row is visible (scrolled into view) and announced |
+| KEY-02 | Shortcuts are inert while typing: in the search box, summary, description, comment, every `fieldControl` type, a select, and while any dialog is open | No action fires; the character is typed |
+| KEY-03 | Sequences: `g` then `i` within 1 s; `g` then a pause longer than 1 s then `i`; `g` then an unknown key | Only the first navigates; nothing is left pending afterwards |
+| KEY-04 | Modifiers and layouts: Ctrl, Cmd and Alt with a shortcut letter; a non-US keyboard layout; Caps Lock | Browser and OS shortcuts are not swallowed; shortcuts follow the typed character |
+| KEY-05 | `e` close or resolve: one done transition; several (picker); none available; a workflow condition refuses; a viewer | One transition applies; the picker lists only allowed ones; a refusal shows the reason; the viewer's `e` does nothing and says why |
+| KEY-06 | `a` assign: "me" listed first, type-ahead over project members, Unassigned, Escape cancels; concurrent change by another person | Assignee saved with the version check; a conflict is reported, not overwritten |
+| KEY-07 | `j`/`k` on the issue page walk the list the person came from, across page boundaries; opened from a link with no list | Next and previous follow the list order; without a list the keys do nothing |
+| KEY-08 | Ctrl+Enter and Cmd+Enter in the comment box and the description editor; a plain Enter in the comment box | Sends or saves once (no double submit on a held key); Enter adds a new line |
+| KEY-09 | Shortcuts turned off in Settings (WCAG 2.2 SC 2.1.4) | No single-character shortcut fires; Ctrl/Cmd+K and Ctrl+Enter still work; the setting persists (PREF-03) |
+| KEY-10 | `?` cheat sheet: opens from anywhere outside a text field, lists every registered shortcut grouped by screen, matches the registry (a test fails when a shortcut is added without a label), closes with Escape and `?` | Complete and in sync; modal behavior per PREF-05; axe clean |
+| KEY-11 | Screen reader pass (extends A11Y-03): moving with `j`/`k`, the cheat sheet, the assign picker | Current row and actions announced once, not repeatedly |
+
+**Command palette (Ctrl/Cmd+K)**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| PAL-01 | Opens with Ctrl+K and Cmd+K from any screen, including while focus is in a text field; Firefox's own Ctrl+K is not triggered | Palette opens with focus in its box |
+| PAL-02 | Jump targets: an exact issue key (current and an old key after a move), issue text, project, board, settings and admin pages | Each opens the right screen; an old key opens the current issue (LIFE-05) |
+| PAL-03 | Actions: "New project", "Create issue", "Settings", shortcut actions | The action runs; actions the person may not take (New project for a non-admin, admin pages) are absent |
+| PAL-04 | Permissions: issues, projects and boards the person cannot see, restricted and trashed issues, archived issues | Never listed, including in counts and while the index lags (TQL-08..) |
+| PAL-05 | Typing fast: requests debounced; a slow response arriving after a newer one | Results always match the current text; no more than one request in flight per 150 ms of typing |
+| PAL-06 | Keyboard and a11y: arrows, Enter, Escape, Tab; combobox and listbox roles with `aria-activedescendant`; recent items first | Fully operable by keyboard; axe clean; screen reader reads the active option |
+| PAL-07 | Latency: palette open and first results on the `team` dataset | First results within the typeahead budget of SPEC 21 |
+
+**Undo instead of confirm**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| UNDO-01 | Transition, archive, delete, bulk transition and bulk archive each show a toast with Undo; Undo within 5 s | The issue returns to its previous status, archive state or place (key kept); history records the undo with its actor |
+| UNDO-02 | Toast timing: disappears after 5 s; hover and keyboard focus pause it; several toasts stack | Never disappears while hovered or focused; announced politely once |
+| UNDO-03 | Token rules: used twice, used after it expires, used by another person, used from another session of the same person | Single use; expired and foreign tokens refused (404 or 403, no information leak); same person in another tab allowed |
+| UNDO-04 | Someone edits the issue between the action and Undo (field, comment, another transition) | 409 "changed since", nothing reverted, the toast says why |
+| UNDO-05 | Undo of a transition whose way back is not in the workflow, or is blocked by a condition (reporter-only reopen, a validator) | Reverted to the previous status anyway; history and audit mark it as an undo, not a transition; no transition post-functions run; automation that already ran is not reversed and the docs say so; outside the undo window the same move is refused as usual |
+| UNDO-06 | Delete no longer opens the plan dialog when the plan has no blockers or drops; it still does when it has them; move and clone always do | Matches the rule; the plan shown equals the result (LIFE-06) |
+| UNDO-07 | Realtime: another person viewing the issue during the action and its undo | They see both changes; no stale state after the undo |
+| UNDO-08 | Undo for a whole bulk batch with one issue changed by someone else in between | Every other issue reverted; the changed one reported per issue |
+| UNDO-09 | Audit and events: the action and its undo each produce audit entries, events and webhooks; notifications are not sent twice | Complete and ordered (LIFE-14) |
+
+**Selection and bulk actions**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| BULK-01 | Selection: checkbox per row, `x` on the current row, shift-click range, header select-all for the page, clear; selection survives a realtime row update | Count in the bulk bar always equals the checked rows |
+| BULK-02 | First release: no "Select all N matching"; the bulk endpoint refuses more than 100 issues. Later milestone: "Select all N matching" as a background job under the LIFE-16 rules | First release: the option is absent and the cap error is clear. Later: added with LIFE-16 |
+| BULK-03 | `POST /api/v1/bulk` for fields (assignee, priority, labels add and remove), transition, move and archive, with `keys` and with `query` | Same results as the MCP bulk tools for the same input (shared code); the plan of a dry run equals the result (MCP-12) |
+| BULK-04 | Dry run changes nothing; `idempotency_key` retry after a lost response | No change on dry run; no double apply on retry |
+| BULK-05 | Partial failure: no permission on some issues, a workflow refusing some transitions, a concurrent edit on one issue, a mirrored issue | Each failure reported per issue with its reason; the others applied; none half-applied |
+| BULK-06 | Caps: above the synchronous limit; empty selection; duplicate keys; unknown keys | Clear error over the limit; duplicates applied once; unknown keys reported, not fatal |
+| BULK-07 | Authorization matrix for every op and role; a viewer sees the bar disabled with a reason | Same decisions as the single-issue endpoints (SEC-01..03) |
+| BULK-08 | Bulk bar UI: sticky while scrolling, actions by keyboard, transition list limited to transitions valid for the selection, per-issue failure report, undo toast | Operable by keyboard; axe clean; failures readable |
+| BULK-09 | Performance: bulk of one full page on the `team` dataset while others use the app | Completes within budget; interactive p95 unchanged (PERF) |
+
+**Row hover actions**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| HOVER-01 | Assign, mark done and watch from a row, with the mouse and with keyboard focus on the row | Each acts without opening the issue; the row updates in place; clicking an action does not open the issue |
+| HOVER-02 | Actions not allowed (viewer, no done transition, mirrored issue) | Hidden or disabled with a reason; never a failing request |
+| HOVER-03 | Touch widths (phone) | Hover actions not shown; the row still opens on tap |
+| HOVER-04 | Hit targets and visual | At least 32 px on desktop and 44 px on touch (DESIGN); visual baseline per density and theme |
+
+**List layout: density, columns, sort, paging**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| LIST-01 | Density compact, default and comfortable; switch in Settings and next to the short/long view buttons | Row height matches the token; no clipped text at 200% zoom; visual baselines for each (extends UI-01) |
+| LIST-02 | Column chooser: show, hide and reorder columns including custom fields; the key and summary cannot be hidden; a custom field later trashed or made restricted | Choice saved per person (PREF); a trashed or restricted field disappears and its values never reach a person who cannot see them |
+| LIST-03 | Sort by each sortable column, both directions, with text and TQL queries, ties broken stably | Order matches the same query run on PostgreSQL and OpenSearch (TQL parity) |
+| LIST-04 | The list API with `fields=` and sort | Only the requested fields returned; unknown fields refused; response size within budget |
+| LIST-05 | Desktop sticky pager: stays visible while scrolling, keyboard reachable, page in the URL survives reload and back, `j`/`k` past the last row moves to the next page; selection is cleared on page change | No duplicate or skipped issue while issues are created and updated during paging |
+| LIST-06 | Short and long view with each density and column choice | All combinations render; no sideways page scroll at 390 px |
+
+**Editing in place**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| EDIT-01 | Description: click to edit without an Edit button; Escape cancels and keeps the draft; Ctrl+Enter saves; blur | Same draft, autosave and conflict guarantees as LIVE-03 and LIVE-10; the counted campaign (LIVE-09) includes this path |
+| EDIT-02 | Custom fields of every type edited in place, with field rules (required, hidden) | Saved with the version check; a required field cannot be emptied; hidden fields stay hidden |
+| EDIT-03 | Read-only cases: viewer, archived issue, mirrored issue, issue being moved | Nothing becomes editable; the reason is shown |
+| EDIT-04 | Keyboard: every in-place field reachable by Tab, opened by Enter, closed by Escape; screen reader names and states | Completable without a mouse; axe clean |
+
+**Comment reactions**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| REACT-01 | Add, remove, toggle each of the eight emoji (👍 👎 😄 🎉 😕 ❤️ 🚀 👀); the same emoji twice by one person; several people; anything outside the set (other emoji, text, a skin-tone or variation-selector variant, an empty value) | One reaction per person per emoji; counts correct; everything outside the set refused with 400 |
+| REACT-02 | Permissions: viewer, a restricted (internal) comment, a portal customer, a mirrored issue, an archived issue | Only people who can see the comment can react; customers never see staff reactions on internal comments |
+| REACT-03 | Two people react at the same moment; realtime | Both kept; each sees the other's within 1 s |
+| REACT-04 | Reactions send no notifications and do not change the issue's `updated` or version | No inbox item, no email, no version bump |
+| REACT-05 | Export and import round trip, GDPR export and erasure, comment deleted, issue moved, trashed and restored | Reactions follow the comment; erased people's reactions are gone |
+| REACT-06 | UI: keyboard-operable picker, counts announced, who reacted in the tooltip | axe clean; readable in both themes |
+
+**Theme and accessibility settings** (extends A11Y-04)
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| THEME-01 | Font size 90, 100, 115 and 130% on every screen | No clipping or overlap; no sideways scroll at 390 px; visual baselines |
+| THEME-02 | Reduced motion: follows the system setting by default, overridden both ways in Settings | No animation or transition when on, toasts and dialogs fade only |
+| THEME-03 | High contrast in dark and light | Contrast checker (UI-02) passes the higher targets on the high-contrast token set; focus rings visible |
+| THEME-04 | Settings apply before first paint after a reload | No flash of the default size or contrast (as UI-03) |
+
+**Onboarding hints**
+
+| Id | Case | Pass criterion |
+|---|---|---|
+| HINT-01 | First sign-in: one hint each for `c`, the view buttons and Settings, at most one per session | Each shown once ever; dismissed hints stay dismissed on another device (PREF-03) |
+| HINT-02 | Hints never cover a dialog, never appear on touch for keyboard hints, and never steal focus | Typing and keyboard flows unaffected; axe clean |
+| HINT-03 | A person with shortcuts turned off | The `c` hint is not shown |
+
 ## 6. Pipeline and gates
 
 | Stage | Contents | Gate |
@@ -834,19 +965,6 @@ Every severity 1 or 2 defect gets a regression test (a document triple added to 
 - Choose the concrete tools per level (section 2) at the start of M1; keep the gates, not the products.
 - Decide the reference `perf` hardware profile and the reference mid-range phone profile.
 - External penetration test (SEC-11) is postponed; decide when to schedule it, and revisit before any public or multi-tenant hosted offering.
-
-### 11.1 Usage budget stop (rule for the implementing agent)
-
-The account has a weekly usage limit. A status-line script (`~/usage-statusline.sh`) records it in
-`~/.claude/usage.log` and keeps the flag file `~/.claude/usage-pause.flag` while weekly use is at or above 50%.
-
-- **Before starting each milestone**, check whether the flag file exists (`test -e ~/.claude/usage-pause.flag`).
-- **If it exists**, do not start the milestone. Finish and commit only what is already in progress, and only with the tests
-  green (never commit on red to beat the limit). Then write one line in STATUS.md ("paused at weekly N%, next: ...") and
-  stop, telling the user that it is waiting. Do not work around the flag, delete it, or edit the script.
-- **If the file is missing**, continue as usual. A missing or stale `usage.log` means the status line is not installed,
-  not that the budget is fine; mention that once in STATUS.md.
-- The flag clears on its own when the weekly window resets. The user can resume, or raise the limit with `USAGE_PAUSE_AT`.
 
 ## 12. Implementation status
 
@@ -1020,5 +1138,10 @@ Which planned tests exist as automated tests in the repository. Updated at the e
 | GIT-10 | done | `TestGIT10_IdentitiesAreLinkedByAnAdministratorAndMapOnlyWhatTheProviderVouchesFor` (unverified email, provider-vouched email, a linked account, unlink, duplicates, audit); GIT-03 regression `TestGIT03_KeysSeparatedByOneSpaceAllLinkAndLongerWordsStillDoNot` |
 | TQL-08..13, 15, 16 | partial | `internal/search/os_test.go`: routing, translator parity with PostgreSQL (50 queries x 4 roles), indexer versions, retries, outage backlog and dead letters, permissions while the index lags (revoked access, moved, trashed, internal comments, typeahead), online reindex with live writes, resume, verification refusing a damaged index, rollback, project reindex, reconcile, outage fallback and recovery, lag warning and own-edit overlay, paging, term limit; `TestHTTP_OpenSearchEngineAndAdminEndpoints`; doctor and matrix rows. TQL-17 (organizations), real OpenSearch, performance at scale and cursor paging are open |
 | MIR-01..09, 11, 12 (partial), 13 | partial | `internal/domain/jira_test.go` (backfill with ADF, paged comments and changelog, links, parents, idempotence, kill and resume, webhook hints, overlap window, lost webhooks, out-of-order versions, key change aliases, deletions and the empty-answer guard, placeholder users and claiming, history idempotence and attribution, roles and groups, revocation, stale permissions failing closed, security levels, every write path refused, rate limits and outages with the stale marker, pause, read features on mirrored data, cut-over); `internal/jira/adf_test.go` (nodes, unsupported, hostile content, garbage, deep nesting); `TestHTTP_MirroredProjectIsReadOnlyWithATypedError`; `TestMCP_MirroredIssuesAreReadOnlyForAgents`; e2e `JIRA`; matrix rows. 10,000-issue backfill, attachments (MIR-10), real Jira, notifications inbox and erasure (MIR-14) are open |
+
+| PREF-01..05 (5.18) | yes | `internal/api/uiprefs_test.go` (round trip of every key, refusals naming the key with nothing stored, key and summary kept, custom field columns dropped when trashed, 412 with the current settings and the merge, another person and anonymous, second device, bootstrap, export and erasure); matrix rows; e2e `prefs.spec.js` PREF-02 (two tabs), PREF-03 (second browser, sign-out, next person), PREF-05 (both themes, axe, tabs by arrow keys, focus trap, Escape returns focus, live apply); `settings.spec.js` UI-08 on the new dialog |
+| THEME-01..04 (5.18) | yes | e2e `prefs.spec.js`: THEME-01 (90 to 130 % on list, issue page and Settings at 390 px), THEME-02 (system reduce and no-preference against the setting on, off and system), THEME-04 (font size, contrast and density present when `<body>` appears); THEME-03 by `TestTHEME03_HighContrastTokens` (7:1 text, 4.5:1 borders, both themes). Visual baselines per font size are open |
+| LIST-01 (5.18) | yes | e2e `prefs.spec.js` LIST-01: density buttons beside the view buttons, row heights 36/44/56, long view at each density without sideways scroll at 390 px. Visual baselines per density are open |
+| KEY, PAL, UNDO, BULK, HOVER, LIST-02..06, EDIT, REACT, HINT (5.18) | open | not built. Existing pieces they build on: MCP bulk tools and the bulk job table (M5.x), in-place summary, priority and assignee on the issue page, the toast with an action |
 
 Run everything with `make db` (once) and `make test`. Tests skip, with a message, when PostgreSQL is not reachable.

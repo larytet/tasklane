@@ -195,3 +195,40 @@ body[data-width=narrow] .page.fluid{max-width:900px}
 .row.long{flex-wrap:wrap;height:auto;padding:8px 12px;row-gap:4px}
 .row .snip{flex:1 1 100%;color:var(--subtle);font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;padding-left:30px}
 .topmore-list button.topmore-item{background:none;border:0;color:inherit;font:inherit;text-align:left;width:100%;cursor:pointer}
+
+/* personal display settings (SPEC 3, 4.6), set on <html> by theme.js before the first paint and by Settings */
+/* high contrast: stronger text, borders and accents in both themes (AAA 7:1 for text, checked by UI-02 / THEME-03) */
+:root[data-hc]{--text:#FFFFFF;--subtle:#E8EBEF;--subtlest:#D2D7DD;--accent:#A9C9FF;--border:#8D95A1;--border-input:#B5BDC8;--success:#A6E8B3;--warning:#FFD47E;--danger:#FFB8B2;--info:#A4E0F2;}
+:root[data-theme=light][data-hc]{--text:#000000;--subtle:#1F252C;--subtlest:#2C333D;--accent:#0A3C94;--border:#5C6470;--border-input:#3A414B;--success:#123F1D;--warning:#4F2E00;--danger:#6E160F;--info:#053F53;}
+:root[data-hc] :focus-visible{outline-width:3px}
+/* font size: the whole interface scales, like the browser's own zoom, so controls grow with the text and nothing clips */
+:root[data-fs="90"] body{zoom:.9}:root[data-fs="115"] body{zoom:1.15}:root[data-fs="130"] body{zoom:1.3}
+/* density of work lists: compact 36, default 44, comfortable 56 (DESIGN 3) */
+:root[data-density=compact] .row{min-height:36px}
+:root[data-density=comfortable] .row{min-height:56px}
+.seg{display:inline-flex;gap:2px}.seg .btn{padding:3px 8px;font-size:12px;min-height:30px}.seg .btn[aria-pressed=true]{border-color:var(--accent)}
+/* motion: toasts and dialogs fade in; reduced motion (setting on, or the system's while the setting follows it) keeps the fade only */
+.toast,.dialog{animation:tl-in .2s ease-out}@keyframes tl-in{from{transform:translateY(6px)}to{transform:none}} /* a slide only: text is at full contrast from the first frame */
+@keyframes tl-fade{from{opacity:0}to{opacity:1}}
+/* only these three animate: the rules name them rather than every element, which the browser would test on each style recalculation of a large page */
+:root[data-motion=on]{scroll-behavior:auto}:root[data-motion=on] .flash{animation:none}
+:root[data-motion=on] .toast,:root[data-motion=on] .dialog{animation:tl-fade .2s ease-out}
+@media(prefers-reduced-motion:reduce){
+  :root:not([data-motion=off]) .toast,:root:not([data-motion=off]) .dialog{animation:tl-fade .2s ease-out}
+}
+:root[data-motion=off] .flash{animation:flash 1.2s ease-out}
+/* settings dialog */
+.dialog.settings{max-width:600px}
+.settings [role=tablist]{display:flex;gap:4px;border-bottom:1px solid var(--border);margin:8px 0 12px;flex-wrap:wrap}
+.settings [role=tab]{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;color:var(--subtle);min-height:32px}
+.settings [role=tab][aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
+.settings .set{display:grid;grid-template-columns:170px 1fr;gap:10px 12px;align-items:center}
+.settings .set label.opt{display:inline-flex;gap:6px;align-items:center;margin-right:12px}
+.settings .cols{display:flex;flex-direction:column;gap:4px;list-style:none;padding:0;margin:0}
+.settings .cols li{display:flex;gap:6px;align-items:center}.settings .cols li .nm{flex:1}
+.settings .saved{min-height:20px}
+@media(max-width:600px){.settings .set{grid-template-columns:1fr}}
+.settings [role=tabpanel][hidden]{display:none}
+.viewctl{flex-wrap:wrap;row-gap:4px;max-width:100%}
+.listbar{flex-wrap:wrap}.listbar>.viewctl{min-width:0}
+@media(max-width:900px){.issue-layout{grid-template-columns:minmax(0,1fr)}.issue-main,.issue-side{min-width:0}}@media(max-width:600px){.issue-page{padding:12px}}

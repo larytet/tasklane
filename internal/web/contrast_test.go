@@ -129,3 +129,50 @@ func TestUI02_CheckerRejectsBadPairs(t *testing.T) {
 		t.Fatal("expected the dark-theme tertiary grey on white to fail 4.5:1")
 	}
 }
+
+// THEME-03: the high-contrast token sets raise every text pair to 7:1 (WCAG AAA) and input borders to 4.5:1, in both themes. A
+// high-contrast block only overrides some tokens; the rest come from its theme.
+func TestTHEME03_HighContrastTokens(t *testing.T) {
+	dark := tokens(t, ":root")
+	light := tokens(t, ":root[data-theme=light]")
+	for k, v := range dark {
+		if _, ok := light[k]; !ok {
+			light[k] = v
+		}
+	}
+	merge := func(base, over map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range base {
+			out[k] = v
+		}
+		for k, v := range over {
+			out[k] = v
+		}
+		return out
+	}
+	hcDark := merge(dark, tokens(t, ":root[data-hc]"))
+	hcLight := merge(light, tokens(t, ":root[data-theme=light][data-hc]"))
+	text := [][2]string{{"text", "surface"}, {"text", "sunken"}, {"text", "raised"}, {"text", "overlay"}, {"subtle", "surface"}, {"subtle", "raised"}, {"subtle", "overlay"},
+		{"subtlest", "surface"}, {"subtlest", "sunken"}, {"subtlest", "overlay"}, {"accent", "surface"}, {"accent", "overlay"}, {"on-accent", "accent"},
+		{"success", "success-bg"}, {"warning", "warning-bg"}, {"danger", "danger-bg"}, {"info", "info-bg"}, {"accent", "accent-bg"}, {"subtle", "todo-bg"},
+		{"success", "surface"}, {"danger", "surface"}, {"warning", "surface"}}
+	for name, th := range map[string]map[string]string{"dark": hcDark, "light": hcLight} {
+		for _, p := range text {
+			if r := ratio(th[p[0]], th[p[1]]); r < 7 {
+				t.Errorf("high contrast %s: --%s on --%s is %.2f, needs 7", name, p[0], p[1], r)
+			}
+		}
+		for _, bg := range []string{"surface", "sunken"} {
+			if r := ratio(th["border-input"], th[bg]); r < 4.5 {
+				t.Errorf("high contrast %s: input border on --%s is %.2f, needs 4.5", name, bg, r)
+			}
+		}
+		if _, _, _, ok := hexRGB(th["border"]); !ok {
+			t.Errorf("high contrast %s: --border must be a solid colour, got %q", name, th["border"])
+		}
+	}
+	// the sets really are stronger than the ordinary ones
+	if ratio(hcDark["subtlest"], hcDark["surface"]) <= ratio(dark["subtlest"], dark["surface"]) {
+		t.Error("high contrast dark does not raise tertiary text")
+	}
+}

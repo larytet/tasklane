@@ -23,7 +23,7 @@ func (d *devSearch) q(a domain.Actor, query string) []string {
 	if err != nil {
 		d.e.T.Fatal(err)
 	}
-	res, err := d.eng.Search(ctx, search.Scope{UserID: a.ID, All: all, Readable: rd, Writable: wr, WeekStart: time.Monday, Now: time.Now}, query, search.Page{Limit: 100})
+	res, err := d.eng.Search(ctx, search.Scope{UserID: a.ID, All: all, Readable: rd, Writable: wr, WeekStart: time.Monday, Now: d.e.Svc.Now}, query, search.Page{Limit: 100}) // the service clock: access lists age by it
 	if err != nil {
 		d.e.T.Fatalf("%s: %v", query, err)
 	}

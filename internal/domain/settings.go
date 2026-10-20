@@ -23,13 +23,14 @@ func defaultSettings() UserSettings {
 	return UserSettings{ListView: "short", PageWidth: "wide", SnippetChars: DefaultSnippetChars}
 }
 
+// MySettings and SetSettings are the first three settings (GET and PUT /api/v1/me/settings); they share the row and the version with
+// the rest (UIPrefs), so a save through either route is seen by the other.
 func (s *Service) MySettings(ctx context.Context, a Actor) UserSettings {
-	p := defaultSettings()
-	var raw []byte
-	if s.DB.QueryRow(ctx, `SELECT settings FROM user_setting WHERE user_id=$1`, a.ID).Scan(&raw) == nil {
-		json.Unmarshal(raw, &p) // missing keys keep their defaults
+	d, err := s.uiPrefsOf(ctx, s.DB, a.ID, false)
+	if err != nil {
+		return defaultSettings()
 	}
-	return p
+	return d.Prefs.UserSettings
 }
 
 func (s *Service) SetSettings(ctx context.Context, a Actor, p UserSettings) (UserSettings, error) {
@@ -43,8 +44,8 @@ func (s *Service) SetSettings(ctx context.Context, a Actor, p UserSettings) (Use
 		return p, invalid("snippet_chars is between 1 and %d", MaxSnippetChars)
 	}
 	raw, _ := json.Marshal(p)
-	_, err := s.DB.Exec(ctx, `INSERT INTO user_setting(user_id,settings) VALUES($1,$2) ON CONFLICT (user_id) DO UPDATE SET settings=EXCLUDED.settings`, a.ID, raw)
-	return p, err
+	d, err := s.SetUIPrefs(ctx, a, raw, nil)
+	return d.Prefs.UserSettings, err
 }
 
 // Snippets returns the start of the description of each issue named, cut at n characters (not bytes) with an ellipsis. The keys come from a

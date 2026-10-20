@@ -82,6 +82,9 @@ test('UI-03: dark is the default, the stored choice wins, and a light user never
   expect(html.indexOf('/theme.js')).toBeGreaterThan(-1);
   expect(html.indexOf('/theme.js')).toBeLessThan(html.indexOf('</head>'));
   expect(html.indexOf('/theme.js')).toBeLessThan(html.indexOf('/app.css'));
+  // the toggle is the person's setting now (PREF-03): put it back so later tests of this account start from the device's theme
+  expect((await page.request.put('/api/v1/me/ui-prefs', { data: { theme: '' }, headers: { 'X-Requested-With': 'tasklane' } })).status()).toBe(200);
+  await ctx.close();
 });
 
 for (const [name, w, h] of [['phone', 390, 800], ['tablet', 768, 1000], ['desktop', 1280, 800]]) {
