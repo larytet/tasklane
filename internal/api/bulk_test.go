@@ -252,3 +252,108 @@ func (c *client) doList(method, path string, body any) (int, []map[string]any, h
 	json.NewDecoder(resp.Body).Decode(&out)
 	return resp.StatusCode, out, resp.Header
 }
+
+func bulkJobDone(t *testing.T, e *testutil.Env, c *client, id string, step int) map[string]any {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		if n, err := e.Svc.ProcessBulk(testutil.Ctx(), step); err != nil {
+			t.Fatal(err)
+		} else if n == 0 {
+			break
+		}
+	}
+	_, out, _ := c.do("GET", "/api/v1/bulk/"+id, nil)
+	return out
+}
+
+// UX-BULK-ALL, BULK-02 (later part): "Select all N matching" runs the bar's actions on every issue a query matches, past the page of 100,
+// as a job in the person's own scope: a field change, a transition and an archive; an issue that cannot take it fails with its reason and
+// the rest go on; the page limit of the interactive endpoint is unchanged.
+func TestUXBULKALL_SelectAllMatchingAsJob(t *testing.T) {
+	e, alice, bob, _ := setup(t)
+	ctx := testutil.Ctx()
+	var keys []string
+	for i := 0; i < 130; i++ {
+		_, out, _ := alice.do("POST", "/api/v1/issues", map[string]any{"project": "ABC", "type": "Task", "summary": fmt.Sprint("all ", i), "labels": []string{"sel"}})
+		keys = append(keys, out["key"].(string))
+	}
+	// one is already Done, so the transition cannot be taken there
+	done := keys[5]
+	if _, err := e.Svc.Transition(ctx, e.Alice, done, transitionOf(t, e, done, "Resolve"), nil); err != nil {
+		t.Fatal(err)
+	}
+	// the interactive endpoint still refuses more than a page
+	if code, out, _ := alice.do("POST", "/api/v1/bulk", map[string]any{"query": "labels = sel", "op": "fields", "priority": "high"}); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "more than 100") {
+		t.Fatalf("the page cap: %d %v", code, out)
+	}
+	// fields over the whole match, as a job: 130 issues, two worker rounds of 100
+	code, out, _ := alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = sel", "do": map[string]any{"kind": "fields", "priority": "highest", "labels_add": []string{"all"}}})
+	if code != 202 || out["total"] != float64(130) || out["op"] != "fields" {
+		t.Fatalf("start: %d %v", code, out)
+	}
+	if v, _ := e.Svc.View(ctx, e.Alice, keys[7]); v.Issue.Priority == "highest" {
+		t.Fatal("the job changed something before a worker took it")
+	}
+	st := bulkJobDone(t, e, alice, fmt.Sprint(int64(out["id"].(float64))), 100)
+	if st["state"] != "done" || st["done"] != float64(130) || st["failed"] != float64(0) {
+		t.Fatalf("fields job: %v", st)
+	}
+	for _, k := range []string{keys[0], keys[7], keys[129]} {
+		if v, _ := e.Svc.View(ctx, e.Alice, k); v.Issue.Priority != "highest" || !strings.Contains(strings.Join(v.Issue.Labels, ","), "all") {
+			t.Fatalf("%s not changed: %v %v", k, v.Issue.Priority, v.Issue.Labels)
+		}
+	}
+	// a transition: the one already Done fails with the reason, the other 129 go on
+	code, out, _ = alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = sel", "do": map[string]any{"kind": "transition", "transition": "Resolve"}})
+	if code != 202 {
+		t.Fatalf("start transition: %d %v", code, out)
+	}
+	st = bulkJobDone(t, e, alice, fmt.Sprint(int64(out["id"].(float64))), 100)
+	errs, _ := st["errors"].([]any)
+	if st["state"] != "done" || st["done"] != float64(129) || st["failed"] != float64(1) || len(errs) != 1 ||
+		errs[0].(map[string]any)["key"] != done || !strings.Contains(fmt.Sprint(errs[0]), "not available") {
+		t.Fatalf("transition job: %v", st)
+	}
+	if statusOfKey(t, e, keys[8]) != "Done" {
+		t.Fatal("not resolved")
+	}
+	// an archive of finished work
+	code, out, _ = alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = sel", "do": map[string]any{"kind": "archive"}})
+	if code != 202 {
+		t.Fatalf("start archive: %d %v", code, out)
+	}
+	st = bulkJobDone(t, e, alice, fmt.Sprint(int64(out["id"].(float64))), 100)
+	if st["state"] != "done" || st["done"] != float64(130) {
+		t.Fatalf("archive job: %v", st)
+	}
+	if v, _ := e.Svc.View(ctx, e.Alice, keys[9]); v.Issue.Archived == nil {
+		t.Fatal("not archived")
+	}
+	// only the owner sees the job
+	if code, _, _ := bob.do("GET", fmt.Sprintf("/api/v1/bulk/%d", int64(out["id"].(float64))), nil); code != 404 {
+		t.Fatalf("another person sees the job: %d", code)
+	}
+	// a wrong query and an empty match are refused before any job exists; so is an action that says nothing
+	if code, out, _ := alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = = =", "do": map[string]any{"kind": "archive"}}); code != 400 || out["error"] == nil {
+		t.Fatalf("bad query: %d %v", code, out)
+	}
+	if code, _, _ := alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = nothing-has-this", "do": map[string]any{"kind": "archive"}}); code != 400 {
+		t.Fatalf("empty match: %d", code)
+	}
+	if code, _, _ := alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = sel", "do": map[string]any{"kind": "fields"}}); code != 400 {
+		t.Fatalf("nothing to change: %d", code)
+	}
+	if code, _, _ := alice.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = sel", "do": map[string]any{"kind": "purge"}}); code != 400 {
+		t.Fatalf("unknown kind: %d", code)
+	}
+	// the query runs in the person's own scope: a person who cannot read the project matches nothing, rather than learning what is there
+	outsider, err := e.Svc.CreateUser(ctx, "scope@example.com", "Scope Less", "password123", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, _ := e.Svc.CreateAPIToken(ctx, outsider.ID, "t")
+	oc := &client{t: t, base: alice.base, token: tok}
+	if code, _, _ := oc.do("POST", "/api/v1/bulk/lifecycle", map[string]any{"query": "labels = sel", "do": map[string]any{"kind": "fields", "priority": "low"}}); code != 400 {
+		t.Fatalf("a person outside the project: %d", code)
+	}
+}

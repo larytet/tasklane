@@ -521,11 +521,21 @@ func (s *Server) Handler() http.Handler {
 		}
 	}))
 	s.handle(mux, "POST /api/v1/bulk/lifecycle", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		var in domain.BulkIn
+		var in struct {
+			domain.BulkIn
+			Syntax string `json:"syntax"` // "text" for the plain search box, as the list sends it
+		}
 		if !s.decode(w, r, &in) {
 			return
 		}
-		j, err := s.Svc.StartBulk(r.Context(), actorOf(r), in)
+		if strings.TrimSpace(in.Query) != "" { // "Select all N matching": the issues the person's own list shows, in their own scope
+			keys, ok := s.matchingKeys(w, r, in.Query, in.Syntax)
+			if !ok {
+				return
+			}
+			in.Keys, in.Query = append(in.Keys, keys...), ""
+		}
+		j, err := s.Svc.StartBulk(r.Context(), actorOf(r), in.BulkIn)
 		s.replyStatus(w, 202, j, err)
 	}))
 	s.handle(mux, "GET /api/v1/bulk/{id}", s.auth(func(w http.ResponseWriter, r *http.Request) {

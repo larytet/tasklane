@@ -438,6 +438,7 @@
           S.sel = new Set(); S.cur = -1; S.lastPick = -1; // a new page starts with nothing selected and no current row (LIST-05)
           if (EXT.onSelect) EXT.onSelect();
         }
+        S.match = { total: r.data.total, capped: !!r.data.total_capped, q: S.q, syntax: S.syntax, rows: (append && S.match ? S.match.rows : 0) + r.data.issues.length }; // what "Select all N matching" would act on (UX-BULK-ALL)
         const first = append ? 1 : n * size + 1, to = n * size + r.data.issues.length;
         meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues' + (pages > 1 && r.data.issues.length ? ' · ' + first + '–' + to : '');
         if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
@@ -476,6 +477,7 @@
       S.cleanup = () => { io.disconnect(); EXT.nextPage = EXT.prevPage = null; if (prevCleanup) prevCleanup(); S.cleanup = null; };
     }
     await load(Math.max(0, (startPage || 1) - 1));
+    if (EXT.afterList) EXT.afterList(); // a background job still running comes back under the bar
   }
 
   // ----- custom fields: one control per field type; get() returns the JSON value to send (null clears, undefined means untouched/empty)

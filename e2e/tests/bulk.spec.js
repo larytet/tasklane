@@ -16,7 +16,7 @@ async function listOf(page, n, word = 'bulk') {
 }
 const bar = page => page.getByRole('toolbar', { name: 'Selected issues' });
 
-test('BULK-01, BULK-02: checkbox, x, shift-click range, the page checkbox and Clear; the count always equals the checked rows; no "select all matching"', async ({ browser }) => {
+test('BULK-01, BULK-02: checkbox, x, shift-click range, the page checkbox and Clear; the count always equals the checked rows; no "select all matching" when the page holds every match', async ({ browser }) => {
   const { page, ctx } = await newUser(browser, 'jana@example.com');
   const order = await listOf(page, 6);
   await expect(bar(page)).toBeHidden();
@@ -34,7 +34,7 @@ test('BULK-01, BULK-02: checkbox, x, shift-click range, the page checkbox and Cl
   await expect(bar(page)).toContainText('6 selected');
   const checked = await page.locator('[role=list] input.rowsel:checked').count();
   expect(checked).toBe(6);
-  await expect(page.getByText(/select all \d+ matching/i)).toHaveCount(0); // the background job is a later milestone
+  await expect(page.getByText(/select all \d+ matching/i)).toHaveCount(0); // everything that matches is on the page, so there is nothing more to select (UX-BULK-ALL offers it past one page)
   await bar(page).getByRole('button', { name: 'Clear' }).click();
   await expect(bar(page)).toBeHidden();
   await expect(page.locator('[role=list] input.rowsel:checked')).toHaveCount(0);
@@ -161,5 +161,67 @@ test('HOVER-03: on a phone there are no hover actions and a tap opens the row', 
   await page.goBack();
   await expect(page.getByRole('listitem')).toHaveCount(1);
   await expect(page.locator('.hover-acts button')).toHaveCount(0);
+  await ctx.close();
+});
+
+const total = (page, q) => page.evaluate(async q => (await (await fetch('/api/v1/issues?limit=1&syntax=tql&q=' + encodeURIComponent(q), { credentials: 'same-origin' })).json()).total, q);
+for (const theme of ['dark', 'light']) {
+  test(`UX-BULK-ALL: "Select all N matching" past one page runs the action as a job with progress, in both themes (${theme})`, async ({ browser }) => {
+    const { page, ctx } = await newUser(browser, 'jana@example.com', { viewport: { width: 1280, height: 700 } });
+    await page.addInitScript(t => localStorage.setItem('tl-theme', t), theme);
+    const tag = 'sa' + theme[0] + Date.now(), added = 'added' + theme[0] + Date.now();
+    await page.goto('/');
+    await page.evaluate(async tag => {
+      for (let i = 0; i < 104; i++) await fetch('/api/v1/issues', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' }, body: JSON.stringify({ project: 'ABC', type: 'Task', summary: 'all ' + i, labels: [tag] }) });
+    }, tag);
+    await page.goto('/#/?q=' + encodeURIComponent('labels = ' + tag) + '&syntax=tql');
+    await expect(page.getByRole('listitem')).toHaveCount(100);
+    // nothing selected: no offer; a few rows: no offer; the whole page: the offer with the count
+    await expect(page.getByRole('button', { name: /Select all \d+ matching/ })).toHaveCount(0);
+    await page.getByLabel('Select all on this page').check();
+    await expect(bar(page)).toContainText('100 selected');
+    const all = bar(page).getByRole('button', { name: 'Select all 104 matching' });
+    await expect(all).toBeVisible();
+    // taking one row off withdraws the offer, and putting it back brings it again
+    const first = (await page.locator('[role=list] > .row[data-key]').first().getAttribute('data-key'));
+    await page.getByLabel('Select ' + first).uncheck();
+    await expect(all).toBeHidden();
+    await page.getByLabel('Select ' + first).check();
+    await all.click();
+    await expect(bar(page)).toContainText('All 104 matching selected');
+    await new AxeBuilder({ page }).include('.bulkbar').analyze().then(r => expect(r.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]));
+    await bar(page).getByRole('button', { name: 'Label' }).click();
+    await page.getByLabel('Label', { exact: true }).fill(added);
+    await page.getByRole('button', { name: 'Add' }).click();
+    // confirmed first: it names the count and says there is no Undo
+    const confirm = page.getByRole('dialog').filter({ hasText: 'Apply to all 104 matching issues?' });
+    await expect(confirm).toContainText('no Undo');
+    await new AxeBuilder({ page }).include('[role=dialog]').analyze().then(r => expect(r.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]));
+    await confirm.getByRole('button', { name: 'Apply to all 104' }).click();
+    const panel = page.getByRole('group', { name: 'Background job' });
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText(/Finished: 104 of 104 issues changed/, { timeout: 60000 });
+    await new AxeBuilder({ page }).include('.jobpanel').analyze().then(r => expect(r.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]));
+    expect(await total(page, 'labels = ' + added)).toBe(104); // all of them, not only the page that was shown
+    await ctx.close();
+  });
+}
+
+test('UX-BULK-ALL: issues that cannot take the change are skipped and listed with the reason', async ({ browser }) => {
+  const { page, ctx } = await newUser(browser, 'jana@example.com', { viewport: { width: 1280, height: 700 } });
+  const tag = 'sf' + Date.now();
+  await page.goto('/');
+  await page.evaluate(async tag => {
+    for (let i = 0; i < 102; i++) await fetch('/api/v1/issues', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' }, body: JSON.stringify({ project: 'ABC', type: 'Task', summary: 'f ' + i, labels: [tag] }) });
+  }, tag);
+  await page.goto('/#/?q=' + encodeURIComponent('labels = ' + tag) + '&syntax=tql');
+  await expect(page.getByRole('listitem')).toHaveCount(100);
+  await page.getByLabel('Select all on this page').check();
+  await bar(page).getByRole('button', { name: /Select all 102 matching/ }).click();
+  await bar(page).getByRole('button', { name: 'Archive' }).click();
+  await page.getByRole('button', { name: 'Apply to all 102' }).click();
+  const panel = page.getByRole('group', { name: 'Background job' });
+  await expect(panel).toContainText(/Finished: 0 of 102 issues changed, 102 skipped/, { timeout: 60000 }); // only finished work is archived
+  await expect(panel.getByRole('listitem').first()).toContainText('only finished work is archived');
   await ctx.close();
 });

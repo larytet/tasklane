@@ -285,3 +285,6 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--raised);border:1px s
 .react-menu[hidden]{display:none}.react-menu .btn{min-height:32px;min-width:32px;padding:0 4px}
 /* an onboarding hint: beside what it is about, never over a dialog, never taking focus */
 .hint{position:fixed;z-index:15;max-width:320px;display:flex;gap:8px;align-items:center;background:var(--accent-bg);color:var(--text);border:1px solid var(--accent);border-radius:var(--r);padding:8px 10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+.jobpanel{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;margin:0 0 8px}
+.jobpanel progress{flex:1;min-width:120px;max-width:320px}
+.jobpanel>div{flex-basis:100%}

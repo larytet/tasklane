@@ -18,10 +18,15 @@ var errBulkItemTaken = errors.New("bulk item already finished")
 // item in flight. Items that fail are marked failed with the reason and the job goes on; a pause on a project makes the worker stop where it
 // is and take the job up again after the pause.
 
+// MaxBulkJobItems is the most issues one job takes.
+const MaxBulkJobItems = 50000
+
 const (
-	maxBulkItems  = 50000
+	maxBulkItems  = MaxBulkJobItems
 	bulkLeaseFor  = time.Minute
 	bulkOpAllowed = "delete restore clone move convert"
+	// the actions of the bulk bar that "Select all N matching" runs as a job (UX-BULK-ALL); delete and move are lifecycle operations above
+	bulkDoAllowed = "fields transition archive"
 )
 
 // BulkIn is what the caller asks for: the operation (with its options, as for one issue) and the issues, as keys or as a TQL query.
@@ -29,6 +34,29 @@ type BulkIn struct {
 	Keys  []string    `json:"keys"`
 	Query string      `json:"query"`
 	Op    LifecycleIn `json:"op"`
+	// Do is a field change, a transition or an archive instead of a lifecycle operation: the same actions, and the same rules, as the bulk bar
+	// applies to one page (PlanBulk). Given, Op is ignored.
+	Do *BulkDo `json:"do,omitempty"`
+}
+
+// BulkDo is one bulk-bar action as the job stores it: what to change, by value, so any node can carry it out as the person who started the job.
+type BulkDo struct {
+	Kind         string   `json:"kind"` // fields, transition or archive
+	Priority     string   `json:"priority,omitempty"`
+	LabelsAdd    []string `json:"labels_add,omitempty"`
+	LabelsRemove []string `json:"labels_remove,omitempty"`
+	Assignee     *string  `json:"assignee,omitempty"` // a person's id, "me", or "" for nobody
+	Transition   string   `json:"transition,omitempty"`
+}
+
+// op turns the stored action into the bulk operation PlanBulk plans; the assignee is resolved per issue as the actor.
+func (d BulkDo) op(s *Service, a Actor) BulkOp {
+	o := BulkOp{Kind: d.Kind, Priority: d.Priority, LabelsAdd: d.LabelsAdd, LabelsRemove: d.LabelsRemove, Transition: d.Transition}
+	if d.Assignee != nil {
+		o.SetAssignee = true
+		o.ResolveAssignee = s.BulkAssignee(a, strings.TrimSpace(*d.Assignee))
+	}
+	return o
 }
 
 // BulkJob is a job and how far it has got.
@@ -61,8 +89,23 @@ type bulkMark struct {
 // StartBulk records the job. Nothing is done to any issue yet; a worker does that.
 func (s *Service) StartBulk(ctx context.Context, a Actor, in BulkIn) (BulkJob, error) {
 	op := strings.ToLower(in.Op.Op)
-	if !strings.Contains(" "+bulkOpAllowed+" ", " "+op+" ") {
-		return BulkJob{}, invalid("a bulk job can delete, restore, clone, move or convert (purge stays one issue at a time)")
+	var params []byte
+	if in.Do != nil {
+		op = strings.ToLower(in.Do.Kind)
+		if !strings.Contains(" "+bulkDoAllowed+" ", " "+op+" ") {
+			return BulkJob{}, invalid("a bulk job changes fields, transitions or archives (delete and move are operations)")
+		}
+		in.Do.Kind = op
+		if err := CheckBulkOp(in.Do.op(s, a)); err != nil {
+			return BulkJob{}, err
+		}
+		params = jsonMarshal(in.Do)
+	} else {
+		if !strings.Contains(" "+bulkOpAllowed+" ", " "+op+" ") {
+			return BulkJob{}, invalid("a bulk job can delete, restore, clone, move or convert (purge stays one issue at a time)")
+		}
+		in.Op.DryRun = false
+		params = jsonMarshal(in.Op)
 	}
 	keys := in.Keys
 	if in.Query != "" {
@@ -101,10 +144,9 @@ func (s *Service) StartBulk(ctx context.Context, a Actor, in BulkIn) (BulkJob, e
 	if len(unknown) > 0 {
 		return BulkJob{}, invalid("not found: %s", strings.Join(unknown, ", "))
 	}
-	in.Op.DryRun = false
 	var id int64
 	err := s.tx(ctx, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `INSERT INTO bulk_job(op,params,created_by,total) VALUES($1,$2,$3,$4) RETURNING id`, op, jsonMarshal(in.Op), nilIfEmpty(a.ID), len(uniq)).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO bulk_job(op,params,created_by,total) VALUES($1,$2,$3,$4) RETURNING id`, op, params, nilIfEmpty(a.ID), len(uniq)).Scan(&id); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO bulk_job_item(job_id,idx,key) SELECT $1, ord-1, k FROM unnest($2::text[]) WITH ORDINALITY AS t(k,ord)`, id, uniq)
@@ -169,7 +211,13 @@ func (s *Service) ProcessBulk(ctx context.Context, limit int) (int, error) {
 		return 0, nil // nothing to do
 	}
 	var base LifecycleIn
-	jsonUnmarshal(params, &base)
+	var do BulkDo
+	isDo := strings.Contains(" "+bulkDoAllowed+" ", " "+op+" ")
+	if isDo {
+		jsonUnmarshal(params, &do)
+	} else {
+		jsonUnmarshal(params, &base)
+	}
 	var a Actor
 	if by != nil {
 		a, _ = s.actorFor(ctx, *by)
@@ -191,9 +239,16 @@ func (s *Service) ProcessBulk(ctx context.Context, limit int) (int, error) {
 		if state != "running" {
 			return done, nil // cancelled
 		}
-		in := base
-		in.bulk = &bulkMark{job: id, idx: idx}
-		_, err := s.Lifecycle(ctx, a, key, in)
+		var err error
+		if isDo {
+			if err = s.bulkDoItem(ctx, a, key, do); err == nil {
+				s.DB.Exec(ctx, `UPDATE bulk_job_item SET state='done',result_key=$3,done_at=$4 WHERE job_id=$1 AND idx=$2 AND state='pending'`, id, idx, key, s.Now())
+			}
+		} else {
+			in := base
+			in.bulk = &bulkMark{job: id, idx: idx}
+			_, err = s.Lifecycle(ctx, a, key, in)
+		}
 		var paused *ErrPaused
 		switch {
 		case errors.As(err, &paused) || ctx.Err() != nil:
@@ -202,7 +257,7 @@ func (s *Service) ProcessBulk(ctx context.Context, limit int) (int, error) {
 		case errors.Is(err, errBulkItemTaken):
 			continue
 		case err != nil:
-			msg := err.Error()
+			msg := BulkReason(err)
 			var bl *BlockedError
 			if errors.As(err, &bl) && len(bl.Plan.Blockers) > 0 {
 				msg = strings.Join(bl.Plan.Blockers, "; ")
@@ -239,4 +294,62 @@ func (s *Service) RunBulk(ctx context.Context, logf func(string, ...any)) {
 		case <-t.C:
 		}
 	}
+}
+
+// bulkDoItem plans and applies one bulk-bar action to one issue, as the person who started the job. An issue that already has what was asked
+// is done; one that cannot take it fails with the reason. The mark "done" is written after the change (the lease keeps one worker on a job);
+// a node that dies between the two leaves the item pending, and the next worker finds the change made: a field change or an archive is then
+// "nothing to change", a transition is refused as no longer available and the item is reported failed with that reason, never done twice.
+func (s *Service) bulkDoItem(ctx context.Context, a Actor, key string, do BulkDo) error {
+	items, err := s.PlanBulk(ctx, a, []string{key}, do.op(s, a))
+	if err != nil {
+		return err
+	}
+	it := items[0]
+	if it.Err != "" {
+		return &InvalidError{Msg: it.Err}
+	}
+	if it.Unchanged || it.Apply == nil {
+		return nil
+	}
+	return it.Apply(ctx)
+}
+
+// BulkAssignee resolves "me", "" (nobody) or a person's id for an issue; the person must be able to work in the issue's project.
+func (s *Service) BulkAssignee(a Actor, who string) func(ctx context.Context, key string) (string, error) {
+	return func(ctx context.Context, key string) (string, error) {
+		switch who {
+		case "":
+			return "", nil
+		case "me":
+			who = a.ID
+		}
+		var ok bool
+		s.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM app_user u JOIN effective_member m ON m.user_id=u.id JOIN issue i ON i.project_id=m.project_id
+			WHERE i.key=$1 AND u.id::text=$2 AND u.active)`, key, who).Scan(&ok)
+		if !ok {
+			return "", &InvalidError{Msg: "that person cannot be assigned here: not a member of this project"}
+		}
+		return who, nil
+	}
+}
+
+// BulkReason says in a person's words why one issue of a bulk action was not changed.
+func BulkReason(err error) string {
+	var vc *VersionConflict
+	var inv *InvalidError
+	var rom *ReadOnlyMirror
+	switch {
+	case errors.As(err, &vc):
+		return "changed by someone else since it was planned; nothing was changed on it"
+	case errors.As(err, &inv):
+		return inv.Msg
+	case errors.As(err, &rom):
+		return rom.Error()
+	case err == ErrForbidden:
+		return "forbidden: you may not change this issue"
+	case err == ErrNotFound:
+		return "not found, or you do not have access"
+	}
+	return err.Error()
 }

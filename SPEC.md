@@ -92,8 +92,12 @@ The ticket view is a conversation: the issue is the thread, the description and 
   the page and then offers "Select all N matching". A sticky bulk bar shows the count and the actions assign, transition,
   label, move, archive and delete. Every bulk action is planned first (dry run, the same rules as MCP bulk tools, section
   18.3); the plan is shown only when some issues would fail or lose data, otherwise it applies and offers Undo
-  (section 4.6). Failures are reported per issue. A selection of up to one page (100 issues) runs at once. "Select all N
-  matching" comes in a later milestone as a resumable background job (section 9.1); until then it is not offered.
+  (section 4.6). Failures are reported per issue. A selection of up to one page (100 issues) runs at once. When the whole
+  page is selected and more issues match the query, the bar offers "Select all N matching": the same actions then run as a
+  resumable background job (section 9.1) over every issue the person's own search matches, in their own scope, up to 50,000.
+  It is confirmed first (the count, and that a job has no Undo); a panel under the bar shows progress and the estimated end,
+  offers Cancel, lists the issues skipped with the reason, and comes back after a reload while the job is open. Any change
+  of the selection or a new page withdraws "all matching".
 - Column chooser and sort: a person picks which columns show (built-in and custom fields; key and summary always) and their
   order, and the sort column and direction. Saved in the person's settings (section 4.6). Restricted or trashed fields
   drop out of the list for people who cannot see them.
@@ -1558,7 +1562,7 @@ per-user locale and timezone, date and number formats.
 - Search engine: resolved in section 10.1. PostgreSQL by default, OpenSearch (an extra service and a second, lagging copy)
   for large instances; the PostgreSQL limit is set at 100,000 issues per instance and verified by PERF-16.
 - Working fast (section 4.6): resolved. Undo of a transition always returns to the previous status, bypassing the
-  workflow; desktop lists use a sticky pager; the first bulk bar acts on up to one page, "select all matching" with
-  background jobs follows later; reactions use a fixed set of eight emoji.
+  workflow; desktop lists use a sticky pager; the first bulk bar acts on up to one page, "select all matching" runs as
+  a background job (built, M5.74); reactions use a fixed set of eight emoji.
 - Jira write-back (the outbound half of the mirror): when to build it and the conflict and echo policy; design notes are in
   section 18.1. Until then Tasklane never writes to Jira.

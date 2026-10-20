@@ -12,6 +12,7 @@ import (
 
 	"github.com/larytet/tasklane/internal/domain"
 	"github.com/larytet/tasklane/internal/search"
+	"github.com/larytet/tasklane/internal/search/tql"
 )
 
 // The bulk bar (SPEC 4.1): one action on up to one page of issues (100), with the planning and applying the MCP bulk tools use
@@ -201,40 +202,36 @@ func (s *Server) bulk(w http.ResponseWriter, r *http.Request) {
 	s.json(w, 200, res)
 }
 
-// bulkAssignee resolves "me", "" (nobody) or a person's id; the person must be able to work in the issue's project.
-func (s *Server) bulkAssignee(a domain.Actor, who string) func(ctx context.Context, key string) (string, error) {
-	return func(ctx context.Context, key string) (string, error) {
-		switch who {
-		case "":
-			return "", nil
-		case "me":
-			who = a.ID
-		}
-		var ok bool
-		s.Svc.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM app_user u JOIN effective_member m ON m.user_id=u.id JOIN issue i ON i.project_id=m.project_id
-			WHERE i.key=$1 AND u.id::text=$2 AND u.active)`, key, who).Scan(&ok)
-		if !ok {
-			return "", &domain.InvalidError{Msg: "that person cannot be assigned here: not a member of this project"}
-		}
-		return who, nil
+// matchingKeys runs the list's query as the person (their scope, so never an issue they cannot read) and returns every key it matches, up
+// to the job limit. It answers the request itself and returns false when the query is wrong or too wide.
+func (s *Server) matchingKeys(w http.ResponseWriter, r *http.Request, q, syntax string) ([]string, bool) {
+	sc, err := s.scope(r)
+	if err != nil {
+		s.reply(w, nil, err)
+		return nil, false
 	}
+	if syntax == "text" {
+		if q, err = tql.FromText(q); err != nil {
+			te, _ := search.IsQueryError(err)
+			s.fail(w, 400, "tql_error", te.Msg, map[string]any{"pos": te.Pos})
+			return nil, false
+		}
+	}
+	keys, err := s.Search.Keys(r.Context(), sc, q, domain.MaxBulkJobItems+1)
+	if te, ok := search.IsQueryError(err); ok {
+		s.fail(w, 400, "tql_error", te.Msg, map[string]any{"pos": te.Pos})
+		return nil, false
+	}
+	if err != nil {
+		s.reply(w, nil, err)
+		return nil, false
+	}
+	return keys, true
 }
 
-func bulkReason(err error) string {
-	var vc *domain.VersionConflict
-	var inv *domain.InvalidError
-	var rom *domain.ReadOnlyMirror
-	switch {
-	case asErr(err, &vc):
-		return "changed by someone else since it was planned; nothing was changed on it"
-	case asErr(err, &inv):
-		return inv.Msg
-	case asErr(err, &rom):
-		return rom.Error()
-	case err == domain.ErrForbidden:
-		return "forbidden: you may not change this issue"
-	case err == domain.ErrNotFound:
-		return "not found, or you do not have access"
-	}
-	return err.Error()
+// bulkAssignee resolves "me", "" (nobody) or a person's id; the person must be able to work in the issue's project.
+func (s *Server) bulkAssignee(a domain.Actor, who string) func(ctx context.Context, key string) (string, error) {
+	return s.Svc.BulkAssignee(a, who)
 }
+
+func bulkReason(err error) string { return domain.BulkReason(err) }
