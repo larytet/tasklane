@@ -1,7 +1,7 @@
 # tasklane
 
-An open source issue and project tracker with a Jira-like UI, written in Go: a **drop-in replacement for Jira** that you
-run yourself, for one team or for many.
+An open source issue and project tracker built for feature parity with Jira, written in Go: a **drop-in replacement for
+Jira** that you run yourself, for one team or for many.
 
 Tasklane gives teams the parts of Jira they actually use - boards, backlogs, weekly sprints, rich ticket views,
 custom fields, workflows - without the weight, and with the enterprise basics (SSO, audit, permissions) built in.
