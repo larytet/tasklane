@@ -15,6 +15,8 @@
     REG.push(def);
   }
   A.shortcuts = REG;
+  // the row hover actions and the bulk bar use the same actions and the same chooser
+  A.issueActions = { done: k => closeOrResolve(k), assign: k => assign(k) };
   A.registerShortcut = register;
 
   const screen = () => {
@@ -92,9 +94,11 @@
     return close;
   }
 
+  A.picker = (title, items, opts) => picker(title, items, opts);
+
   // ----- e: close or resolve (the transition into the done category; a choice when there are several)
-  async function closeOrResolve() {
-    const key = targetKey();
+  async function closeOrResolve(forKey) {
+    const key = typeof forKey === 'string' ? forKey : targetKey();
     if (!key) return;
     const v = await viewOf(key);
     if (!v) { toast('That issue could not be loaded.'); return; }
@@ -111,8 +115,8 @@
   }
 
   // ----- a: assign (me first, then Unassigned, then people)
-  async function assign() {
-    const key = targetKey();
+  async function assign(forKey) {
+    const key = typeof forKey === 'string' ? forKey : targetKey();
     if (!key) return;
     const v = await viewOf(key);
     if (!v) { toast('That issue could not be loaded.'); return; }

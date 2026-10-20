@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { pageErrors, newUser, createIssue, tqlBox } from './helpers.js';
+import { pageErrors, newUser, createIssue, tqlBox, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 async function openActions(page, item) {
   await page.getByRole('button', { name: /Actions/ }).click();

@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -19,16 +18,6 @@ import (
 const maxBulk = 50
 
 var bulkPriorities = map[string]bool{"lowest": true, "low": true, "medium": true, "high": true, "highest": true}
-
-type bulkItem struct {
-	Key       string
-	OK        bool
-	Unchanged bool
-	Err       string
-	Changes   []map[string]any
-	Version   int64
-	apply     func(ctx context.Context) error
-}
 
 func (s *Server) bulkTargets(ctx context.Context, a domain.Actor, args map[string]any) ([]string, error) {
 	var keys []string
@@ -67,10 +56,12 @@ func (s *Server) bulkTargets(ctx context.Context, a domain.Actor, args map[strin
 	return ks, nil
 }
 
-func canEditRole(role string) bool { return role == "member" || role == "admin" }
-
-// bulkRun plans every target, and applies the plan when dry is false.
-func (s *Server) bulkRun(ctx context.Context, a domain.Actor, args map[string]any, dry bool, plan func(v domain.IssueView) bulkItem) (toolResult, error) {
+// bulkRun plans every target with the shared bulk code (domain.PlanBulk), and applies the plan when dry is false within the
+// agent's write budget.
+func (s *Server) bulkRun(ctx context.Context, a domain.Actor, args map[string]any, dry bool, op domain.BulkOp) (toolResult, error) {
+	if err := domain.CheckBulkOp(op); err != nil {
+		return toolResult{}, err
+	}
 	keys, err := s.bulkTargets(ctx, a, args)
 	if err != nil {
 		return toolResult{}, err
@@ -78,20 +69,14 @@ func (s *Server) bulkRun(ctx context.Context, a domain.Actor, args map[string]an
 	if len(keys) == 0 {
 		return toolResult{Data: map[string]any{"dry_run": dry, "items": []any{}, "summary": map[string]any{"issues": 0}}}, nil
 	}
-	items := make([]bulkItem, 0, len(keys))
-	for _, k := range keys {
-		v, err := s.Svc.View(ctx, a, k)
-		if err != nil {
-			items = append(items, bulkItem{Key: k, Err: errorText(err)})
-			continue
+	items, err := s.Svc.PlanBulk(ctx, a, keys, op)
+	if err != nil {
+		return toolResult{}, err
+	}
+	for i := range items {
+		if items[i].Err == "forbidden: you may not change this issue" {
+			items[i].Err = "forbidden: your identity may not change this issue"
 		}
-		it := plan(v)
-		it.Key, it.Version = v.Issue.Key, v.Issue.Version
-		if it.Err == "" && !canEditRole(v.Role) {
-			it.Err = "forbidden: your identity may not change this issue"
-			it.OK = false
-		}
-		items = append(items, it)
 	}
 	writes := 0
 	for _, it := range items {
@@ -104,18 +89,7 @@ func (s *Server) bulkRun(ctx context.Context, a domain.Actor, args map[string]an
 		if ok, wait := s.allowWriteN(a.ID, writes); !ok {
 			return toolResult{}, &domain.InvalidError{Msg: fmt.Sprintf("the write budget cannot cover %d changes; retry in %d min or change fewer issues", writes, int(wait.Minutes())+1)}
 		}
-		for i := range items {
-			it := &items[i]
-			if !it.OK || it.Unchanged {
-				continue
-			}
-			if err := it.apply(ctx); err != nil {
-				it.OK, it.Err = false, errorText(err)
-				failed++
-				continue
-			}
-			applied++
-		}
+		applied, failed = domain.ApplyBulk(ctx, items, errorText)
 	}
 	out := make([]any, 0, len(items))
 	errs, unchanged := 0, 0
@@ -168,75 +142,15 @@ func (s *Server) registerBulk() {
 				return out
 			}
 			add, rem := list("labels_add"), list("labels_remove")
-			_, hasAssignee := args["assignee"].(string)
+			who, hasAssignee := args["assignee"].(string)
 			if prio == "" && len(add) == 0 && len(rem) == 0 && !hasAssignee {
 				return toolResult{}, &domain.InvalidError{Msg: "say what to change: priority, labels_add, labels_remove or assignee"}
 			}
-			dry := boolArg(args, "dry_run", true)
-			return s.bulkRun(ctx, a, args, dry, func(v domain.IssueView) bulkItem {
-				it := bulkItem{OK: true}
-				var ch domain.Changes
-				if prio != "" && prio != v.Issue.Priority {
-					ch.Priority = &prio
-					it.Changes = append(it.Changes, map[string]any{"field": "priority", "before": v.Issue.Priority, "after": prio})
-				}
-				if len(add)+len(rem) > 0 {
-					set := map[string]bool{}
-					for _, l := range v.Issue.Labels {
-						set[l] = true
-					}
-					for _, l := range add {
-						set[l] = true
-					}
-					for _, l := range rem {
-						delete(set, l)
-					}
-					next := make([]string, 0, len(set))
-					for l := range set {
-						next = append(next, l)
-					}
-					sort.Strings(next)
-					cur := append([]string{}, v.Issue.Labels...)
-					sort.Strings(cur)
-					if strings.Join(next, "\x00") != strings.Join(cur, "\x00") {
-						ch.Labels = &next
-						it.Changes = append(it.Changes, map[string]any{"field": "labels", "before": cur, "after": next})
-					}
-				}
-				if hasAssignee {
-					id, err := s.resolveAssignee(ctx, a, v.Issue.Key, strings.TrimSpace(str(args, "assignee")))
-					if err != nil {
-						it.OK, it.Err = false, errorText(err)
-						return it
-					}
-					before, after := "", ""
-					if v.Issue.Assignee != nil {
-						before = v.Issue.Assignee.Name
-					}
-					cur := ""
-					if v.Issue.Assignee != nil {
-						cur = v.Issue.Assignee.ID
-					}
-					if id != cur {
-						if id != "" {
-							s.Svc.DB.QueryRow(ctx, `SELECT name FROM app_user WHERE id::text=$1`, id).Scan(&after)
-						}
-						ch.Assignee = &id
-						it.Changes = append(it.Changes, map[string]any{"field": "assignee", "before": before, "after": after})
-					}
-				}
-				if len(it.Changes) == 0 {
-					it.Unchanged = true
-					return it
-				}
-				ver := v.Issue.Version
-				key := v.Issue.Key
-				it.apply = func(ctx context.Context) error {
-					_, err := s.Svc.UpdateFields(ctx, a, key, &ver, false, ch)
-					return err
-				}
-				return it
-			})
+			op := domain.BulkOp{Kind: "fields", Priority: prio, LabelsAdd: add, LabelsRemove: rem, SetAssignee: hasAssignee,
+				ResolveAssignee: func(ctx context.Context, key string) (string, error) {
+					return s.resolveAssignee(ctx, a, key, strings.TrimSpace(who))
+				}}
+			return s.bulkRun(ctx, a, args, boolArg(args, "dry_run", true), op)
 		}})
 	s.add(&Tool{Name: "bulk_transition", Description: "Move many issues along the same workflow transition (by name). A dry run (the default) shows which issues can take it and which cannot, and why; a real run does the ones that can. Transitions that need a person are refused for agents.", Scope: "transition", Write: true, DryRun: true,
 		Props: append(append([]Prop{}, target...), Prop{"transition", "string", "Transition name", true, nil}),
@@ -244,37 +158,7 @@ func (s *Server) registerBulk() {
 			if err := need(args, "transition"); err != nil {
 				return toolResult{}, err
 			}
-			name := str(args, "transition")
-			dry := boolArg(args, "dry_run", true)
-			return s.bulkRun(ctx, a, args, dry, func(v domain.IssueView) bulkItem {
-				it := bulkItem{OK: true}
-				var tid, to string
-				var human bool
-				var names []string
-				if merr := s.Svc.MirrorRefusal(ctx, v.Issue.Project); merr != nil {
-					it.OK, it.Err = false, merr.Error() // the reason, not a list of transitions that is empty because of it
-					return it
-				}
-				for _, t := range v.Transitions {
-					names = append(names, t.Name)
-					if strings.EqualFold(t.Name, name) {
-						tid, to, human = t.ID, t.To, t.RequiresHuman
-					}
-				}
-				switch {
-				case tid == "":
-					it.OK, it.Err = false, fmt.Sprintf("%q is not available from status %q; available: %s", name, v.Issue.Status, strings.Join(names, ", "))
-				case human && a.Kind == "agent":
-					it.OK, it.Err = false, fmt.Sprintf("%q needs a person: agents cannot take this transition", to)
-				default:
-					it.Changes = []map[string]any{{"field": "status", "before": v.Issue.Status, "after": to}}
-					ver, key := v.Issue.Version, v.Issue.Key
-					it.apply = func(ctx context.Context) error {
-						_, err := s.Svc.Transition(ctx, a, key, tid, &ver)
-						return err
-					}
-				}
-				return it
-			})
+			op := domain.BulkOp{Kind: "transition", Transition: str(args, "transition")}
+			return s.bulkRun(ctx, a, args, boolArg(args, "dry_run", true), op)
 		}})
 }

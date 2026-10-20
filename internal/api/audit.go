@@ -24,6 +24,8 @@ var ordinaryWork = map[string]bool{
 	"POST /api/v1/issues": true, "PATCH /api/v1/issues/{key}": true, "POST /api/v1/issues/{key}/comments": true, "PATCH /api/v1/issues/{key}/comments/{id}": true,
 	"POST /api/v1/issues/{key}/transitions": true, "POST /api/v1/issues/{key}/links": true, "POST /api/v1/issues/{key}/archive": true, "DELETE /api/v1/issues/{key}/archive": true,
 	"POST /api/v1/issues/{key}/lifecycle": true, // audited by the domain
+	"POST /api/v1/bulk":                   true, // each issue's change is the ordinary single-issue change, audited as such
+	"POST /api/v1/bulk/transitions":       true, // a read
 	"POST /api/v1/undo/{token}":           true, // a person's own undo, audited by the domain as issue.undo
 	"PUT /api/v1/issues/{key}/versions":   true, // an edit of the issue, with its own history
 	"POST /api/v1/issues/{key}/presence":  true, "DELETE /api/v1/issues/{key}/presence": true,

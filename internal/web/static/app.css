@@ -247,3 +247,14 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--raised);border:1px s
 .palette input[type=text]{width:100%;font-size:16px;min-height:40px}
 .palette .pick{margin-top:8px}.pal-kind{display:inline-block;min-width:64px;font-size:11px;color:var(--subtle);text-transform:uppercase;letter-spacing:.04em}
 .pick li.on .pal-kind{color:var(--text)}.pal-hint{float:right}
+/* selection and the bulk bar */
+.listsel{display:flex;gap:10px;align-items:center;padding-left:12px}
+.bulkbar{position:sticky;top:52px;z-index:4;display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--r);padding:6px 10px;margin:0 0 8px}
+.bulkbar[hidden]{display:none}
+.planlist{max-height:50vh;overflow:auto;padding-left:18px}.planlist li{margin:4px 0}
+.dialog:has(.bulkplan){max-width:720px}
+/* row hover actions: on hover and keyboard focus, never on touch */
+.row .hover-acts{display:none;gap:2px;flex:none}
+.row:hover .hover-acts,.row:focus-within .hover-acts{display:inline-flex}
+.hact{min-width:32px;min-height:32px;padding:2px 6px}
+@media(hover:none){.row .hover-acts{display:none!important}}

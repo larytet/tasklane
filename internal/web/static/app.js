@@ -319,7 +319,18 @@
     const pager = h('div', { class: 'actions', style: 'margin-top:8px' });
     let at = 0; // the page of results on the screen
     const controls = viewControls(true, () => load(at)); // wide or narrow, short or long rows
-    clear($app).append(topbar(), h('div', { class: 'page fluid' }, h('div', { class: 'listbar' }, meta, controls), err, out, pager));
+    // the page's checkbox: all or none of the rows on this page (a bulk action takes one page at most)
+    const all = h('input', { type: 'checkbox', class: 'rowsel', 'aria-label': 'Select all on this page', hidden: true });
+    let cascading = false;
+    all.addEventListener('change', () => {
+      const want = all.checked;
+      cascading = true; // the rows are changed one by one: the page checkbox keeps its new state until they all are
+      for (const b of out.querySelectorAll('input.rowsel')) if (b.checked !== want) { b.checked = want; b.dispatchEvent(new Event('change')); }
+      cascading = false;
+      syncAll();
+    });
+    const syncAll = () => { if (cascading) return; const n = out.querySelectorAll('input.rowsel').length; all.checked = n > 0 && S.sel.size === n; all.indeterminate = S.sel.size > 0 && S.sel.size < n; };
+    clear($app).append(topbar(), h('div', { class: 'page fluid' }, h('div', { class: 'listbar' }, h('span', { class: 'listsel' }, all, meta), controls), err, out, pager));
     const size = 100;
     const load = async n => {
       at = n;
@@ -335,17 +346,28 @@
       meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues' + (pages > 1 && r.data.issues.length ? ' · ' + from + '–' + to : '');
       if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
       if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
-      S.sel = new Set(); S.cur = -1; // a new page starts with nothing selected and no current row (LIST-05)
+      S.sel = new Set(); S.cur = -1; S.lastPick = -1; // a new page starts with nothing selected and no current row (LIST-05)
+      if (EXT.onSelect) EXT.onSelect();
+      all.hidden = !r.data.issues.length; all.checked = false; all.indeterminate = false;
       for (const i of r.data.issues) {
         const open = () => { location.hash = '#/issue/' + i.key; };
         // the checkbox selects without opening (x does the same on the current row)
-        const pick = h('input', { type: 'checkbox', class: 'rowsel', 'aria-label': 'Select ' + i.key, onclick: e => e.stopPropagation() }); // keys go on to the shortcuts; the row opens only on its own Enter
-        pick.addEventListener('change', () => { if (pick.checked) S.sel.add(i.key); else S.sel.delete(i.key); if (EXT.onSelect) EXT.onSelect(); });
+        const pick = h('input', { type: 'checkbox', class: 'rowsel', 'aria-label': 'Select ' + i.key, onclick: e => {
+          e.stopPropagation(); // keys go on to the shortcuts; the row opens only on its own Enter
+          const boxes = [...out.querySelectorAll('input.rowsel')], at = boxes.indexOf(pick);
+          if (e.shiftKey && S.lastPick >= 0 && S.lastPick !== at) { // shift-click: everything between the last click and this one takes this one's state
+            const [a, b] = [Math.min(S.lastPick, at), Math.max(S.lastPick, at)];
+            for (let k = a; k <= b; k++) if (boxes[k].checked !== pick.checked) { boxes[k].checked = pick.checked; boxes[k].dispatchEvent(new Event('change')); }
+          }
+          S.lastPick = at;
+        } });
+        pick.addEventListener('change', () => { if (pick.checked) S.sel.add(i.key); else S.sel.delete(i.key); syncAll(); if (EXT.onSelect) EXT.onSelect(); });
         out.append(h('div', { class: 'row' + (long ? ' long' : ''), role: 'listitem', tabindex: 0, 'data-key': i.key, onclick: open, onkeydown: e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); } },
           pick, h('span', { class: 'tile ' + i.type, title: i.type }), h('span', { class: 'key' }, i.key), h('span', { class: 'sum' }, i.summary),
           h('span', { class: 'pri ' + i.priority, title: i.priority }, PRI[i.priority] || ''), i.assignee ? avatar(i.assignee) : h('span', { class: 'av' }, '–'),
           lozenge(i.status, i.status_category), h('span', { class: 'muted' }, L.relTime(i.updated)),
-          long ? h('div', { class: 'snip' }, i.snippet || h('span', { class: 'muted' }, 'No description.')) : null));
+          long ? h('div', { class: 'snip' }, i.snippet || h('span', { class: 'muted' }, 'No description.')) : null,
+          h('span', { class: 'hover-acts', 'data-for': i.key })));
       }
       if (pages < 2) return;
       // numbered pages around the current one, with the first and last always reachable

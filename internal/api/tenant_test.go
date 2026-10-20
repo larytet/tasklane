@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"sort"
@@ -143,7 +144,8 @@ func TestSEC09_CrossTenantSweepEveryRouteAsAPersonOfAnotherOrganization(t *testi
 			}
 			if code/100 == 2 {
 				n2xx++
-				sent := fmt.Sprint(p.q.body, string(p.q.raw), p.q.path) // what the probe itself sent may come back
+				js, _ := json.Marshal(p.q.body)                                     // in its JSON form too: a key named in the request, reported back as not found
+				sent := fmt.Sprint(p.q.body, string(p.q.raw), p.q.path, string(js)) // what the probe itself sent may come back
 				for _, m := range orgAMarkers {
 					if strings.Contains(body, m) && !strings.Contains(sent, m) {
 						t.Errorf("%s: %s answered %d with organization A's data (%q):\n    %.300s", who.name, p.pattern, code, m, strings.TrimSpace(body))

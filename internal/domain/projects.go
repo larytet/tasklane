@@ -15,6 +15,7 @@ type Project struct {
 	Type     string `json:"type"`
 	Archived bool   `json:"archived"`
 	Mirrored bool   `json:"mirrored,omitempty"` // mirrored from Jira: read-only here
+	Role     string `json:"role,omitempty"`     // the caller's own role in it, in lists made for them (viewer, member, admin)
 }
 
 // EnsureDefaults creates the standard issue types and workflow template; idempotent.
@@ -159,11 +160,13 @@ func (s *Service) canIn(ctx context.Context, a Actor, projectKey, role, perm str
 }
 
 func (s *Service) ListProjects(ctx context.Context, a Actor) ([]Project, error) {
-	q := `SELECT p.id,p.key,p.name,p.type,p.archived,p.mirror_of IS NOT NULL FROM project p `
+	q := `SELECT p.id,p.key,p.name,p.type,p.archived,p.mirror_of IS NOT NULL,COALESCE(m.role,'') FROM project p `
 	args := []any{}
 	switch {
 	case a.Admin:
-	case a.OrgAdmin: // every project of their organization
+		q = strings.Replace(q, "COALESCE(m.role,'')", "'admin'", 1)
+	case a.OrgAdmin: // every project of their organization, administered by them
+		q = strings.Replace(q, "COALESCE(m.role,'')", "'admin'", 1)
 		q += `WHERE p.org_id::text=$1 `
 		args = append(args, a.OrgID())
 	default:
@@ -178,7 +181,7 @@ func (s *Service) ListProjects(ctx context.Context, a Actor) ([]Project, error) 
 	out := []Project{}
 	for rows.Next() {
 		var p Project
-		rows.Scan(&p.ID, &p.Key, &p.Name, &p.Type, &p.Archived, &p.Mirrored)
+		rows.Scan(&p.ID, &p.Key, &p.Name, &p.Type, &p.Archived, &p.Mirrored, &p.Role)
 		out = append(out, p)
 	}
 	return out, rows.Err()

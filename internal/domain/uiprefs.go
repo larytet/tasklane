@@ -22,7 +22,7 @@ type UIPrefs struct {
 	FontScale     int      `json:"font_scale"`     // percent: 90, 100, 115, 130
 	ReducedMotion string   `json:"reduced_motion"` // system | on | off
 	HighContrast  bool     `json:"high_contrast"`
-	Shortcuts     bool     `json:"shortcuts"` // single-key shortcuts (WCAG 2.2 SC 2.1.4); Ctrl/Cmd chords always work
+	Shortcuts     bool     `json:"shortcuts"`  // single-key shortcuts (WCAG 2.2 SC 2.1.4); Ctrl/Cmd chords always work
 	HintsSeen     []string `json:"hints_seen"` // onboarding hints dismissed: create, views, settings
 }
 

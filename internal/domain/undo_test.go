@@ -96,7 +96,10 @@ func TestUNDO01_05_TransitionArchiveAndDeleteAreUndone(t *testing.T) {
 		t.Fatal("still archived")
 	}
 	// delete to the trash: put back with its key
-	dtok := takeUndo(t, func(c context.Context) error { _, err := e.Svc.Lifecycle(c, e.Alice, key, domain.LifecycleIn{Op: "delete"}); return err })
+	dtok := takeUndo(t, func(c context.Context) error {
+		_, err := e.Svc.Lifecycle(c, e.Alice, key, domain.LifecycleIn{Op: "delete"})
+		return err
+	})
 	if _, err := e.Svc.View(ctx, e.Alice, key); !errors.Is(err, domain.ErrGone) {
 		t.Fatalf("not in the trash: %v", err)
 	}
@@ -215,7 +218,10 @@ func TestUNDO04_AChangeSinceStopsTheUndo(t *testing.T) {
 func TestUNDO09_EventsForTheActionAndItsUndo(t *testing.T) {
 	e := undoable(t)
 	key := e.Issue("events", "").Key
-	tok := takeUndo(t, func(c context.Context) error { _, err := e.Svc.Transition(c, e.Alice, key, transitionID(t, e, "Resolve"), nil); return err })
+	tok := takeUndo(t, func(c context.Context) error {
+		_, err := e.Svc.Transition(c, e.Alice, key, transitionID(t, e, "Resolve"), nil)
+		return err
+	})
 	if _, err := e.Svc.Undo(ctx, e.Alice, tok); err != nil {
 		t.Fatal(err)
 	}

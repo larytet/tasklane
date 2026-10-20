@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { pageErrors, newUser, createIssue, watch } from './helpers.js';
+import { pageErrors, newUser, createIssue, watch, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 async function axe(page, what) {
@@ -95,7 +95,7 @@ test('PAL-02: jump to an issue by key, by an old key after a move, by text; to a
   await open(page);
   await find(page, 'releases');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/#\/releases$/);
+  await expect(page).toHaveURL(/#\/releases(\/[A-Z]+)?$/); // the page opens the first project's releases
   await ctx.close();
 });
 

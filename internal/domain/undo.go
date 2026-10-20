@@ -19,10 +19,28 @@ import (
 
 const UndoWindow = 5 * time.Minute // the toast offers Undo for 5 s (longer while hovered or focused); the token outlives it
 
-// UndoSlot receives the token an action leaves.
+// UndoSlot receives the token an action leaves. A batch slot (WithUndoBatch) gathers the items of many actions, each in its own
+// transaction, for one token written by SaveUndoBatch.
 type UndoSlot struct {
 	Token   string
 	Expires time.Time
+	batch   bool
+	op      string
+	items   []undoItem
+}
+
+// WithUndoBatch is WithUndo for a bulk run: one token undoes every issue the run changed.
+func WithUndoBatch(ctx context.Context) (context.Context, *UndoSlot) {
+	sl := &UndoSlot{batch: true}
+	return context.WithValue(ctx, undoKey{}, sl), sl
+}
+
+// SaveUndoBatch writes the token for what a batch gathered; nothing when it changed nothing undoable.
+func (s *Service) SaveUndoBatch(ctx context.Context, a Actor, sl *UndoSlot) error {
+	if sl == nil || len(sl.items) == 0 || a.ID == "" {
+		return nil
+	}
+	return s.tx(ctx, func(tx pgx.Tx) error { return s.writeUndo(ctx, tx, a, sl.op, sl.items, sl) })
 }
 
 type undoKey struct{}
@@ -39,6 +57,7 @@ type undoItem struct {
 	Version  int64      `json:"version"`             // the issue's version right after the action
 	StatusID string     `json:"status_id,omitempty"` // transition: the status before it
 	Resolved *time.Time `json:"resolved,omitempty"`  // transition: resolved_at before it
+	Acted    *time.Time `json:"acted,omitempty"`     // the database time of this issue's action (a batch has one per issue)
 }
 
 // recordUndo writes the token when the context asks for one. acted is the database's time of the action's transaction.
@@ -47,6 +66,22 @@ func (s *Service) recordUndo(ctx context.Context, tx pgx.Tx, a Actor, op string,
 	if sl == nil || a.ID == "" || len(items) == 0 {
 		return nil
 	}
+	if sl.batch {
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+			return err
+		}
+		for i := range items {
+			items[i].Acted = &now
+		}
+		sl.op = op
+		sl.items = append(sl.items, items...)
+		return nil
+	}
+	return s.writeUndo(ctx, tx, a, op, items, sl)
+}
+
+func (s *Service) writeUndo(ctx context.Context, tx pgx.Tx, a Actor, op string, items []undoItem, sl *UndoSlot) error {
 	raw := make([]byte, 18)
 	rand.Read(raw)
 	tok := "un_" + hex.EncodeToString(raw)
@@ -102,14 +137,20 @@ func (s *Service) Undo(ctx context.Context, a Actor, token string) (UndoResult, 
 	json.Unmarshal(raw, &items)
 	res := UndoResult{Op: op, Undone: []string{}, Conflict: map[string]string{}}
 	for _, it := range items {
-		key, err := s.undoOne(ctx, a, op, it, acted)
+		at := acted
+		if it.Acted != nil {
+			at = *it.Acted
+		}
+		key, err := s.undoOne(ctx, a, op, it, at)
 		var ch *undoConflict
 		switch {
 		case errors.As(err, &ch):
 			res.Conflict[key] = ch.why
-		case err != nil:
+		case err != nil && len(items) == 1:
 			s.releaseUndo(ctx, token, len(items)) // nothing was reverted: the person may try again
 			return res, err
+		case err != nil: // in a batch, one issue that cannot be put back does not stop the others
+			res.Conflict[key] = bulkErrText(err)
 		default:
 			res.Undone = append(res.Undone, key)
 		}

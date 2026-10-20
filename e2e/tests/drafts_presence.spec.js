@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { pageErrors, newUser, createIssue, saveAsApi, login } from './helpers.js';
+import { pageErrors, newUser, createIssue, saveAsApi, login, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 test('LIVE-11: a draft survives a killed tab and is restored with a banner; a changed base opens the conflict dialog', async ({ browser }) => {
   const jana = await newUser(browser, 'jana@example.com');

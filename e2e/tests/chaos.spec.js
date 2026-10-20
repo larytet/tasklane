@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { pageErrors, newUser, createIssue, saveAsApi } from './helpers.js';
+import { pageErrors, newUser, createIssue, saveAsApi, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 // CHAOS-06: the realtime layer is switched off on the server (its ticket endpoint answers 404 "realtime_disabled"). The page asks
 // once and stops asking, editing and saving go through REST, and a save based on an old version still opens the conflict dialog.

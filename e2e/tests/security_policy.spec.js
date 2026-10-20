@@ -11,10 +11,10 @@ const totp = secret => {
   const h = createHmac('sha1', kb).update(ctr).digest(); const o = h[h.length - 1] & 0xf;
   return String(((h[o] & 0x7f) << 24 | h[o + 1] << 16 | h[o + 2] << 8 | h[o + 3]) % 1000000).padStart(6, '0');
 };
-import { pageErrors, watch } from './helpers.js';
+import { pageErrors, watch, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
 const uniq = () => Math.random().toString(36).slice(2, 7);

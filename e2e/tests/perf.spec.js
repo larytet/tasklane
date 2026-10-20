@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { pageErrors, newUser, createIssue } from './helpers.js';
+import { pageErrors, newUser, createIssue, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 // PERF-06: a first visit with an empty cache shows the sign-in form in under a second, on under 200 KB of gzipped JavaScript.
 test('PERF-06: first visit, empty cache: under 1 s and under 200 KB of gzipped script', async ({ browser }) => {

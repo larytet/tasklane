@@ -592,6 +592,12 @@ func rows() []row {
 		{"PUT /api/v1/me/settings", authed, func(f *fixture) req {
 			return J("PUT", "/api/v1/me/settings", map[string]any{"list_view": "long", "page_width": "wide", "snippet_chars": 500})
 		}},
+		{"POST /api/v1/bulk", exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/bulk", map[string]any{"keys": []string{f.issue()}, "op": "fields", "priority": "low"}) // a dry run: who may do what is per issue in the answer
+		}},
+		{"POST /api/v1/bulk/transitions", exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
+			return J("POST", "/api/v1/bulk/transitions", map[string]any{"keys": []string{f.issue()}})
+		}},
 		{"POST /api/v1/undo/{token}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("POST", "/api/v1/undo/un_nothing", nil) }},
 		{"GET /api/v1/me/ui-prefs", authed, func(f *fixture) req { return J("GET", "/api/v1/me/ui-prefs", nil) }},
 		{"PUT /api/v1/me/ui-prefs", authed, func(f *fixture) req { return J("PUT", "/api/v1/me/ui-prefs", map[string]any{"density": "compact"}) }},

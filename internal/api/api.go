@@ -581,6 +581,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerInbox(mux)
 	s.registerUIPrefs(mux)
 	s.registerUndo(mux)
+	s.registerBulkREST(mux)
 	s.registerAutomation(mux)
 	s.registerSecurity(mux)
 	s.registerSSO(mux)

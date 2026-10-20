@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { pageErrors, watch } from './helpers.js';
+import { pageErrors, watch, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
 const uniq = () => Math.random().toString(36).slice(2, 7);

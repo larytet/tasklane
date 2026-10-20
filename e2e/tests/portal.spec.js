@@ -3,10 +3,10 @@ import AxeBuilder from '@axe-core/playwright';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
-import { pageErrors, watch } from './helpers.js';
+import { pageErrors, watch, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'tasklane' };
 const uniq = () => Math.random().toString(36).slice(2, 7);

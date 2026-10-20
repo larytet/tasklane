@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { pageErrors, newUser, createIssue } from './helpers.js';
+import { pageErrors, newUser, createIssue, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 test('CORE-12: ask someone to approve; the approver decides from the waiting list; the thread and the outcome show', async ({ browser }) => {
   const jana = await newUser(browser, 'jana@example.com');

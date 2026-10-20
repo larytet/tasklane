@@ -17,8 +17,16 @@ export function watch(page) {
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) pageErrors.push('console.error: ' + m.text()); });
 }
 
+// Every context a test opens with newUser is closed after it (each spec's afterEach), so pages left open by earlier tests do not keep
+// polling the server and slow the later ones down.
+const openContexts = [];
+export async function closeContexts() {
+  while (openContexts.length) { const c = openContexts.pop(); try { await c.close(); } catch (e) { /* closed already */ } }
+}
+
 export async function newUser(browser, email, opts = {}) {
   const ctx = await browser.newContext(opts);
+  openContexts.push(ctx);
   ctx.on('page', watch);
   const page = await ctx.newPage();
   await login(page, email);

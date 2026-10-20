@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { pageErrors, newUser, createIssue } from './helpers.js';
+import { pageErrors, newUser, createIssue, closeContexts } from './helpers.js';
 
 test.beforeEach(() => { pageErrors.length = 0; });
-test.afterEach(() => { expect(pageErrors, 'uncaught errors in the page').toEqual([]); });
+test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
 // E3 (SPEC 21, "lost draft"): text typed in an open editor can be recovered after a tab close, a crash or a reload, and what is lost is at most the local
 // autosave interval (2 s of typing). A simulated person types without stopping at a steady rate, the tab dies at a random moment in one of three ways, and
