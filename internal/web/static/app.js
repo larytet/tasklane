@@ -308,10 +308,14 @@
       meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues' + (pages > 1 && r.data.issues.length ? ' · ' + from + '–' + to : '');
       if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
       if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
+      S.sel = new Set(); S.cur = -1; // a new page starts with nothing selected and no current row (LIST-05)
       for (const i of r.data.issues) {
         const open = () => { location.hash = '#/issue/' + i.key; };
-        out.append(h('div', { class: 'row' + (long ? ' long' : ''), role: 'listitem', tabindex: 0, onclick: open, onkeydown: e => { if (e.key === 'Enter') open(); } },
-          h('span', { class: 'tile ' + i.type, title: i.type }), h('span', { class: 'key' }, i.key), h('span', { class: 'sum' }, i.summary),
+        // the checkbox selects without opening (x does the same on the current row)
+        const pick = h('input', { type: 'checkbox', class: 'rowsel', 'aria-label': 'Select ' + i.key, onclick: e => e.stopPropagation() }); // keys go on to the shortcuts; the row opens only on its own Enter
+        pick.addEventListener('change', () => { if (pick.checked) S.sel.add(i.key); else S.sel.delete(i.key); if (EXT.onSelect) EXT.onSelect(); });
+        out.append(h('div', { class: 'row' + (long ? ' long' : ''), role: 'listitem', tabindex: 0, 'data-key': i.key, onclick: open, onkeydown: e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); } },
+          pick, h('span', { class: 'tile ' + i.type, title: i.type }), h('span', { class: 'key' }, i.key), h('span', { class: 'sum' }, i.summary),
           h('span', { class: 'pri ' + i.priority, title: i.priority }, PRI[i.priority] || ''), i.assignee ? avatar(i.assignee) : h('span', { class: 'av' }, '–'),
           lozenge(i.status, i.status_category), h('span', { class: 'muted' }, L.relTime(i.updated)),
           long ? h('div', { class: 'snip' }, i.snippet || h('span', { class: 'muted' }, 'No description.')) : null));
@@ -421,13 +425,6 @@
     wrap.append(btn, list);
     return wrap;
   }
-  document.addEventListener('keydown', e => {
-    if (e.key !== 'c' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !S.me || !S.projects.length) return;
-    const t = e.target;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-    if (document.querySelector('.scrim')) return; // a dialog is open already
-    e.preventDefault(); createDialog();
-  });
   // a small dialog: a title, labelled fields, an error line, Cancel and a submit that returns the response; done runs on success
   function formDialog(title, fields, submitLabel, submit, done) {
     const msg = h('div', { class: 'err', role: 'alert' });
@@ -1135,6 +1132,12 @@
       clearInterval(st.serverTimer);
       st.serverTimer = setInterval(() => { if (st.dirty && st.editing) api('PUT', '/api/v1/issues/' + key + '/drafts/description', { body: ed.body, base_seq: ed.baseSeq }); }, 10000);
       const save = async () => {
+        if (st.saving) return; // one save at a time (a held Ctrl+Enter, a double click)
+        st.saving = true;
+        try { await saveOnce(); } finally { st.saving = false; }
+      };
+      ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) save(); } });
+      const saveOnce = async () => {
         clearTimeout(st.localTimer); st.localTimer = 0; setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); // never lose it
         state.textContent = 'Saving…';
         st.saveId = st.saveId || L.uuid();
@@ -1330,12 +1333,18 @@
           ta.focus();
         });
       });
-      return h('div', { class: 'reply' }, ta, h('div', { class: 'chips' }, h('label', {}, internal, ' Internal'), canned, audience, h('span', { class: 'grow' }),
-        h('button', { class: 'btn primary', onclick: async () => {
-          if (!ta.value.trim()) return;
+      // one request at a time, so a held Ctrl+Enter or a double click never sends the comment twice (KEY-08)
+      const send = h('button', { class: 'btn primary', onclick: async () => {
+        if (!ta.value.trim() || send.disabled) return;
+        send.disabled = true;
+        try {
           const r = await api('POST', '/api/v1/issues/' + key + '/comments', { body: ta.value, internal: internal.checked });
           if (r.status === 201) { setLocalDraft(key, 'comment', null); await reloadAll(); } else toast(r.data.error || 'Could not send');
-        } }, 'Send')));
+        } finally { send.disabled = false; }
+      } }, 'Send');
+      ta.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) send.click(); } }); // Enter alone is a new line
+      return h('div', { class: 'reply' }, ta, h('div', { class: 'chips' }, h('label', {}, internal, ' Internal'), canned, audience, h('span', { class: 'grow' }),
+        send));
     }
 
     // ----- presence heartbeat and change polling (advisory; never blocks anything)
@@ -1456,7 +1465,7 @@
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [], settings: null };
-  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS };
+  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS, createDialog };
   window.addEventListener('hashchange', route);
   boot();
 })();

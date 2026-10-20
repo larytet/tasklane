@@ -43,6 +43,8 @@ type TransitionOpt struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	To   string `json:"to"`
+	// ToCategory is the category of the status it goes to (todo, in_progress, done): "close or resolve" is a transition into done
+	ToCategory string `json:"to_category"`
 	// RequiresHuman: the workflow lets only a person take this transition (agents are refused)
 	RequiresHuman bool `json:"requires_human,omitempty"`
 	// Screen lists the fields to ask for before the transition runs
@@ -347,7 +349,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 		return IssueView{}, err
 	}
 	v := IssueView{Issue: is, Role: role, Transitions: []TransitionOpt{}}
-	rows, err := s.DB.Query(ctx, `SELECT t.id,t.name,st.name,t.requires_human,t.rules FROM issue i JOIN project p ON p.id=i.project_id
+	rows, err := s.DB.Query(ctx, `SELECT t.id,t.name,st.name,st.category,t.requires_human,t.rules FROM issue i JOIN project p ON p.id=i.project_id
 		JOIN transition t ON t.workflow_id=p.workflow_id AND (t.from_status IS NULL OR t.from_status=i.status_id) JOIN status st ON st.id=t.to_status
 		WHERE i.id=$1 ORDER BY st.position, t.name`, is.ID)
 	if err != nil {
@@ -357,7 +359,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 	for rows.Next() {
 		var t TransitionOpt
 		var raw []byte
-		rows.Scan(&t.ID, &t.Name, &t.To, &t.RequiresHuman, &raw)
+		rows.Scan(&t.ID, &t.Name, &t.To, &t.ToCategory, &t.RequiresHuman, &raw)
 		if rules := parseRules(raw); len(rules.Conditions) > 0 || len(rules.Screen) > 0 {
 			if len(rules.Conditions) > 0 { // a transition whose conditions are not met is not offered
 				if tc == nil {

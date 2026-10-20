@@ -232,3 +232,13 @@ body[data-width=narrow] .page.fluid{max-width:900px}
 .viewctl{flex-wrap:wrap;row-gap:4px;max-width:100%}
 .listbar{flex-wrap:wrap}.listbar>.viewctl{min-width:0}
 @media(max-width:900px){.issue-layout{grid-template-columns:minmax(0,1fr)}.issue-main,.issue-side{min-width:0}}@media(max-width:600px){.issue-page{padding:12px}}
+/* keyboard: the current row of a list, the selection checkbox, pickers and the cheat sheet */
+.row.current{box-shadow:inset 3px 0 0 var(--accent);background:var(--hover)}
+.row .rowsel{margin:0;width:16px;height:16px;flex:none;accent-color:var(--accent)}
+.picker{max-width:440px}.picker input[type=search]{width:100%;margin:8px 0}
+.pick{list-style:none;margin:0;padding:0;max-height:50vh;overflow:auto}.pick li{padding:8px 10px;border-radius:var(--r);cursor:pointer}
+.pick li.on,.pick li:hover{background:var(--accent-bg);color:var(--text)}
+.dialog:has(.picker){max-width:460px}.dialog:has(.cheats){max-width:640px}
+.cheats h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--subtle);margin:16px 0 4px}
+table.keys{width:100%}table.keys th{width:40%;font-weight:400;white-space:nowrap}
+kbd{font-family:var(--mono);font-size:12px;background:var(--raised);border:1px solid var(--border-input);border-bottom-width:2px;border-radius:4px;padding:0 6px}
