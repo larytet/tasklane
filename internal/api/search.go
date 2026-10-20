@@ -38,6 +38,20 @@ func (s *Server) registerSearch(mux *http.ServeMux) {
 			s.fail(w, 400, "tql_error", te.Msg, map[string]any{"pos": te.Pos})
 			return
 		}
+		if n, _ := strconv.Atoi(r.URL.Query().Get("snippet")); err == nil && n > 0 && len(res.Rows) > 0 { // the long view: the start of each description
+			if n > domain.MaxSnippetChars {
+				n = domain.MaxSnippetChars
+			}
+			keys := make([]string, len(res.Rows))
+			for i, row := range res.Rows {
+				keys[i] = row.Key
+			}
+			if sn, e := s.Svc.Snippets(r.Context(), keys, n); e == nil {
+				for i := range res.Rows {
+					res.Rows[i].Snippet = sn[res.Rows[i].Key]
+				}
+			}
+		}
 		s.replyStatus(w, 200, res, err)
 	}))
 	s.handle(mux, "GET /api/v1/search/typeahead", s.auth(func(w http.ResponseWriter, r *http.Request) {

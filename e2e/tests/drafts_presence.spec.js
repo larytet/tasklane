@@ -70,6 +70,7 @@ test('PRES-04: a viewer sees who is editing but cannot open an editor or save', 
   await jana.page.getByRole('button', { name: 'Edit' }).click();
   await expect(vera.page.getByText(/Jana K\. is editing the description/)).toBeVisible();
   await expect(vera.page.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+  await vera.page.getByRole('tab', { name: /^Comments/ }).click();
   await expect(vera.page.getByText('You have read-only access')).toBeVisible();
   await expect(vera.page.getByLabel('Priority')).toBeDisabled();
 });
@@ -80,6 +81,8 @@ test('live updates: a change by someone else appears on an open page without any
   const key = await createIssue(jana.page, 'Live', 'text');
   await jana.page.goto(`/#/issue/${key}`);
   await ark.page.goto(`/#/issue/${key}`);
+  await jana.page.getByRole('tab', { name: /^Comments/ }).click();
+  await ark.page.getByRole('tab', { name: /^Comments/ }).click();
   await ark.page.getByPlaceholder('Reply…').fill('hello from Arkady');
   await ark.page.getByRole('button', { name: 'Send' }).click();
   await expect(jana.page.getByText('hello from Arkady')).toBeVisible();
@@ -95,10 +98,12 @@ test('PERF/realtime fallback: with the socket blocked the page still works and c
   const page = await ctx.newPage();
   await login(page, 'arkady@example.com');
   await page.goto(`/#/issue/${key}`);
+  await page.getByRole('tab', { name: /^Comments/ }).click();
   await page.getByPlaceholder('Reply…').fill('works without a socket');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('works without a socket')).toBeVisible();
   await jana.page.goto(`/#/issue/${key}`);
+  await jana.page.getByRole('tab', { name: /^Comments/ }).click();
   await jana.page.getByPlaceholder('Reply…').fill('seen by polling');
   await jana.page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('seen by polling')).toBeVisible({ timeout: 12_000 }); // the 4 s fallback poll

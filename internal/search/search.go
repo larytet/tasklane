@@ -27,6 +27,7 @@ type Row struct {
 	Labels    []string  `json:"labels"`
 	Updated   time.Time `json:"updated"`
 	Comments  int       `json:"comments"`
+	Snippet   string    `json:"snippet,omitempty"` // the start of the description, filled by the list endpoint on request
 }
 
 type Result struct {

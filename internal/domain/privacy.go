@@ -262,6 +262,7 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 			{"passkey_challenges_removed", `DELETE FROM webauthn_challenge WHERE user_id::text=$1`},
 			{"pending_sign_ins_removed", `DELETE FROM mfa_pending WHERE user_id::text=$1`},
 			{"preferences_removed", `DELETE FROM notification_pref WHERE user_id::text=$1`},
+			{"settings_removed", `DELETE FROM user_setting WHERE user_id::text=$1`},
 			{"idempotency_keys_removed", `DELETE FROM idempotency_key WHERE user_id::text=$1`},
 		} {
 			if err := exec(q.count, q.sql, userID); err != nil {

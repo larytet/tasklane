@@ -588,6 +588,10 @@ func rows() []row {
 		{"POST /api/v1/notifications/{id}/state", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
 			return J("POST", "/api/v1/notifications/999999/state", map[string]any{"state": "read"})
 		}},
+		{"GET /api/v1/me/settings", authed, func(f *fixture) req { return J("GET", "/api/v1/me/settings", nil) }},
+		{"PUT /api/v1/me/settings", authed, func(f *fixture) req {
+			return J("PUT", "/api/v1/me/settings", map[string]any{"list_view": "long", "page_width": "wide", "snippet_chars": 500})
+		}},
 		{"GET /api/v1/me/notification-prefs", authed, func(f *fixture) req { return J("GET", "/api/v1/me/notification-prefs", nil) }},
 		{"PUT /api/v1/me/notification-prefs", authed, func(f *fixture) req {
 			return J("PUT", "/api/v1/me/notification-prefs", map[string]any{"auto_watch": true, "inbox": true, "email": true})

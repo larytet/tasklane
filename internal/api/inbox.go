@@ -36,6 +36,16 @@ func (s *Server) registerInbox(mux *http.ServeMux) {
 			s.reply(w, map[string]bool{"ok": true}, s.Svc.MarkNotification(r.Context(), actorOf(r), id, in.State))
 		}
 	}))
+	s.handle(mux, "GET /api/v1/me/settings", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		s.reply(w, s.Svc.MySettings(r.Context(), actorOf(r)), nil)
+	}))
+	s.handle(mux, "PUT /api/v1/me/settings", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		in := s.Svc.MySettings(r.Context(), actorOf(r)) // a body that leaves a key out keeps the stored value
+		if s.decode(w, r, &in) {
+			v, err := s.Svc.SetSettings(r.Context(), actorOf(r), in)
+			s.reply(w, v, err)
+		}
+	}))
 	s.handle(mux, "GET /api/v1/me/notification-prefs", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, s.Svc.MyNotifyPrefs(r.Context(), actorOf(r)), nil)
 	}))

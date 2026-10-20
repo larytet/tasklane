@@ -2,7 +2,7 @@
   'use strict';
   const L = window.TL;
   const $app = document.getElementById('app');
-  const S = { me: null, projects: [], users: [], q: '', syntax: 'text', tql: '', view: null, timers: [], nav: { keys: [], q: null }, vcache: new Map() };
+  const S = { me: null, projects: [], users: [], q: '', syntax: 'text', tql: '', view: null, settings: { list_view: 'short', page_width: 'wide', snippet_chars: 500 }, timers: [], nav: { keys: [], q: null }, vcache: new Map() };
 
   // ---------- helpers ----------
   function h(tag, props, ...kids) {
@@ -114,12 +114,64 @@
 
   // ---------- shell ----------
   // the less used places, folded into one menu so the bar fits at any width (a disclosure, so it works with the keyboard and screen readers)
+  // ----- settings kept on the server for each person
+  function applyWidth() { document.body.dataset.width = S.settings.page_width; }
+  async function saveSettings(ch) {
+    const before = Object.assign({}, S.settings);
+    Object.assign(S.settings, ch); applyWidth();
+    const r = await api('PUT', '/api/v1/me/settings', S.settings);
+    if (r.status === 200) { S.settings = r.data; return true; }
+    S.settings = before; applyWidth(); toast((r.data && r.data.error) || 'Could not save the settings');
+    return false;
+  }
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  // an icon is a list of [tag, attributes]; built with DOM calls, never from a string
+  const svg = shapes => {
+    const e = document.createElementNS(SVGNS, 'svg');
+    for (const [k, v] of Object.entries({ viewBox: '0 0 24 24', width: 18, height: 18, 'aria-hidden': 'true', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6 })) e.setAttribute(k, v);
+    for (const [tag, attrs] of shapes) { const c = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) c.setAttribute(k, v); e.append(c); }
+    return e;
+  };
+  const ICON = {
+    wide: [['rect', { x: 2, y: 5, width: 20, height: 14, rx: 1.5 }], ['path', { d: 'M6 12h12M6 12l2.5-2.5M6 12l2.5 2.5M18 12l-2.5-2.5M18 12l-2.5 2.5' }]], // the page spread over the whole window
+    narrow: [['rect', { x: 7, y: 3, width: 10, height: 18, rx: 1 }], ['path', { d: 'M2.5 12h3M2.5 12l1.5-1.5M2.5 12l1.5 1.5M21.5 12h-3M21.5 12l-1.5-1.5M21.5 12l-1.5 1.5' }]], // a page like the printed one
+    short: [['path', { d: 'M4 7h16M4 12h16M4 17h16' }]],
+    long: [['path', { d: 'M4 5h16M4 8h12M4 13h16M4 16h12M4 21h8' }]]
+  };
+  // one group of toggle buttons: wide or narrow page, and (on the list) short or long rows
+  function viewControls(withRows, onRows) {
+    const btn = (icon, label, on, fn) => h('button', { class: 'btn' + (on ? '' : ' ghost'), 'aria-pressed': String(on), title: label, 'aria-label': label, onclick: fn }, svg(ICON[icon]));
+    const box = h('span', { class: 'viewctl', role: 'group', 'aria-label': 'View' });
+    const draw = () => {
+      clear(box);
+      box.append(btn('wide', 'Wide view (the whole window)', S.settings.page_width === 'wide', async () => { await saveSettings({ page_width: 'wide' }); draw(); }),
+        btn('narrow', 'Narrow view (like a printed page)', S.settings.page_width === 'narrow', async () => { await saveSettings({ page_width: 'narrow' }); draw(); }));
+      if (withRows) {
+        box.append(h('span', { class: 'sep' }),
+          btn('short', 'Short view: title, status, assignee', S.settings.list_view === 'short', async () => { if (await saveSettings({ list_view: 'short' })) { draw(); onRows(); } }),
+          btn('long', 'Long view: with the start of the description', S.settings.list_view === 'long', async () => { if (await saveSettings({ list_view: 'long' })) { draw(); onRows(); } }));
+      }
+    };
+    draw();
+    return box;
+  }
+  function settingsDialog() {
+    const view = h('select', { 'aria-label': 'List view' }, h('option', { value: 'short' }, 'Short: title, status, assignee'), h('option', { value: 'long' }, 'Long: also the start of the description'));
+    view.value = S.settings.list_view;
+    const width = h('select', { 'aria-label': 'Page width' }, h('option', { value: 'wide' }, 'Wide: the whole window'), h('option', { value: 'narrow' }, 'Narrow: like a printed page'));
+    width.value = S.settings.page_width;
+    const chars = h('input', { type: 'number', 'aria-label': 'Description length in the long view', min: 1, max: 5000, value: S.settings.snippet_chars });
+    formDialog('Settings', [field('List view', view), field('Page width', width), field('Characters of the description shown in the long view (1 to 5000, 500 by default)', chars)], 'Save',
+      async () => { const ok = await saveSettings({ list_view: view.value, page_width: width.value, snippet_chars: Number(chars.value) }); return ok ? { status: 200, data: {} } : { status: 400, data: { error: 'Could not save the settings' } }; },
+      () => { toast('Settings saved'); route(); });
+  }
+
   function moreMenu() {
     const d = h('details', { class: 'topmore' });
     const go = (label, hash) => h('a', { href: hash, class: 'topmore-item', onclick: () => d.removeAttribute('open') }, label);
     const first = S.projects[0] ? S.projects[0].key : '';
     d.append(h('summary', { class: 'btn ghost' }, 'More'),
-      h('div', { class: 'topmore-list' }, go('Dashboards', '#/dashboards'), go('Releases', '#/releases'), go('Approvals', '#/approvals'), go('Queues', '#/queues'), go('Import', '#/import'), go('Trash', '#/trash/' + first)));
+      h('div', { class: 'topmore-list' }, go('Dashboards', '#/dashboards'), go('Releases', '#/releases'), go('Approvals', '#/approvals'), go('Queues', '#/queues'), go('Import', '#/import'), go('Trash', '#/trash/' + first), h('button', { class: 'topmore-item', onclick: () => { d.removeAttribute('open'); settingsDialog(); } }, 'Settings')));
     d.addEventListener('keydown', e => { if (e.key === 'Escape') { d.removeAttribute('open'); d.querySelector('summary').focus(); } });
     return d;
   }
@@ -212,10 +264,14 @@
     S.q = q || '';
     const out = h('div', { class: 'card', role: 'list' }), err = h('div', { class: 'tqlerr', role: 'alert' }), meta = h('div', { class: 'muted' });
     const pager = h('div', { class: 'actions', style: 'margin-top:8px' });
-    clear($app).append(topbar(), h('div', { class: 'page' }, err, meta, out, pager));
+    let at = 0; // the page of results on the screen
+    const controls = viewControls(true, () => load(at)); // wide or narrow, short or long rows
+    clear($app).append(topbar(), h('div', { class: 'page fluid' }, h('div', { class: 'listbar' }, meta, controls), err, out, pager));
     const size = 100;
     const load = async n => {
-      const r = await api('GET', '/api/v1/issues?limit=' + size + '&offset=' + n * size + '&q=' + encodeURIComponent(S.q) + '&syntax=' + S.syntax);
+      at = n;
+      const long = S.settings.list_view === 'long';
+      const r = await api('GET', '/api/v1/issues?limit=' + size + '&offset=' + n * size + '&q=' + encodeURIComponent(S.q) + '&syntax=' + S.syntax + (long ? '&snippet=' + S.settings.snippet_chars : ''));
       if (r.status === 400) { err.textContent = r.data.error + (r.data.detail && r.data.detail.pos != null ? ' (at position ' + r.data.detail.pos + ')' : ''); return; }
       if (r.status !== 200) { err.textContent = 'Could not load issues'; return; }
       S.tql = r.data.query || '';
@@ -228,10 +284,11 @@
       if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
       for (const i of r.data.issues) {
         const open = () => { location.hash = '#/issue/' + i.key; };
-        out.append(h('div', { class: 'row', role: 'listitem', tabindex: 0, onclick: open, onkeydown: e => { if (e.key === 'Enter') open(); } },
+        out.append(h('div', { class: 'row' + (long ? ' long' : ''), role: 'listitem', tabindex: 0, onclick: open, onkeydown: e => { if (e.key === 'Enter') open(); } },
           h('span', { class: 'tile ' + i.type, title: i.type }), h('span', { class: 'key' }, i.key), h('span', { class: 'sum' }, i.summary),
           h('span', { class: 'pri ' + i.priority, title: i.priority }, PRI[i.priority] || ''), i.assignee ? avatar(i.assignee) : h('span', { class: 'av' }, '–'),
-          lozenge(i.status, i.status_category), h('span', { class: 'muted' }, L.relTime(i.updated))));
+          lozenge(i.status, i.status_category), h('span', { class: 'muted' }, L.relTime(i.updated)),
+          long ? h('div', { class: 'snip' }, i.snippet || h('span', { class: 'muted' }, 'No description.')) : null));
       }
       if (pages < 2) return;
       // numbered pages around the current one, with the first and last always reachable
@@ -676,7 +733,7 @@
   async function issueView(requestedKey) {
     let key = requestedKey;
     stopTimers();
-    const root = h('div', { class: 'page' });
+    const root = h('div', { class: 'page fluid issue-page' });
     clear($app).append(topbar(), root);
     let v = await load();
     async function load() {
@@ -688,7 +745,7 @@
       return r.data;
     }
     if (!v) return;
-    const st = { v, editing: null, dirty: false, saveId: null, serverTimer: 0, localTimer: 0, changedBy: null, deleted: null };
+    const st = { v, tab: 'description', editing: null, dirty: false, saveId: null, serverTimer: 0, localTimer: 0, changedBy: null, deleted: null };
     if (v.alias && v.issue.key !== key) { key = v.issue.key; history.replaceState(null, '', '#/issue/' + key); } // an old key redirects to the current one
     S.view = st;
     render();
@@ -712,7 +769,7 @@
       // header: presence stack
       root.append(h('div', { class: 'chips' },
         h('button', { class: 'btn ghost', onclick: () => history.back(), 'aria-label': 'Back' }, '←'),
-        h('span', { class: 'key' }, is.key), pager(is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' }),
+        h('span', { class: 'key' }, is.key), pager(is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' }), viewControls(false),
         h('button', { class: 'btn', id: 'watch-btn', 'aria-pressed': 'false' }, 'Watch'),
         canEdit() ? h('button', { class: 'btn', 'aria-haspopup': 'dialog', onclick: actionsMenu }, 'Actions ▾') : null));
       if (st.deleted) root.append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted' + (st.deleted.by ? ' by ' + st.deleted.by : '') + '. Anything you were typing stays in your draft. ', h('a', { href: '#/trash/' + is.project }, 'Open the trash')));
@@ -730,15 +787,23 @@
       }
       if (v.request) root.append(h('div', { class: 'banner info', role: 'status' }, 'Raised through the portal by ' + (v.request.customer || v.request.email) + ' (' + v.request.email + ')' + (v.request.request_type ? ' · ' + v.request.request_type : '') + (v.request.company ? ' · ' + v.request.company : '') + (v.request.shared_with_company ? ' (shared with the whole company)' : '') + (v.request.shared_with && v.request.shared_with.length ? ' · also seen by ' + v.request.shared_with.join(', ') : '') + '. A comment that is not internal is visible to the customer' + ((v.request.shared_with && v.request.shared_with.length) || v.request.shared_with_company ? 's it is shared with' : '') + '.'));
       if (v.sla && v.sla.length) root.append(slaEl(v.sla));
-      root.append(subjectEl(is));
-      root.append(chipLine(is));
-      root.append(descriptionEl(is));
-      root.append(customFieldsEl(is));
-      root.append(attachmentsEl());
-      root.append(developmentEl());
-      root.append(approvalsEl());
-      root.append(threadEl());
-      root.append(replyEl());
+      // the title and the description first; comments and history are tabs; the fields sit in a column beside them
+      const tabs = [['description', 'Description'], ['comments', 'Comments (' + v.comments.length + ')'], ['history', 'History']];
+      const pick = id => { st.tab = id; render(); };
+      const bar = h('div', { class: 'tabs issue-tabs', role: 'tablist', 'aria-label': 'Issue sections' }, tabs.map(([id, label]) =>
+        h('button', { class: 'tab', role: 'tab', id: 'tab-' + id, 'aria-selected': String(st.tab === id), 'aria-controls': 'panel-' + id, tabindex: st.tab === id ? 0 : -1,
+          onclick: () => pick(id),
+          onkeydown: e => {
+            const i = tabs.findIndex(t => t[0] === st.tab), to = e.key === 'ArrowRight' ? tabs[(i + 1) % tabs.length] : e.key === 'ArrowLeft' ? tabs[(i + tabs.length - 1) % tabs.length] : null;
+            if (to) { e.preventDefault(); pick(to[0]); document.getElementById('tab-' + to[0]).focus(); }
+          } }, label)));
+      const panel = h('div', { role: 'tabpanel', id: 'panel-' + st.tab, 'aria-labelledby': 'tab-' + st.tab });
+      if (st.tab === 'description') panel.append(descriptionEl(is));
+      else if (st.tab === 'comments') panel.append(threadEl(), replyEl());
+      else panel.append(historyEl());
+      root.append(h('div', { class: 'issue-layout' },
+        h('div', { class: 'issue-main' }, subjectEl(is), bar, panel),
+        h('aside', { class: 'issue-side', 'aria-label': 'Details' }, chipLine(is), customFieldsEl(is), attachmentsEl(), developmentEl(), approvalsEl())));
     }
 
     // ----- service level clocks of a request
@@ -1197,15 +1262,21 @@
           h('div', {}, h('span', { class: 'who' }, c.author.name), ' ', h('span', { class: 'muted' }, L.relTime(c.created) + (c.internal ? ' · internal' : '') + (c.via_email ? ' · via email' : '') + (c.edited ? ' · edited' : ''))), paragraphs(c.body))));
       }
       if (!v.comments.length) t.append(h('p', { class: 'muted' }, 'No comments yet.'));
-      const act = h('div', {}); t.append(act);
+      return t;
+    }
+    // the whole history, newest first, on its own tab
+    function historyEl() {
+      const act = h('div', { class: 'history' }, h('p', { class: 'muted' }, 'Loading…'));
       api('GET', '/api/v1/issues/' + key + '/history').then(r => {
-        if (r.status !== 200) return;
-        for (const x of r.data.filter(x => !['description', 'summary'].includes(x.field) || true).slice(-12)) {
+        if (r.status !== 200) { clear(act).append(h('p', { class: 'muted' }, 'The history could not be loaded.')); return; }
+        clear(act);
+        if (!r.data.length) act.append(h('p', { class: 'muted' }, 'No history yet.'));
+        for (const x of [...r.data].reverse()) {
           const line = x.field === 'created' ? 'created this issue' : x.field === 'attachment' ? (x.after ? 'attached ' + x.after : 'removed ' + x.before) : 'changed ' + x.field + (x.before != null && x.after != null && x.field !== 'description' ? ' ' + x.before + ' → ' + x.after : '');
           act.append(h('div', { class: 'activity' }, '·· ' + x.actor + ' ' + line + ' · ' + L.relTime(x.at)));
         }
       });
-      return t;
+      return act;
     }
     function replyEl() {
       if (!canEdit()) return h('div', { class: 'muted' }, 'You have read-only access to this project.');
@@ -1344,12 +1415,17 @@
   }
   async function boot() {
     const r = await api('GET', '/api/v1/bootstrap');
-    if (r.status === 200) { S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect(); }
+    if (r.status === 200) {
+      S.me = r.data.me; S.projects = r.data.projects; S.users = r.data.users; rtConnect();
+      const st = await api('GET', '/api/v1/me/settings'); // kept on the server, so they follow the person to every browser
+      if (st.status === 200) S.settings = st.data;
+    }
     else if (r.status === 403 && r.data && r.data.code === 'second_factor_required') {
       // signed in, but held to the pages that set a second factor up: who they are is all the page may load before that
       const m = await api('GET', '/api/v1/me');
       if (m.status === 200) { S.me = m.data; S.projects = []; S.users = []; } else S.me = null;
     } else S.me = null;
+    applyWidth();
     route();
     if (S.me) showScheduled();
   }

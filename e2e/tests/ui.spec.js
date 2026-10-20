@@ -127,6 +127,8 @@ test('A11Y-02: create, open, comment and transition with the keyboard only', asy
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(page.getByLabel('Summary')).toHaveValue(title);
+  await page.getByRole('tab', { name: /^Comments/ }).focus();
+  await page.keyboard.press('Enter'); // the tabs are buttons: Enter opens the comments
   await page.getByPlaceholder('Reply…').focus();
   await page.keyboard.type('commented by keyboard');
   await page.getByRole('button', { name: 'Send' }).focus();
@@ -136,6 +138,8 @@ test('A11Y-02: create, open, comment and transition with the keyboard only', asy
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   await expect(page.locator('.loz').first()).toHaveText('In Progress');
+  await page.getByRole('tab', { name: 'Description' }).focus();
+  await page.keyboard.press('Enter'); // the Edit button is on the description tab; the keyboard keeps focus rings visible
   // focus is always visible
   await page.getByRole('button', { name: 'Edit' }).focus();
   const ring = await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle);

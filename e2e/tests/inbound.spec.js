@@ -47,6 +47,7 @@ test('MAIL-21: review and release a quarantined email in the Email tab', async (
   await expect(page.getByText('Released as a comment')).toBeVisible();
 
   await page.goto(`/#/issue/${issue}`);
+  await page.getByRole('tab', { name: /^Comments/ }).click();
   await expect(page.getByText('This came by email.')).toBeVisible();
   await expect(page.getByText('via email')).toBeVisible();
 });

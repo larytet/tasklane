@@ -136,6 +136,7 @@ test('REQ: a customer raises a request through a form, staff reply (and see who 
   await sp.getByLabel('Password').fill('adminpass1');
   await sp.getByRole('button', { name: 'Sign in' }).click();
   await sp.goto('/#/issue/' + key);
+  await sp.getByRole('tab', { name: /^Comments/ }).click();
   await expect(sp.getByText('Raised through the portal by')).toContainText(addr);
   await expect(sp.locator('#reply-audience')).toContainText('The customer (' + addr + ') will see this reply');
   await sp.getByLabel('Reply', { exact: true }).fill('We are on it.');
@@ -160,6 +161,7 @@ test('REQ: a customer raises a request through a form, staff reply (and see who 
   expect(axe2.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]);
   // the staff thread shows the customer's reply
   await sp.reload();
+  await sp.getByRole('tab', { name: /^Comments/ }).click();
   await expect(sp.getByText('Thanks, standing by')).toBeVisible();
   // the portal settings page lists the form and passes the accessibility check
   await sp.goto('/#/portal-admin/' + pk);
@@ -217,6 +219,7 @@ test('PORT-08: a request carries service level clocks that staff see running, an
 
   const sp = await adm.newPage();
   await sp.goto('/#/issue/' + key);
+  await sp.getByRole('tab', { name: /^Comments/ }).click();
   const clocks = sp.getByRole('group', { name: 'Service level goals' });
   await expect(clocks).toContainText('First response:');
   await expect(clocks).toContainText('left');
@@ -351,6 +354,7 @@ test('PORT-07: the customer is emailed about their request with a portal link, a
   // staff reply publicly and privately: only the public one is mailed, without the name
   const sp = await adm.newPage();
   await sp.goto('/#/issue/' + key);
+  await sp.getByRole('tab', { name: /^Comments/ }).click();
   await sp.getByLabel('Reply', { exact: true }).fill('Please send a photo.');
   await sp.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(sp.getByText('Please send a photo.').first()).toBeVisible();
@@ -367,6 +371,7 @@ test('PORT-07: the customer is emailed about their request with a portal link, a
   await page.reload();
   await expect(page.getByText('Here is the photo link.')).toBeVisible();
   await sp.reload();
+  await sp.getByRole('tab', { name: /^Comments/ }).click();
   await expect(sp.getByText('Here is the photo link.')).toBeVisible();
 });
 

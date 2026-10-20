@@ -53,6 +53,7 @@ test('PORT: an administrator makes a queue and a canned response; an agent works
 
   // on the ticket, the response is inserted with the page's own words filled in
   await page.goto('/#/issue/' + mine);
+  await page.getByRole('tab', { name: /^Comments/ }).click();
   await page.getByLabel('Insert a canned response').selectOption({ label: 'Thanks' });
   await expect(page.getByLabel('Reply', { exact: true })).toHaveValue('Hello there, we are on ' + mine + '. Administrator');
 });
