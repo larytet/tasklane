@@ -312,11 +312,44 @@
   }
 
   // ---------- issue list ----------
-  async function listView(q) {
+  // ----- list columns (SPEC 4.1): the person's choice and order (key and summary always), drawn by these
+  const COL_LABEL = { type: 'Type', key: 'Key', summary: 'Summary', priority: 'Priority', assignee: 'Assignee', status: 'Status', updated: 'Updated', created: 'Created', reporter: 'Reporter', labels: 'Labels', comments: 'Comments' };
+  const SORTABLE = { key: 1, summary: 1, priority: 1, assignee: 1, status: 1, updated: 1, created: 1, reporter: 1, type: 1 };
+  S.fieldNames = null; // customfield_<id> -> name, for headers and the column chooser
+  async function fieldNames() {
+    if (S.fieldNames) return S.fieldNames;
+    const r = await api('GET', '/api/v1/fields');
+    S.fieldNames = {};
+    if (r.status === 200) for (const f of r.data) if (!f.trashed) S.fieldNames[f.key || 'customfield_' + f.id] = f.name;
+    return S.fieldNames;
+  }
+  const colName = c => COL_LABEL[c] || (S.fieldNames && S.fieldNames[c]) || c;
+  function cell(c, i) {
+    switch (c) {
+      case 'type': return h('span', { class: 'tile ' + i.type, title: i.type });
+      case 'key': return h('span', { class: 'key' }, i.key);
+      case 'summary': return h('span', { class: 'sum' }, i.summary);
+      case 'priority': return h('span', { class: 'pri ' + i.priority, title: i.priority }, PRI[i.priority] || '');
+      case 'assignee': return i.assignee ? avatar(i.assignee) : h('span', { class: 'av', title: 'Unassigned' }, '–');
+      case 'status': return lozenge(i.status, i.status_category);
+      case 'updated': return h('span', { class: 'muted', title: 'Updated' }, L.relTime(i.updated));
+      case 'created': return h('span', { class: 'muted', title: 'Created' }, L.relTime(i.created));
+      case 'reporter': return h('span', { class: 'muted col-rep', title: 'Reporter' }, i.reporter || '');
+      case 'labels': return h('span', { class: 'col-labels' }, (i.labels || []).map(l => h('span', { class: 'label' }, l)));
+      case 'comments': return h('span', { class: 'muted', title: 'Comments' }, i.comments ? '💬 ' + i.comments : '');
+    }
+    const v = i[c]; // a custom field
+    return h('span', { class: 'col-cf', title: colName(c) }, v == null ? '' : Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? (v.name || v.value || JSON.stringify(v)) : String(v));
+  }
+  const phone = () => window.matchMedia && window.matchMedia('(max-width: 600px)').matches;
+
+  async function listView(q, startPage) {
     stopTimers();
     S.q = q || '';
     const out = h('div', { class: 'card', role: 'list' }), err = h('div', { class: 'tqlerr', role: 'alert' }), meta = h('div', { class: 'muted' });
-    const pager = h('div', { class: 'actions', style: 'margin-top:8px' });
+    // a sticky pager on desktop (pages of 100, the page in the address); infinite scroll on phones (SPEC 4.1)
+    const pager = h('nav', { class: 'pager', 'aria-label': 'Pages', hidden: true });
+    const more = h('div', { class: 'more-sentinel', 'aria-hidden': 'true' });
     let at = 0; // the page of results on the screen
     const controls = viewControls(true, () => load(at)); // wide or narrow, short or long rows
     // the page's checkbox: all or none of the rows on this page (a bulk action takes one page at most)
@@ -330,48 +363,98 @@
       syncAll();
     });
     const syncAll = () => { if (cascading) return; const n = out.querySelectorAll('input.rowsel').length; all.checked = n > 0 && S.sel.size === n; all.indeterminate = S.sel.size > 0 && S.sel.size < n; };
-    clear($app).append(topbar(), h('div', { class: 'page fluid' }, h('div', { class: 'listbar' }, h('span', { class: 'listsel' }, all, meta), controls), err, out, pager));
-    const size = 100;
-    const load = async n => {
-      at = n;
-      const long = S.settings.list_view === 'long';
-      const r = await api('GET', '/api/v1/issues?limit=' + size + '&offset=' + n * size + '&q=' + encodeURIComponent(S.q) + '&syntax=' + S.syntax + (long ? '&snippet=' + S.settings.snippet_chars : ''));
-      if (r.status === 400) { err.textContent = r.data.error + (r.data.detail && r.data.detail.pos != null ? ' (at position ' + r.data.detail.pos + ')' : ''); return; }
-      if (r.status !== 200) { err.textContent = 'Could not load issues'; return; }
-      S.tql = r.data.query || '';
-      S.nav = { keys: r.data.issues.map(i => i.key), q: S.q }; // the order the person is reading in: prev/next in a ticket follow it
-      clear(out); clear(pager);
-      const pages = Math.max(1, Math.ceil(r.data.total / size));
-      const from = n * size + 1, to = n * size + r.data.issues.length;
-      meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues' + (pages > 1 && r.data.issues.length ? ' · ' + from + '–' + to : '');
-      if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
-      if (!r.data.issues.length) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
-      S.sel = new Set(); S.cur = -1; S.lastPick = -1; // a new page starts with nothing selected and no current row (LIST-05)
-      if (EXT.onSelect) EXT.onSelect();
-      all.hidden = !r.data.issues.length; all.checked = false; all.indeterminate = false;
-      for (const i of r.data.issues) {
-        const open = () => { location.hash = '#/issue/' + i.key; };
-        // the checkbox selects without opening (x does the same on the current row)
-        const pick = h('input', { type: 'checkbox', class: 'rowsel', 'aria-label': 'Select ' + i.key, onclick: e => {
-          e.stopPropagation(); // keys go on to the shortcuts; the row opens only on its own Enter
-          const boxes = [...out.querySelectorAll('input.rowsel')], at = boxes.indexOf(pick);
-          if (e.shiftKey && S.lastPick >= 0 && S.lastPick !== at) { // shift-click: everything between the last click and this one takes this one's state
-            const [a, b] = [Math.min(S.lastPick, at), Math.max(S.lastPick, at)];
-            for (let k = a; k <= b; k++) if (boxes[k].checked !== pick.checked) { boxes[k].checked = pick.checked; boxes[k].dispatchEvent(new Event('change')); }
-          }
-          S.lastPick = at;
-        } });
-        pick.addEventListener('change', () => { if (pick.checked) S.sel.add(i.key); else S.sel.delete(i.key); syncAll(); if (EXT.onSelect) EXT.onSelect(); });
-        out.append(h('div', { class: 'row' + (long ? ' long' : ''), role: 'listitem', tabindex: 0, 'data-key': i.key, onclick: open, onkeydown: e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); } },
-          pick, h('span', { class: 'tile ' + i.type, title: i.type }), h('span', { class: 'key' }, i.key), h('span', { class: 'sum' }, i.summary),
-          h('span', { class: 'pri ' + i.priority, title: i.priority }, PRI[i.priority] || ''), i.assignee ? avatar(i.assignee) : h('span', { class: 'av' }, '–'),
-          lozenge(i.status, i.status_category), h('span', { class: 'muted' }, L.relTime(i.updated)),
-          long ? h('div', { class: 'snip' }, i.snippet || h('span', { class: 'muted' }, 'No description.')) : null,
-          h('span', { class: 'hover-acts', 'data-for': i.key })));
+    // the column headers sort: ascending, descending, then the query's own order
+    const head = h('div', { class: 'listhead', role: 'group', 'aria-label': 'Sort by' });
+    const drawHead = cols => {
+      clear(head);
+      const so = S.settings.sort || {};
+      for (const c of cols) {
+        const sortable = SORTABLE[c] || c.startsWith('customfield_');
+        const on = so.field === c, dir = on ? so.dir : '';
+        const label = colName(c) + (on ? (dir === 'desc' ? ' ↓' : ' ↑') : '');
+        const cc = 'c-' + (c.startsWith('customfield_') ? 'cf' : c);
+        // named by its text (no aria-label), so the column's name is not a second "label" beside the form fields of the page
+        head.append(sortable ? h('button', { class: 'btn ghost colhead ' + cc, 'aria-pressed': String(on), title: 'Sort by ' + colName(c),
+          onclick: async () => { await saveSettings({ sort: !on ? { field: c, dir: 'asc' } : dir === 'asc' ? { field: c, dir: 'desc' } : { field: '', dir: 'asc' } }); load(0, true); } },
+          label, on ? h('span', { class: 'sr' }, dir === 'desc' ? ', sorted descending' : ', sorted ascending') : null)
+          : h('span', { class: 'colhead muted ' + cc }, label));
       }
-      if (pages < 2) return;
+    };
+    clear($app).append(topbar(), h('div', { class: 'page fluid' }, h('div', { class: 'listbar' }, h('span', { class: 'listsel' }, all, meta), controls), err, head, out, more, pager));
+    const size = 100;
+    let pages = 1, loading = false;
+    const query = (n, cols, long) => '/api/v1/issues?limit=' + size + '&offset=' + n * size + '&q=' + encodeURIComponent(S.q) + '&syntax=' + S.syntax +
+      '&fields=' + encodeURIComponent(cols.concat(['project'], long ? ['snippet'] : []).join(',')) + (long ? '&snippet=' + S.settings.snippet_chars : '') +
+      (S.settings.sort && S.settings.sort.field ? '&sort=' + encodeURIComponent(S.settings.sort.field + ':' + (S.settings.sort.dir || 'asc')) : '');
+    const rowOf = (i, cols, long) => {
+      const open = () => { location.hash = '#/issue/' + i.key; };
+      // the checkbox selects without opening (x does the same on the current row)
+      const pick = h('input', { type: 'checkbox', class: 'rowsel', 'aria-label': 'Select ' + i.key, onclick: e => {
+        e.stopPropagation(); // keys go on to the shortcuts; the row opens only on its own Enter
+        const boxes = [...out.querySelectorAll('input.rowsel')], k0 = boxes.indexOf(pick);
+        if (e.shiftKey && S.lastPick >= 0 && S.lastPick !== k0) { // shift-click: everything between the last click and this one takes this one's state
+          const [a, b] = [Math.min(S.lastPick, k0), Math.max(S.lastPick, k0)];
+          for (let k = a; k <= b; k++) if (boxes[k].checked !== pick.checked) { boxes[k].checked = pick.checked; boxes[k].dispatchEvent(new Event('change')); }
+        }
+        S.lastPick = k0;
+      } });
+      pick.addEventListener('change', () => { if (pick.checked) S.sel.add(i.key); else S.sel.delete(i.key); syncAll(); if (EXT.onSelect) EXT.onSelect(); });
+      return h('div', { class: 'row' + (long ? ' long' : ''), role: 'listitem', tabindex: 0, 'data-key': i.key, onclick: open, onkeydown: e => { if (e.key === 'Enter' && e.target === e.currentTarget) open(); } },
+        pick, cols.map(c => { const el = cell(c, i); el.classList.add('c-' + (c.startsWith('customfield_') ? 'cf' : c)); return el; }),
+        long ? h('div', { class: 'snip' }, i.snippet || h('span', { class: 'muted' }, 'No description.')) : null,
+        h('span', { class: 'hover-acts', 'data-for': i.key }));
+    };
+    // append: the next page under the ones shown (infinite scroll on phones); otherwise the page replaces what was there
+    const load = async (n, toUrl, append) => {
+      if (loading) return;
+      loading = true;
+      try {
+        at = n;
+        const long = S.settings.list_view === 'long';
+        const cols = (S.settings.columns && S.settings.columns.length ? S.settings.columns : ['type', 'key', 'summary', 'priority', 'assignee', 'status', 'updated']);
+        if (cols.some(c => c.startsWith('customfield_'))) await fieldNames();
+        drawHead(cols);
+        const r = await api('GET', query(n, cols, long));
+        if (r.status === 400 && r.data && r.data.detail && r.data.detail.key) { // a column or sort that no longer exists: the person's own settings, so drop it and go on
+          if (r.data.detail.key === 'sort') await saveSettings({ sort: { field: '', dir: 'asc' } }); else await saveSettings({ columns: cols.filter(c => !c.startsWith('customfield_')) });
+          loading = false; return load(n, toUrl, append);
+        }
+        if (r.status === 400) { err.textContent = r.data.error + (r.data.detail && r.data.detail.pos != null ? ' (at position ' + r.data.detail.pos + ')' : ''); return; }
+        if (r.status !== 200) { err.textContent = 'Could not load issues'; return; }
+        err.textContent = '';
+        S.tql = r.data.query || '';
+        pages = Math.max(1, Math.ceil(r.data.total / size));
+        if (n >= pages && n > 0) { loading = false; return load(pages - 1, true); } // the page in the address is past the end now
+        if (toUrl) { // the page in the address: a reload or Back returns to it (LIST-05)
+          const p = new URLSearchParams(location.hash.startsWith('#/?') ? location.hash.slice(3) : '');
+          if (n) p.set('page', String(n + 1)); else p.delete('page');
+          if (!p.has('q')) { p.set('q', S.q); p.set('syntax', S.syntax); }
+          history.replaceState(null, '', '#/?' + p.toString());
+        }
+        const keys = r.data.issues.map(i => i.key);
+        S.nav = append && S.nav ? { keys: S.nav.keys.concat(keys), q: S.q } : { keys, q: S.q }; // the order the person is reading in: prev/next in a ticket follow it
+        if (!append) {
+          clear(out);
+          S.sel = new Set(); S.cur = -1; S.lastPick = -1; // a new page starts with nothing selected and no current row (LIST-05)
+          if (EXT.onSelect) EXT.onSelect();
+        }
+        const first = append ? 1 : n * size + 1, to = n * size + r.data.issues.length;
+        meta.textContent = (r.data.total_capped ? r.data.total + '+' : r.data.total) + ' issues' + (pages > 1 && r.data.issues.length ? ' · ' + first + '–' + to : '');
+        if (r.data.warning) meta.append(' · ', h('span', { class: 'note', role: 'status' }, r.data.warning)); // the index is behind, or a fallback answered
+        if (!r.data.issues.length && !append) out.append(h('div', { class: 'row' }, h('span', { class: 'muted' }, 'No issues match.')));
+        all.hidden = !out.childElementCount && !r.data.issues.length; all.checked = false; all.indeterminate = false;
+        for (const i of r.data.issues) out.append(rowOf(i, cols, long));
+        syncAll();
+        drawPager(n);
+      } finally { loading = false; }
+    };
+    function drawPager(n) {
+      clear(pager);
+      pager.hidden = pages < 2 || phone();
+      more.hidden = !phone() || at >= pages - 1;
+      if (pages < 2 || phone()) return;
       // numbered pages around the current one, with the first and last always reachable
-      const go = k => async () => { await load(k); window.scrollTo(0, 0); };
+      const go = k => async () => { await load(k, true); window.scrollTo(0, 0); };
       pager.append(h('button', { class: 'btn ghost', disabled: n === 0, onclick: go(n - 1) }, '‹ Prev'));
       let gap = false;
       for (let k = 0; k < pages; k++) {
@@ -380,10 +463,18 @@
         pager.append(h('button', { class: k === n ? 'btn' : 'btn ghost', 'aria-current': k === n ? 'page' : null, onclick: go(k) }, String(k + 1)));
       }
       pager.append(h('button', { class: 'btn ghost', disabled: n >= pages - 1, onclick: go(n + 1) }, 'Next ›'));
-    };
-    await load(0);
+    }
+    // j past the last row goes on to the next page (keys.js)
+    EXT.nextPage = async () => { if (phone() || at >= pages - 1) return false; await load(at + 1, true); window.scrollTo(0, 0); return true; };
+    EXT.prevPage = async () => { if (phone() || at <= 0) return false; await load(at - 1, true); return true; };
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting) && phone() && at < pages - 1 && !loading) load(at + 1, false, true); });
+      io.observe(more);
+      const prevCleanup = S.cleanup;
+      S.cleanup = () => { io.disconnect(); EXT.nextPage = EXT.prevPage = null; if (prevCleanup) prevCleanup(); S.cleanup = null; };
+    }
+    await load(Math.max(0, (startPage || 1) - 1));
   }
-
 
   // ----- custom fields: one control per field type; get() returns the JSON value to send (null clears, undefined means untouched/empty)
   function fieldControl(f, value, disabled) {
@@ -1486,7 +1577,7 @@
     // #/?q=…&syntax=text|tql; a link without syntax (older links, Releases' "Issues") is TQL
     const p = new URLSearchParams(hash.startsWith('#/?') ? hash.slice(3) : '');
     if (p.has('q')) S.syntax = p.get('syntax') === 'text' ? 'text' : 'tql';
-    return listView(p.get('q') || '');
+    return listView(p.get('q') || '', parseInt(p.get('page'), 10) || 1);
   }
   // the unread count on the Inbox button: fetched on every screen and every 30 seconds
   async function bell() {

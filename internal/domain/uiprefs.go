@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -284,4 +285,63 @@ func (s *Service) setUIPref(ctx context.Context, q querier, p *UIPrefs, k string
 		return &UIPrefError{k, "unknown setting"}
 	}
 	return err
+}
+
+// ColumnValues gives, for the issues of a list page, the columns the search row does not carry: reporter, created and custom
+// fields (customfield_<id>). Custom values come through CustomValues, so a field the person may not see (restricted by role, or
+// trashed) never reaches them. The keys come from a search already scoped to the person; each is checked again here.
+func (s *Service) ColumnValues(ctx context.Context, a Actor, keys, cols []string) (map[string]map[string]any, error) {
+	out := map[string]map[string]any{}
+	want := map[string]bool{}
+	custom := false
+	for _, c := range cols {
+		want[c] = true
+		if customColRe.MatchString(c) {
+			custom = true
+		}
+	}
+	for _, k := range keys {
+		is, role, err := s.access(ctx, a, k)
+		if err != nil {
+			continue
+		}
+		m := map[string]any{}
+		if want["reporter"] || want["created"] {
+			var rep *string
+			var created time.Time
+			s.DB.QueryRow(ctx, `SELECT u.name, i.created_at FROM issue i LEFT JOIN app_user u ON u.id=i.reporter_id WHERE i.id=$1`, is.ID).Scan(&rep, &created)
+			if want["reporter"] {
+				m["reporter"] = ""
+				if rep != nil {
+					m["reporter"] = *rep
+				}
+			}
+			if want["created"] {
+				m["created"] = created
+			}
+		}
+		if custom {
+			var ptid, ppid string
+			s.DB.QueryRow(ctx, `SELECT i.issue_type_id::text,i.project_id::text FROM issue i WHERE i.id=$1`, is.ID).Scan(&ptid, &ppid)
+			if cv, err := s.CustomValues(ctx, a, is.ID, ppid, ptid, role); err == nil {
+				for c := range want {
+					if v, ok := cv[c]; ok && customColRe.MatchString(c) {
+						m[c] = v
+					}
+				}
+			}
+		}
+		out[is.Key] = m
+	}
+	return out, nil
+}
+
+// ValidColumn says whether a list may ask for the column: a built-in one, or a live custom field.
+func (s *Service) ValidColumn(ctx context.Context, c string) bool {
+	for _, b := range UIColumns {
+		if b == c {
+			return true
+		}
+	}
+	return customColRe.MatchString(c) && s.customFieldLive(ctx, s.DB, c)
 }

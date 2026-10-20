@@ -258,3 +258,19 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--raised);border:1px s
 .row:hover .hover-acts,.row:focus-within .hover-acts{display:inline-flex}
 .hact{min-width:32px;min-height:32px;padding:2px 6px}
 @media(hover:none){.row .hover-acts{display:none!important}}
+/* list columns: the header and the cells share widths; the summary takes the rest */
+.listhead{display:flex;gap:10px;align-items:center;padding:0 12px 4px 38px;flex-wrap:nowrap;overflow:hidden}
+.colhead{font-size:12px;padding:2px 4px;min-height:24px;white-space:nowrap;text-align:left;justify-content:flex-start}
+.colhead[aria-pressed=true]{color:var(--accent)}
+.c-type{width:16px;flex:none}.c-key{width:76px;flex:none}.c-summary{flex:1;min-width:0}.c-priority{width:18px;flex:none}.c-assignee{width:24px;flex:none}
+.c-status{width:104px;flex:none}.c-updated,.c-created{width:76px;flex:none}.c-reporter{width:110px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-labels{width:140px;flex:none;overflow:hidden;white-space:nowrap}.c-comments{width:56px;flex:none}.c-cf{width:100px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.listhead .c-type,.listhead .c-priority,.listhead .c-assignee{overflow:hidden;font-size:0}
+.row .c-status{display:inline-flex}
+@media(max-width:600px){.listhead{display:none}.row .c-key,.row .c-status,.row .c-updated,.row .c-created,.row .c-reporter,.row .c-labels,.row .c-cf,.row .c-comments{width:auto}}
+/* the sticky pager */
+.pager{position:sticky;bottom:0;z-index:4;display:flex;gap:4px;justify-content:center;align-items:center;flex-wrap:wrap;background:var(--sunken);border-top:1px solid var(--border);padding:8px 0;margin-top:8px}
+.pager[hidden],.more-sentinel[hidden]{display:none}
+.more-sentinel{height:1px}
+.settings .colpick{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:240px;overflow:auto}
+.settings .colpick li{display:flex;gap:6px;align-items:center}.settings .colpick .nm{flex:1}.settings .colpick .btn{min-height:28px;padding:0 8px}

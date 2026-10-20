@@ -153,8 +153,15 @@
   register({ keys: ['g', 'b'], screen: 'Anywhere', label: 'Go to boards', run: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } });
   register({ keys: ['?'], screen: 'Anywhere', label: 'Show these shortcuts', run: cheatSheet, palette: false }); // the palette has it as an action
   A.cheatSheet = cheatSheet;
-  register({ keys: ['j'], screen: 'Issue list', label: 'Next issue', run: () => setCurrent(S.cur < 0 ? 0 : S.cur + 1) });
-  register({ keys: ['k'], screen: 'Issue list', label: 'Previous issue', run: () => setCurrent(S.cur < 0 ? 0 : S.cur - 1) });
+  // past the last row of a page j goes on to the next page, and k before the first back to the previous one (LIST-05)
+  register({ keys: ['j'], screen: 'Issue list', label: 'Next issue', run: async () => {
+    if (S.cur >= 0 && S.cur === rows().length - 1 && A.EXT.nextPage && await A.EXT.nextPage()) { S.cur = -1; setCurrent(0); return; }
+    setCurrent(S.cur < 0 ? 0 : S.cur + 1);
+  } });
+  register({ keys: ['k'], screen: 'Issue list', label: 'Previous issue', run: async () => {
+    if (S.cur === 0 && A.EXT.prevPage && await A.EXT.prevPage()) { S.cur = -1; setCurrent(rows().length - 1); return; }
+    setCurrent(S.cur < 0 ? 0 : S.cur - 1);
+  } });
   register({ keys: ['o'], screen: 'Issue list', label: 'Open the current issue (or Enter)', run: () => { const r = currentRow(); if (r) location.hash = '#/issue/' + r.dataset.key; } });
   register({ keys: ['x'], screen: 'Issue list', label: 'Select the current issue', run: () => {
     const r = currentRow() || setCurrent(0);
