@@ -598,6 +598,9 @@ func rows() []row {
 		{"POST /api/v1/bulk/transitions", exp{anon: codes(401), outsider: codes(200), viewer: codes(200), member: codes(200), admin: codes(200)}, func(f *fixture) req {
 			return J("POST", "/api/v1/bulk/transitions", map[string]any{"keys": []string{f.issue()}})
 		}},
+		{"PUT /api/v1/issues/{key}/comments/{id}/reactions", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req {
+			return J("PUT", "/api/v1/issues/"+f.issue()+"/comments/00000000-0000-0000-0000-000000000000/reactions", map[string]any{"emoji": "👍", "on": true})
+		}},
 		{"POST /api/v1/undo/{token}", exp{anon: codes(401), outsider: codes(404), viewer: codes(404), member: codes(404), admin: codes(404)}, func(f *fixture) req { return J("POST", "/api/v1/undo/un_nothing", nil) }},
 		{"GET /api/v1/me/ui-prefs", authed, func(f *fixture) req { return J("GET", "/api/v1/me/ui-prefs", nil) }},
 		{"PUT /api/v1/me/ui-prefs", authed, func(f *fixture) req { return J("PUT", "/api/v1/me/ui-prefs", map[string]any{"density": "compact"}) }},

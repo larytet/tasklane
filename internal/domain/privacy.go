@@ -83,6 +83,7 @@ func (s *Service) ExportPersonalData(ctx context.Context, a Actor, userID string
 		{"git_activity", `SELECT o.kind, r.full_name AS repo, o.title, o.state, o.provider_at FROM git_object o JOIN git_repo r ON r.id=o.repo_id WHERE o.author_user::text=$1 ORDER BY o.provider_at`},
 		{"git_commands", `SELECT issue_key, command, outcome, reason, at FROM git_smart_run WHERE user_id::text=$1 ORDER BY id`},
 		{"audit", `SELECT action, target, detail, at FROM audit_event WHERE actor_id::text=$1 ORDER BY id`},
+		{"reactions", `SELECT r.emoji, i.key, r.created_at FROM comment_reaction r JOIN comment c ON c.id=r.comment_id JOIN issue i ON i.id=c.issue_id WHERE r.user_id::text=$1 ORDER BY r.created_at`},
 	} {
 		if err := list(q.key, q.sql, 0); err != nil {
 			return nil, fmt.Errorf("%s: %w", q.key, err)
@@ -268,6 +269,7 @@ func (s *Service) ErasePerson(ctx context.Context, a Actor, userID string, o Era
 			{"preferences_removed", `DELETE FROM notification_pref WHERE user_id::text=$1`},
 			{"settings_removed", `DELETE FROM user_setting WHERE user_id::text=$1`},
 			{"undo_tokens_removed", `DELETE FROM undo_token WHERE user_id::text=$1`},
+			{"reactions_removed", `DELETE FROM comment_reaction WHERE user_id::text=$1`},
 			{"idempotency_keys_removed", `DELETE FROM idempotency_key WHERE user_id::text=$1`},
 		} {
 			if err := exec(q.count, q.sql, userID); err != nil {

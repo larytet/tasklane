@@ -278,3 +278,10 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--raised);border:1px s
 .desc-body.editable{cursor:text;border-radius:var(--r);margin:-4px;padding:4px}
 .desc-body.editable:hover{background:var(--hover);outline:1px dashed var(--border-input)}
 .ro-note{margin:4px 0}
+/* reactions on comments */
+.reactions{display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-top:4px}
+.btn.react{padding:0 8px;min-height:28px;border-radius:999px;font-size:13px}.btn.react.mine{border-color:var(--accent);background:var(--accent-bg)}
+.react-add{min-height:28px;padding:0 8px;font-size:13px}.react-menu{display:inline-flex;gap:2px;background:var(--overlay);border:1px solid var(--border);border-radius:999px;padding:2px}
+.react-menu[hidden]{display:none}.react-menu .btn{min-height:32px;min-width:32px;padding:0 4px}
+/* an onboarding hint: beside what it is about, never over a dialog, never taking focus */
+.hint{position:fixed;z-index:15;max-width:320px;display:flex;gap:8px;align-items:center;background:var(--accent-bg);color:var(--text);border:1px solid var(--accent);border-radius:var(--r);padding:8px 10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.25)}

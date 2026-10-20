@@ -84,5 +84,10 @@ export default async function globalSetup() {
   }
   await api(ck, 'POST', '/api/v1/issues', { project: 'ABC', type: 'Bug', summary: 'Checkout fails on 3DS challenge', priority: 'high', labels: ['payments'],
     description: 'Steps:\n\n1. Use test card\n\nExpected: order created\n\nNotes: see https://example.com/runbook' });
+  // the seeded people have seen the onboarding hints, so a tooltip never sits over what the other tests click; hints.spec uses new people
+  for (const [email, pw] of [['admin@example.com', 'adminpass1'], ['jana@example.com', 'password123'], ['arkady@example.com', 'password123'], ['viewer@example.com', 'password123']]) {
+    const s = await api(null, 'POST', '/api/v1/login', { email, password: pw });
+    await api(s.cookie, 'PUT', '/api/v1/me/ui-prefs', { hints_seen: ['create', 'views', 'settings'] });
+  }
   process.env.E2E_READY = '1';
 }

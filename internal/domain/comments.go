@@ -16,6 +16,8 @@ type Comment struct {
 	Created  time.Time  `json:"created"`
 	Edited   *time.Time `json:"edited,omitempty"`
 	ViaEmail bool       `json:"via_email,omitempty"` // posted from an email; an administrator can open the original
+	// Reactions are filled for the issue view (the person reading decides Mine)
+	Reactions []Reaction `json:"reactions,omitempty"`
 }
 
 // listComments returns the thread; internal comments only for people who may see them (write access), so a viewer never reads them.

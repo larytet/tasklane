@@ -23,12 +23,13 @@ var ordinaryWork = map[string]bool{
 	"POST /api/v1/mail/inbound/{id}": true, "POST /api/v1/mail/bounces/{id}": true, "POST /api/v1/git/webhooks/{id}": true, "POST /api/v1/jira/webhooks/{id}": true, // inbound, signed by the provider
 	"POST /api/v1/issues": true, "PATCH /api/v1/issues/{key}": true, "POST /api/v1/issues/{key}/comments": true, "PATCH /api/v1/issues/{key}/comments/{id}": true,
 	"POST /api/v1/issues/{key}/transitions": true, "POST /api/v1/issues/{key}/links": true, "POST /api/v1/issues/{key}/archive": true, "DELETE /api/v1/issues/{key}/archive": true,
-	"POST /api/v1/issues/{key}/lifecycle": true, // audited by the domain
-	"POST /api/v1/bulk":                   true, // each issue's change is the ordinary single-issue change, audited as such
-	"POST /api/v1/bulk/transitions":       true, // a read
-	"POST /api/v1/undo/{token}":           true, // a person's own undo, audited by the domain as issue.undo
-	"PUT /api/v1/issues/{key}/versions":   true, // an edit of the issue, with its own history
-	"POST /api/v1/issues/{key}/presence":  true, "DELETE /api/v1/issues/{key}/presence": true,
+	"POST /api/v1/issues/{key}/lifecycle":              true, // audited by the domain
+	"POST /api/v1/bulk":                                true, // each issue's change is the ordinary single-issue change, audited as such
+	"POST /api/v1/bulk/transitions":                    true, // a read
+	"PUT /api/v1/issues/{key}/comments/{id}/reactions": true, // a person's own reaction
+	"POST /api/v1/undo/{token}":                        true, // a person's own undo, audited by the domain as issue.undo
+	"PUT /api/v1/issues/{key}/versions":                true, // an edit of the issue, with its own history
+	"POST /api/v1/issues/{key}/presence":               true, "DELETE /api/v1/issues/{key}/presence": true,
 	"PUT /api/v1/issues/{key}/text/{field}": true, "POST /api/v1/issues/{key}/text/{field}/patch": true, "POST /api/v1/issues/{key}/text/{field}/replace": true, "POST /api/v1/issues/{key}/text/{field}/restore": true,
 	"PUT /api/v1/issues/{key}/drafts/{field}": true, "DELETE /api/v1/issues/{key}/drafts/{field}": true,
 	"POST /api/v1/issues/{key}/attachments": true, "DELETE /api/v1/issues/{key}/attachments/{id}": true, "POST /api/v1/issues/{key}/uploads": true, "POST /api/v1/issues/{key}/uploads/direct": true,

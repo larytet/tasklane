@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgconn"
+	"hash/fnv"
 	"io"
 	"net"
 	"net/http"
@@ -828,6 +829,14 @@ func (s *Server) view(w http.ResponseWriter, r *http.Request) {
 	if v.Issue.Updated.UnixNano() != 0 {
 		etag = etag[:len(etag)-1] + fmt.Sprintf("-%d\"", v.Issue.Updated.UnixNano())
 	}
+	// reactions change neither the version nor the updated time: a short hash of them keeps a poll from answering 304 over a new one
+	rh := fnv.New32a()
+	for _, c := range v.Comments {
+		for _, re := range c.Reactions {
+			fmt.Fprintf(rh, "%s|%s|%d|%t;", c.ID, re.Emoji, re.Count, re.Mine)
+		}
+	}
+	etag = etag[:len(etag)-1] + fmt.Sprintf("-r%x\"", rh.Sum32())
 	if len(v.Presence) == 0 {
 		w.Header().Set("ETag", etag)
 		if r.Header.Get("If-None-Match") == etag {

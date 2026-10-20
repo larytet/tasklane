@@ -380,6 +380,7 @@ func (s *Service) View(ctx context.Context, a Actor, key string) (IssueView, err
 	if v.Comments, err = s.listComments(ctx, is.ID, canWrite(role)); err != nil {
 		return v, err
 	}
+	s.withReactions(ctx, v.Comments, a.ID)
 	if v.Attachments, err = s.listAttachments(ctx, is.ID); err != nil {
 		return v, err
 	}

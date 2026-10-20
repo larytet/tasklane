@@ -1308,7 +1308,8 @@
       // cancel keeps what was typed as a draft (offered back with "Continue editing"), without asking
       const cancel = () => { if (st.dirty) { clearTimeout(st.localTimer); flushLocal(); } stopEditing(false); render(); };
       // leaving the editor saves, unless focus went to its own buttons or banners (Save, Cancel, a conflict choice)
-      ta.addEventListener('blur', e => { if (st.editing && st.dirty && !st.saving && !(e.relatedTarget && box.contains(e.relatedTarget)) && document.hasFocus()) save(); });
+      // not into a deleted issue, and not again with the text whose save just failed (that answer is on the screen already)
+      ta.addEventListener('blur', e => { if (st.editing && st.dirty && !st.saving && !st.deleted && st.failedBody !== ed.body && !(e.relatedTarget && box.contains(e.relatedTarget)) && document.hasFocus()) save(); });
       const saveOnce = async () => {
         clearTimeout(st.localTimer); st.localTimer = 0; setLocalDraft(key, 'description', { body: ed.body, base_seq: ed.baseSeq, at: new Date().toISOString() }); // never lose it
         state.textContent = 'Saving…';
@@ -1317,6 +1318,7 @@
         if (r.ok) { stopEditing(true); await reloadAll(); }
         else if (r.conflict) { st.saveId = null; await conflictDialog('description', r.conflict, ed.body, async () => { stopEditing(true); await reloadAll(); }); }
         else {
+          st.failedBody = ed.body;
           state.textContent = r.msg || 'Offline, draft kept'; // same save id on retry: a replay can never apply twice
           if (r.paused) window.addEventListener('tl-resumed', () => { if (st.editing && st.dirty) save(); }, { once: true });
         }
@@ -1456,11 +1458,48 @@
     }
 
     // ----- comments and activity
+    // ----- reactions on a comment (SPEC 4.2): the eight, one each per person; a toggle per emoji with its count and who reacted
+    const EMOJI = ['👍', '👎', '😄', '🎉', '😕', '❤️', '🚀', '👀'];
+    function reactionsEl(c) {
+      const box = h('div', { class: 'reactions', role: 'group', 'aria-label': 'Reactions' });
+      const can = !v.mirror && !v.issue.archived;
+      const set = async (emoji, on) => {
+        const r = await api('PUT', '/api/v1/issues/' + key + '/comments/' + c.id + '/reactions', { emoji, on });
+        if (r.status !== 200) { toast((r.data && r.data.error) || 'Could not react'); return; }
+        c.reactions = r.data || [];
+        const nb = reactionsEl(c); box.replaceWith(nb);
+        const again = nb.querySelector('[data-emoji="' + emoji + '"]') || nb.querySelector('.react-add'); if (again) again.focus();
+      };
+      for (const r of c.reactions || []) {
+        const who = r.names.join(', ');
+        box.append(h('button', { class: 'btn react' + (r.mine ? ' mine' : ''), 'data-emoji': r.emoji, 'aria-pressed': String(r.mine), disabled: !can,
+          title: who, 'aria-label': r.emoji + ' ' + r.count + (r.count === 1 ? ' reaction' : ' reactions') + ' by ' + who + (can ? (r.mine ? '. Press to take yours back' : '. Press to add yours') : ''),
+          onclick: () => set(r.emoji, !r.mine) }, r.emoji + ' ' + r.count));
+      }
+      if (can) {
+        const menu = h('span', { class: 'react-menu', role: 'group', 'aria-label': 'Choose a reaction', hidden: true });
+        const add = h('button', { class: 'btn ghost react-add', 'aria-label': 'Add reaction', 'aria-expanded': 'false', title: 'Add reaction', onclick: () => {
+          const open = menu.hidden; menu.hidden = !open; add.setAttribute('aria-expanded', String(open));
+          if (open) menu.querySelector('button').focus();
+        } }, '☺+');
+        for (const em of EMOJI) {
+          const mine = (c.reactions || []).some(r => r.emoji === em && r.mine);
+          menu.append(h('button', { class: 'btn ghost', 'aria-label': (mine ? 'Take back ' : 'React with ') + em, onclick: () => set(em, !mine) }, em));
+        }
+        menu.addEventListener('keydown', e => {
+          const bs = [...menu.querySelectorAll('button')], at = bs.indexOf(document.activeElement);
+          if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); bs[(at + (e.key === 'ArrowRight' ? 1 : bs.length - 1)) % bs.length].focus(); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); menu.hidden = true; add.setAttribute('aria-expanded', 'false'); add.focus(); }
+        });
+        box.append(add, menu);
+      }
+      return box;
+    }
     function threadEl() {
       const t = h('div', {});
       for (const c of v.comments) {
         t.append(h('div', { class: 'msg' }, avatar(c.author.name), h('div', { class: 'body' },
-          h('div', {}, h('span', { class: 'who' }, c.author.name), ' ', h('span', { class: 'muted' }, L.relTime(c.created) + (c.internal ? ' · internal' : '') + (c.via_email ? ' · via email' : '') + (c.edited ? ' · edited' : ''))), paragraphs(c.body))));
+          h('div', {}, h('span', { class: 'who' }, c.author.name), ' ', h('span', { class: 'muted' }, L.relTime(c.created) + (c.internal ? ' · internal' : '') + (c.via_email ? ' · via email' : '') + (c.edited ? ' · edited' : ''))), paragraphs(c.body), String(c.author.id).startsWith('customer:') ? null : reactionsEl(c))));
       }
       if (!v.comments.length) t.append(h('p', { class: 'muted' }, 'No comments yet.'));
       return t;
@@ -1633,7 +1672,7 @@
     } else { S.me = null; if (r.status === 401) forgetPrefs(); }
     applyWidth();
     route();
-    if (S.me) showScheduled();
+    if (S.me) { showScheduled(); window.dispatchEvent(new Event('tl-signed-in')); }
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [], settings: null };
