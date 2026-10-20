@@ -242,3 +242,8 @@ body[data-width=narrow] .page.fluid{max-width:900px}
 .cheats h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--subtle);margin:16px 0 4px}
 table.keys{width:100%}table.keys th{width:40%;font-weight:400;white-space:nowrap}
 kbd{font-family:var(--mono);font-size:12px;background:var(--raised);border:1px solid var(--border-input);border-bottom-width:2px;border-radius:4px;padding:0 6px}
+/* command palette */
+.dialog:has(.palette){max-width:620px;align-self:flex-start;margin-top:10vh}
+.palette input[type=text]{width:100%;font-size:16px;min-height:40px}
+.palette .pick{margin-top:8px}.pal-kind{display:inline-block;min-width:64px;font-size:11px;color:var(--subtle);text-transform:uppercase;letter-spacing:.04em}
+.pick li.on .pal-kind{color:var(--text)}.pal-hint{float:right}

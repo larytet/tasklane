@@ -1465,7 +1465,7 @@
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [], settings: null };
-  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS, createDialog };
+  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS, createDialog, projectDialog };
   window.addEventListener('hashchange', route);
   boot();
 })();

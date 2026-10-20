@@ -10,7 +10,8 @@
   // keys: one key, or two pressed one after the other (g then i); screen: where it applies, as the cheat sheet groups them
   const REG = [];
   function register(def) {
-    if (!def.label) throw new Error('shortcut ' + def.keys.join(' ') + ' has no label'); // KEY-10: nothing reaches the sheet unnamed
+    if (!def.label) throw new Error('shortcut ' + (def.keys || [def.chord]).join(' ') + ' has no label'); // KEY-10: nothing reaches the sheet unnamed
+    def.applies = () => applies(def); // the palette offers the actions that apply on this screen
     REG.push(def);
   }
   A.shortcuts = REG;
@@ -146,7 +147,8 @@
   register({ keys: ['/'], screen: 'Anywhere', label: 'Search', run: () => { const q = document.querySelector('.bar input[type=search]'); if (q) { q.focus(); q.select(); } } });
   register({ keys: ['g', 'i'], screen: 'Anywhere', label: 'Go to the inbox', run: go('#/inbox/unread') });
   register({ keys: ['g', 'b'], screen: 'Anywhere', label: 'Go to boards', run: () => { location.hash = '#/boards/' + (S.projects[0] ? S.projects[0].key : ''); } });
-  register({ keys: ['?'], screen: 'Anywhere', label: 'Show these shortcuts', run: cheatSheet });
+  register({ keys: ['?'], screen: 'Anywhere', label: 'Show these shortcuts', run: cheatSheet, palette: false }); // the palette has it as an action
+  A.cheatSheet = cheatSheet;
   register({ keys: ['j'], screen: 'Issue list', label: 'Next issue', run: () => setCurrent(S.cur < 0 ? 0 : S.cur + 1) });
   register({ keys: ['k'], screen: 'Issue list', label: 'Previous issue', run: () => setCurrent(S.cur < 0 ? 0 : S.cur - 1) });
   register({ keys: ['o'], screen: 'Issue list', label: 'Open the current issue (or Enter)', run: () => { const r = currentRow(); if (r) location.hash = '#/issue/' + r.dataset.key; } });
