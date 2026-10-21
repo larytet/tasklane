@@ -507,13 +507,30 @@ func (s *Service) applyJiraIssue(ctx context.Context, cl *jira.Client, pid, pkey
 // syncJiraPermissions reads the project roles and the groups in them and sets who may read the mirror. Users are matched
 // by Jira account id or verified email. Actors it cannot evaluate are listed as a warning; they grant nothing (fail closed).
 func (s *Service) syncJiraPermissions(ctx context.Context, cl *jira.Client, pid, jiraKey string) error {
-	roles, err := cl.ProjectRoles(ctx, jiraKey)
-	if err != nil {
-		return err
-	}
 	type member struct{ acct, email string }
 	members := map[string]member{}
 	var unmapped []string
+	var fallback string // set when Jira refused the roles and the readers are the assignable people instead
+	roles, err := cl.ProjectRoles(ctx, jiraKey)
+	var refused *jira.ErrStatus
+	if errors.As(err, &refused) && (refused.Status == 401 || refused.Status == 403) {
+		// the account may read the project but not administer it, and Jira shows the roles only to administrators: use the people
+		// Jira lets issues be assigned to (a subset of those who may browse), and say so
+		us, aerr := cl.AssignableUsers(ctx, jiraKey)
+		if aerr != nil {
+			return err
+		}
+		for _, u := range us {
+			if u.Active && u.AccountID != "" {
+				members[u.AccountID] = member{acct: u.AccountID, email: strings.ToLower(u.Email)}
+			}
+		}
+		roles, err = nil, nil
+		fallback = "Jira shows project roles only to project administrators and this connection's account is not one, so who may read this project is taken from the people Jira lets issues be assigned to. Someone who may browse but cannot be assigned issues does not see it here; make the account a project administrator in Jira for exact permissions."
+	}
+	if err != nil {
+		return err
+	}
 	for _, url := range roles {
 		actors, err := cl.RoleActors(ctx, url)
 		if err != nil {
@@ -579,6 +596,11 @@ func (s *Service) syncJiraPermissions(ctx context.Context, cl *jira.Client, pid,
 				"These Jira role members are not users or groups Tasklane can evaluate, so they grant nothing: "+strings.Join(unmapped, ", "))
 		} else {
 			tx.Exec(ctx, `DELETE FROM jira_warning WHERE project_id::text=$1 AND kind='actors'`, pid)
+		}
+		if fallback != "" {
+			tx.Exec(ctx, `INSERT INTO jira_warning(project_id,kind,detail) VALUES($1::uuid,'permissions',$2) ON CONFLICT (project_id,kind) DO UPDATE SET detail=EXCLUDED.detail,at=now()`, pid, fallback)
+		} else {
+			tx.Exec(ctx, `DELETE FROM jira_warning WHERE project_id::text=$1 AND kind='permissions'`, pid)
 		}
 		_, err := tx.Exec(ctx, `UPDATE jira_project SET perm_synced_at=$2 WHERE project_id::text=$1`, pid, s.Now())
 		return err

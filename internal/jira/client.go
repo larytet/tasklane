@@ -317,6 +317,23 @@ func (c *Client) GroupMembers(ctx context.Context, group string) ([]User, error)
 	}
 }
 
+// AssignableUsers returns the active people Jira lets issues of the project be assigned to. It needs only ordinary access to the
+// project (not the right to administer it), so it stands in for the project roles when Jira refuses those.
+func (c *Client) AssignableUsers(ctx context.Context, key string) ([]User, error) {
+	var all []User
+	for start := 0; ; {
+		var out []User
+		if err := c.get(ctx, "/rest/api/3/user/assignable/search", url.Values{"project": {key}, "startAt": {strconv.Itoa(start)}, "maxResults": {"1000"}}, &out); err != nil {
+			return nil, err
+		}
+		all = append(all, out...)
+		start += len(out)
+		if len(out) == 0 {
+			return all, nil
+		}
+	}
+}
+
 // User looks one account up (an email address is only present when the account's privacy settings allow it).
 func (c *Client) User(ctx context.Context, accountID string) (User, error) {
 	var u User

@@ -32,23 +32,25 @@ type Issue struct {
 
 type Server struct {
 	*httptest.Server
-	mu         sync.Mutex
-	Email      string
-	Token      string
-	TZ         *time.Location
-	Issues     []*Issue
-	Roles      map[string]map[string][]M // project -> role name -> actors
-	Groups     map[string][]M            // group -> users
-	Users      map[string]M
-	PageSize   int
-	InlineHist int // changelog entries included inline (Jira caps this); the rest need the changelog endpoint
-	reqs       []string
-	limit      int
-	retryAfter int
-	down       bool
-	downAfter  int // when > 0, the Jira goes down after this many search requests have been answered
-	searches   int
-	Now        func() time.Time
+	mu          sync.Mutex
+	Email       string
+	Token       string
+	TZ          *time.Location
+	Issues      []*Issue
+	Roles       map[string]map[string][]M // project -> role name -> actors
+	Groups      map[string][]M            // group -> users
+	Assignable  map[string][]M            // project -> people issues can be assigned to
+	RolesDenied map[string]bool           // project -> Jira refuses its roles (the account does not administer it)
+	Users       map[string]M
+	PageSize    int
+	InlineHist  int // changelog entries included inline (Jira caps this); the rest need the changelog endpoint
+	reqs        []string
+	limit       int
+	retryAfter  int
+	down        bool
+	downAfter   int // when > 0, the Jira goes down after this many search requests have been answered
+	searches    int
+	Now         func() time.Time
 	// write support (see jirawrite.go)
 	Accounts    map[string]*Account // other people who may sign in, by email
 	Transitions []Trans
@@ -255,6 +257,16 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			start = len(is.History)
 		}
 		write(M{"values": is.History[start:end], "total": len(is.History)})
+	case path == "/rest/api/3/user/assignable/search":
+		list := s.Assignable[q.Get("project")]
+		start, _ := strconv.Atoi(q.Get("startAt"))
+		if start > len(list) {
+			start = len(list)
+		}
+		write(list[start:])
+	case regexp.MustCompile(`^/rest/api/3/project/[^/]+/role$`).MatchString(path) && s.RolesDenied[strings.Split(path, "/")[5]]:
+		w.WriteHeader(401)
+		write(M{"errorMessages": []string{"You cannot edit the configuration of this project."}, "errors": M{}})
 	case regexp.MustCompile(`^/rest/api/3/project/[^/]+/role$`).MatchString(path):
 		key := strings.Split(path, "/")[5]
 		out := M{}

@@ -426,6 +426,29 @@ func TestMIR06_PermissionsAreJirasAndFailClosed(t *testing.T) {
 	}
 }
 
+func TestMIR06_NotAProjectAdministratorStillGivesAccurateReaders(t *testing.T) {
+	r := newJira(t)
+	jiraDataset(r)
+	e := r.e
+	ann, _ := e.Svc.CreateUser(ctx, "ann@example.com", "Ann", "password123", false)
+	annA := domain.Actor{ID: ann.ID, Label: "Ann"}
+	r.jm.Users["acc-ann"] = jiramock.M{"accountId": "acc-ann", "displayName": "Ann", "emailAddress": "ann@example.com", "active": true}
+	r.jm.RolesDenied = map[string]bool{"WEB": true}
+	r.jm.Assignable = map[string][]jiramock.M{"WEB": {{"accountId": "acc-ann", "emailAddress": "ann@example.com", "displayName": "Ann", "active": true}, {"accountId": "acc-gone", "displayName": "Closed", "active": false}}}
+	r.mirror(t)
+	r.syncAs(t)
+	if _, err := e.Svc.View(ctx, annA, "WEB-3"); err != nil {
+		t.Fatalf("an assignable person cannot read when Jira hides the roles: %v", err)
+	}
+	if _, err := e.Svc.View(ctx, e.Bob, "WEB-3"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("someone Jira does not list can read: %v", err)
+	}
+	st, _ := e.Svc.JiraStatus(ctx, e.Admin)
+	if st[0].LastError != "" || !st[0].PermFresh || !strings.Contains(strings.Join(st[0].Warnings, " | "), "project administrator") {
+		t.Fatalf("the project shows an error instead of a note: %+v", st[0])
+	}
+}
+
 func TestMIR06_RevocationReachesTheMirrorAndStalenessFailsClosed(t *testing.T) {
 	r := newJira(t)
 	jiraDataset(r)

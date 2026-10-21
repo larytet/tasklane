@@ -53,6 +53,12 @@ served with a "synced N min ago" marker.
 
 ## Permissions
 
+If Jira refuses the role read because the connection's account is not an administrator of the project (it answers 401 or 403),
+Tasklane does not fail: it takes the readers from the people Jira lets issues be assigned to (`user/assignable/search`, which
+needs only ordinary access), keeps the permission data fresh, and shows a warning that says so. That is a subset of those who may
+browse (someone who may browse but cannot be assigned issues does not see the project here), so make the account a project
+administrator for exact permissions.
+
 Tasklane evaluates Jira's read rules itself, from data it mirrors: members of project roles (users, and the active members of
 groups) become **readers**, matched to Tasklane accounts by Jira account id or email. The permission data is re-read at least
 every 5 minutes. **A project whose permission data is older than 15 minutes is invisible to everyone but administrators**
