@@ -205,12 +205,7 @@
       if (withRows) {
         box.append(h('span', { class: 'sep' }),
           btn('short', 'Short view: title, status, assignee', S.settings.list_view === 'short', async () => { if (await saveSettings({ list_view: 'short' })) { draw(); onRows(); } }),
-          btn('long', 'Long view: with the start of the description', S.settings.list_view === 'long', async () => { if (await saveSettings({ list_view: 'long' })) { draw(); onRows(); } }),
-          h('span', { class: 'sep' }));
-        const den = h('span', { class: 'seg', role: 'group', 'aria-label': 'Density' });
-        for (const [v, label] of [['compact', 'Compact'], ['default', 'Default'], ['comfortable', 'Comfortable']])
-          den.append(h('button', { class: 'btn' + (S.settings.density === v ? '' : ' ghost'), 'aria-pressed': String(S.settings.density === v), title: label + ' rows', onclick: async () => { saveSettings({ density: v }); draw(); } }, label));
-        box.append(den);
+          btn('long', 'Long view: with the start of the description', S.settings.list_view === 'long', async () => { if (await saveSettings({ list_view: 'long' })) { draw(); onRows(); } }));
       }
     };
     draw();
