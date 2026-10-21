@@ -95,7 +95,9 @@ test('PREF-02: two tabs change different settings and both changes are kept', as
   await u.page.getByRole('button', { name: 'Settings' }).click();
   await u.page.getByRole('dialog').getByLabel('High contrast').check();
   await expect(u.page.getByRole('dialog').getByRole('status')).toHaveText('Saved');
-  await tab2.getByRole('button', { name: 'Comfortable' }).click();
+  await tab2.getByRole('button', { name: 'Settings' }).click();
+  await tab2.getByRole('dialog').getByRole('tab', { name: 'List' }).click();
+  await tab2.getByRole('dialog').getByRole('radiogroup', { name: 'Density' }).getByLabel('Comfortable', { exact: true }).check();
   await expect.poll(async () => (await get(tab2)).prefs.density).toBe('comfortable');
   const p = (await get(tab2)).prefs;
   expect(p.high_contrast, 'the first tab\'s change was lost').toBe(true);
@@ -104,17 +106,21 @@ test('PREF-02: two tabs change different settings and both changes are kept', as
   await u.ctx.close();
 });
 
-test('LIST-01: density buttons sit next to the short/long view and set the row height (compact 36, default 44, comfortable 56)', async ({ browser }) => {
+test('LIST-01: density is set in Settings (not on the list) and sets the row height (compact 36, default 44, comfortable 56)', async ({ browser }) => {
   const u = await newUser(browser, 'arkady@example.com', { viewport: { width: 1280, height: 800 } });
   const view = u.page.getByRole('group', { name: 'View' });
   await expect(view.getByRole('button', { name: /^Long view/ })).toBeVisible();
+  await expect(view.getByRole('button', { name: 'Compact', exact: true })).toHaveCount(0);
   const row = u.page.getByRole('listitem').first();
+  await u.page.getByRole('button', { name: 'Settings' }).click();
+  const dlg = u.page.getByRole('dialog', { name: 'Settings' });
+  await dlg.getByRole('tab', { name: 'List' }).click();
   for (const [name, px] of [['Compact', 36], ['Comfortable', 56], ['Default', 44]]) {
-    await view.getByRole('button', { name, exact: true }).click();
-    await expect(view.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await dlg.getByRole('radiogroup', { name: 'Density' }).getByLabel(name, { exact: true }).check();
     await expect.poll(async () => Math.round((await row.boundingBox()).height)).toBeGreaterThanOrEqual(px);
     expect(Math.round((await row.boundingBox()).height)).toBeLessThanOrEqual(px + 4);
   }
+  await u.page.keyboard.press('Escape');
   // each density works in the long view too, without sideways scroll on a phone
   await view.getByRole('button', { name: /^Long view/ }).click();
   await u.page.setViewportSize({ width: 390, height: 800 });

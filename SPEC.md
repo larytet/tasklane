@@ -1133,7 +1133,7 @@ it when Jira deletes it, and honours account closures and erasure requests repor
 
 ### 18.1.1 Jira write-through (editing a mirrored project in Tasklane)
 
-Status: **built (M5.75) against a recorded Jira double; never run against a real Jira site.** The assumptions in the last
+Status: **built (M5.76 and M5.77) against a recorded Jira double; never run against a real Jira site.** The assumptions in the last
 paragraph of this section must be verified against a real Jira site before the conflict design below is relaxed. Where the
 build differs from the text below, a *Built:* note says so.
 
