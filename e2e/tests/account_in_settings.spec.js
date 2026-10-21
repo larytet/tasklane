@@ -7,11 +7,13 @@ import { pageErrors, newUser, closeContexts } from './helpers.js';
 test.beforeEach(() => { pageErrors.length = 0; });
 test.afterEach(async () => { const errs = [...pageErrors]; await closeContexts(); expect(errs, 'uncaught errors in the page').toEqual([]); });
 
-test('ACCT-SET-01: the name in the top bar opens Settings on Security, with the account sections in three tabs', async ({ browser }) => {
+test('ACCT-SET-01: Settings (the gear) opens on Security, with the account sections in three tabs', async ({ browser }) => {
   const { page } = await newUser(browser, 'jana@example.com');
-  await page.getByRole('button', { name: 'Account and security' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const dlg = page.getByRole('dialog', { name: 'Settings' });
   await expect(dlg).toBeVisible();
+  await dlg.getByRole('tab', { name: 'Security' }).click();
+  await expect(page.getByRole('button', { name: 'Account and security' })).toHaveCount(0); // the name button is gone: the gear is the one way in
   await expect(page).toHaveURL(/#\/$|\/$/); // it is a dialog, not a page: the address did not change
   await expect(dlg.getByRole('tab', { name: 'Security' })).toHaveAttribute('aria-selected', 'true');
   for (const h of ['Two-factor authentication', 'Passkeys and security keys', 'Password']) await expect(dlg.getByRole('heading', { name: h })).toBeVisible();
@@ -30,7 +32,8 @@ test('ACCT-SET-01: the name in the top bar opens Settings on Security, with the 
 
 test('ACCT-SET-02: a dialog opened from Settings sits above it: only it answers, and Escape closes one at a time', async ({ browser }) => {
   const { page } = await newUser(browser, 'jana@example.com');
-  await page.getByRole('button', { name: 'Account and security' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('tab', { name: 'Security' }).click();
   await page.getByRole('button', { name: 'Set up two-factor authentication' }).click();
   const setup = page.getByRole('dialog', { name: 'Set up two-factor authentication' });
   await expect(setup).toBeVisible();

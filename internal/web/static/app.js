@@ -297,7 +297,6 @@
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
       h('button', { class: 'btn ghost', id: 'settings-btn', 'aria-label': 'Settings', 'aria-haspopup': 'dialog', title: 'Settings', onclick: settingsDialog }, '⚙'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => saveSettings({ theme: document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' }) }, '◐'),
-      S.me ? h('button', { class: 'btn ghost', 'aria-label': 'Account and security', 'aria-haspopup': 'dialog', onclick: () => settingsDialog('Security') }, S.me.label) : null,
       h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/logout'); S.me = null; forgetPrefs(); route(); } }, 'Sign out'));
   }
 

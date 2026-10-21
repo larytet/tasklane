@@ -1,6 +1,6 @@
 // The Settings dialog (SPEC 4.6): the person's own settings in one place, saved on the server as each one changes and applied at once,
 // without a reload. Two-factor authentication, passkeys, the password, sessions and API tokens are here too (tabs Security, Sessions and
-// API tokens, built by account.js); the name in the top bar opens Settings on Security.
+// API tokens, built by account.js); Settings (the gear in the top bar) has them on Security.
 (function () {
   'use strict';
   const A = window.TLApp;
