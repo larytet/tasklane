@@ -119,6 +119,9 @@
       ...accountPanels,
       Jira: jiraPanel,
     };
+    // the instance administrator's way into the administration pages (it was a button in the top bar)
+    if (S.me && S.me.admin) panels.Administration = h('div', { class: 'set' }, h('span', {}),
+      h('p', { style: 'margin:0' }, h('a', { href: '#/admin/workflows', onclick: () => close() }, 'Open administration'), h('span', { class: 'muted' }, ' · workflows, fields, users, security and the rest of the instance settings')));
     const tabs = h('div', { role: 'tablist', 'aria-label': 'Settings sections' });
     const box = h('div', {});
     const names = Object.keys(panels);
