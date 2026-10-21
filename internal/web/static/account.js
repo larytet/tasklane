@@ -177,17 +177,9 @@
   }
 
   // #/account is where a person is sent who must set up a second factor (the organization requires one) and where old links point:
-  // a short page that opens Settings on its Security tab. Nothing behind it asks the server for anything, so a refusal cannot send the
+  // they are sent on to Settings on its Security tab. Nothing behind it asks the server for anything, so a refusal cannot send the
   // person back here in a loop.
-  function accountView() {
-    // Settings opens when a person arrives here (also after signing in again on this address), not at every redraw of the page they are on
-    const fresh = !document.getElementById('account-shell');
-    const app = clear(document.getElementById('app'));
-    app.append(topbar(), h('div', { class: 'page', id: 'account-shell' }, h('h2', {}, 'Account and security'),
-      h('p', {}, 'Two-factor authentication, passkeys, your password, sessions and API tokens are in Settings.'),
-      h('button', { class: 'btn primary', id: 'open-account-settings', onclick: () => A.EXT.settings('Security') }, 'Open Settings')));
-    if (fresh) A.EXT.settings('Security');
-  }
+  function accountView() { A.S.settingsFrom = A.S.settingsFrom || '#/'; location.replace('#/settings/security'); }
   A.EXT.accountSections = buildAccount;
 
   // the screen an application sends a person to when it asks for access (OAuth authorization)

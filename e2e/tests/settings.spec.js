@@ -43,7 +43,7 @@ test('UI-08: view buttons and Settings are saved on the server and follow the pe
   await page.getByRole('tab', { name: 'List' }).click();
   await page.getByLabel('Description length in the long view').fill('50');
   await page.getByLabel('Description length in the long view').press('Tab');
-  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Saved');
+  await expect(page.getByRole('region', { name: 'Settings' }).getByRole('status')).toHaveText('Saved');
   await page.getByRole('button', { name: 'Done' }).click();
   await expect(row.locator('.snip')).toContainText('start-abcdefghij');
   await expect(row.locator('.snip')).not.toContainText('-END');
@@ -53,7 +53,7 @@ test('UI-08: view buttons and Settings are saved on the server and follow the pe
   await page.getByRole('tab', { name: 'List' }).click();
   await page.getByLabel('Description length in the long view').fill('0');
   await page.getByLabel('Description length in the long view').press('Tab');
-  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Could not save the settings');
+  await expect(page.getByRole('region', { name: 'Settings' }).getByRole('status')).toHaveText('Could not save the settings');
   await expect(page.getByLabel('Description length in the long view')).toHaveValue('50');
   await page.getByRole('button', { name: 'Done' }).click();
   // another browser, same person: the settings are there

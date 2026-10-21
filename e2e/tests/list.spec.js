@@ -48,7 +48,7 @@ test('LIST-02, LIST-03: choose, order and hide columns (a custom field among the
   await expect(page.getByRole('listitem')).toHaveCount(6);
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByRole('tab', { name: 'List' }).click();
-  const dlg = page.getByRole('dialog', { name: 'Settings' });
+  const dlg = page.getByRole('region', { name: 'Settings' });
   await expect(dlg.getByLabel('Show Key')).toBeDisabled();
   await expect(dlg.getByLabel('Show Summary')).toBeDisabled();
   await dlg.getByLabel('Show Assignee').uncheck();
@@ -58,7 +58,7 @@ test('LIST-02, LIST-03: choose, order and hide columns (a custom field among the
   await dlg.getByRole('button', { name: 'Move ' + fname + ' earlier' }).click();
   await expect(dlg.getByRole('button', { name: 'Move ' + fname + ' earlier' })).toBeFocused();
   await expect(dlg.getByRole('status')).toHaveText('Saved');
-  await new AxeBuilder({ page }).include('.dialog').analyze().then(r => expect(r.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]));
+  await new AxeBuilder({ page }).include('#settings-page').analyze().then(r => expect(r.violations.filter(v => ['serious', 'critical'].includes(v.impact))).toEqual([]));
   await page.getByRole('button', { name: 'Done' }).click();
   const row = page.getByRole('listitem').filter({ hasText: 'with effort' });
   await expect(row.locator('.c-cf')).toHaveText('8');

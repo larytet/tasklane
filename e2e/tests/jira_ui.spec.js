@@ -126,7 +126,7 @@ test('WT-22: a person sets, replaces and forgets their Jira token in Settings, w
   await expect(panel).toContainText('WEB, OPS');
   await expect(panel.getByText('No token: you are asked at your first save')).toBeVisible();
   await expect(panel.getByRole('link', { name: 'Where to create a token for acme' })).toHaveAttribute('href', TOKEN_PAGE);
-  const ax = await new AxeBuilder({ page }).include('[role=dialog]').analyze();
+  const ax = await new AxeBuilder({ page }).include('#settings-page').analyze();
   expect(ax.violations.filter(v => ['serious', 'critical'].includes(v.impact)).map(v => v.id)).toEqual([]);
 
   await panel.getByRole('button', { name: 'Set your token for acme' }).click();

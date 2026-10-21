@@ -109,7 +109,7 @@ test('PAL-03: actions run, and the ones a person may not take are absent', async
   await expect(jana.page.getByRole('listbox', { name: 'Results' })).toContainText('Nothing matches');
   await find(jana.page, 'settings');
   await jana.page.keyboard.press('Enter');
-  await expect(jana.page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await expect(jana.page.getByRole('region', { name: 'Settings' })).toBeVisible();
   await jana.page.keyboard.press('Escape');
   await open(jana.page);
   await find(jana.page, 'create issue');

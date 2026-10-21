@@ -17,15 +17,14 @@ const get = page => page.evaluate(async () => (await fetch('/api/v1/me/ui-prefs'
 const root = (page, k) => page.evaluate(k => document.documentElement.dataset[k] ?? null, k);
 
 for (const theme of ['dark', 'light']) {
-  test(`PREF-05: the Settings dialog is a modal operable by keyboard and applies changes at once (${theme})`, async ({ browser }) => {
+  test(`PREF-05: the Settings screen is operable by keyboard and applies changes at once (${theme})`, async ({ browser }) => {
     const u = await newUser(browser, 'arkady@example.com');
     await u.page.addInitScript(t => localStorage.setItem('tl-theme', t), theme);
     await u.page.reload();
     const gear = u.page.getByRole('button', { name: 'Settings' });
     await gear.click();
-    const dlg = u.page.getByRole('dialog', { name: 'Settings' });
+    const dlg = u.page.getByRole('region', { name: 'Settings' });
     await expect(dlg).toBeVisible();
-    expect(await u.page.evaluate(() => !!document.activeElement.closest('[role=dialog]'))).toBe(true);
     await axe(u.page, 'settings dialog, appearance');
     // the tabs move with the arrow keys
     await dlg.getByRole('tab', { name: 'Appearance' }).focus();
@@ -38,11 +37,6 @@ for (const theme of ['dark', 'light']) {
     await expect(dlg.getByRole('tab', { name: 'API tokens' })).toBeFocused(); // the last tab: Settings now holds the account's sections too
     await u.page.keyboard.press('Home');
     await expect(dlg.getByRole('tab', { name: 'Appearance' })).toBeFocused();
-    // focus stays inside the dialog
-    for (let i = 0; i < 25; i++) {
-      await u.page.keyboard.press('Tab');
-      expect(await u.page.evaluate(() => !!document.activeElement.closest('[role=dialog]')), 'focus left the dialog').toBe(true);
-    }
     // a change applies without a reload and is saved on the server
     await dlg.getByLabel('Font size').selectOption('115');
     await expect.poll(() => root(u.page, 'fs')).toBe('115');
@@ -53,10 +47,11 @@ for (const theme of ['dark', 'light']) {
     expect(saved.prefs.font_scale).toBe(115);
     expect(saved.prefs.high_contrast).toBe(true);
     await axe(u.page, 'settings dialog in high contrast');
-    // Escape closes and gives focus back to the button that opened it
+    // Escape goes back to where Settings was opened from
+    await u.page.locator('#settings-page').focus().catch(() => {});
     await u.page.keyboard.press('Escape');
     await expect(dlg).toHaveCount(0);
-    await expect(gear).toBeFocused();
+    await expect(gear).toBeVisible();
     await axe(u.page, 'issue list at 115% in high contrast');
     expect(await put(u.page, DEFAULTS)).toBe(200);
     await u.ctx.close();
@@ -93,11 +88,11 @@ test('PREF-02: two tabs change different settings and both changes are kept', as
   await expect(tab2.getByRole('button', { name: 'Settings' })).toBeVisible();
   // the first tab saves; the second still holds the older version and saves something else
   await u.page.getByRole('button', { name: 'Settings' }).click();
-  await u.page.getByRole('dialog').getByLabel('High contrast').check();
-  await expect(u.page.getByRole('dialog').getByRole('status')).toHaveText('Saved');
+  await u.page.getByRole('region', { name: 'Settings' }).getByLabel('High contrast').check();
+  await expect(u.page.getByRole('region', { name: 'Settings' }).getByRole('status')).toHaveText('Saved');
   await tab2.getByRole('button', { name: 'Settings' }).click();
-  await tab2.getByRole('dialog').getByRole('tab', { name: 'List' }).click();
-  await tab2.getByRole('dialog').getByRole('radiogroup', { name: 'Density' }).getByLabel('Comfortable', { exact: true }).check();
+  await tab2.getByRole('region', { name: 'Settings' }).getByRole('tab', { name: 'List' }).click();
+  await tab2.getByRole('region', { name: 'Settings' }).getByRole('radiogroup', { name: 'Density' }).getByLabel('Comfortable', { exact: true }).check();
   await expect.poll(async () => (await get(tab2)).prefs.density).toBe('comfortable');
   const p = (await get(tab2)).prefs;
   expect(p.high_contrast, 'the first tab\'s change was lost').toBe(true);
@@ -112,15 +107,16 @@ test('LIST-01: density is set in Settings (not on the list) and sets the row hei
   await expect(view.getByRole('button', { name: /^Long view/ })).toBeVisible();
   await expect(view.getByRole('button', { name: 'Compact', exact: true })).toHaveCount(0);
   const row = u.page.getByRole('listitem').first();
-  await u.page.getByRole('button', { name: 'Settings' }).click();
-  const dlg = u.page.getByRole('dialog', { name: 'Settings' });
-  await dlg.getByRole('tab', { name: 'List' }).click();
   for (const [name, px] of [['Compact', 36], ['Comfortable', 56], ['Default', 44]]) {
+    await u.page.getByRole('button', { name: 'Settings' }).click();
+    const dlg = u.page.getByRole('region', { name: 'Settings' });
+    await dlg.getByRole('tab', { name: 'List' }).click();
     await dlg.getByRole('radiogroup', { name: 'Density' }).getByLabel(name, { exact: true }).check();
+    await expect(dlg.getByRole('status')).toHaveText('Saved');
+    await u.page.keyboard.press('Escape'); // Settings is a screen: the list is behind it, not under it
     await expect.poll(async () => Math.round((await row.boundingBox()).height)).toBeGreaterThanOrEqual(px);
     expect(Math.round((await row.boundingBox()).height)).toBeLessThanOrEqual(px + 4);
   }
-  await u.page.keyboard.press('Escape');
   // each density works in the long view too, without sideways scroll on a phone
   await view.getByRole('button', { name: /^Long view/ }).click();
   await u.page.setViewportSize({ width: 390, height: 800 });
@@ -146,9 +142,8 @@ test('THEME-01: every font size fits a phone on the list, the issue page and in 
       await expect.poll(() => u.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${route} at ${fs}%: sideways scroll`).toBeLessThanOrEqual(0);
     }
     await u.page.getByRole('button', { name: 'Settings' }).click();
-    await expect(u.page.getByRole('dialog')).toBeVisible();
-    const dlg = await u.page.getByRole('dialog').boundingBox();
-    expect(dlg.x).toBeGreaterThanOrEqual(0);
+    await expect(u.page.getByRole('region', { name: 'Settings' })).toBeVisible();
+    await expect.poll(() => u.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `Settings at ${fs}%: sideways scroll`).toBeLessThanOrEqual(0);
     await u.page.keyboard.press('Escape');
   }
   expect(await put(u.page, DEFAULTS)).toBe(200);

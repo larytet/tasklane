@@ -76,7 +76,6 @@ test('SEC-04: two-factor enrolment, a second step at sign-in, and recovery codes
   await page.getByLabel('Authentication code').fill(totp(secret, Date.now() + 30000));
   await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
-  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Done' }).click(); // signing in on #/account opens Settings again
   // a recovery code works once
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await page.getByLabel('Email').fill(email);
@@ -126,7 +125,7 @@ test('SEC-04: sessions, API tokens and the password on the account page', async 
   await page.getByRole('button', { name: 'Create token' }).click();
   const token = (await page.getByRole('dialog').getByLabel('Token', { exact: true }).textContent()).trim();
   expect(token).toMatch(/^tl_/);
-  await page.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
   const use = async () => (await page.request.get('/api/v1/bootstrap', { headers: { Authorization: 'Bearer ' + token }, failOnStatusCode: false })).status();
   // the page's own cookie would authenticate the request: use a context with no cookies
   const bare = await browser.newContext();

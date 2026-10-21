@@ -235,7 +235,7 @@ test('KEY-09: with single-key shortcuts off nothing fires, Ctrl+Enter still work
   await page.getByRole('button', { name: 'Settings' }).click();
   await page.getByRole('tab', { name: 'Keyboard' }).click();
   await page.getByLabel('Single-key shortcuts').uncheck();
-  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('Saved');
+  await expect(page.getByRole('region', { name: 'Settings' }).getByRole('status')).toHaveText('Saved');
   await page.keyboard.press('Escape');
   const { order } = await listOf(page, 2);
   await page.reload();

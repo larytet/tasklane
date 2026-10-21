@@ -15,7 +15,7 @@ test('ADM-SET-01: administration is a tab in Settings, not a button in the top b
   await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const dlg = page.getByRole('dialog', { name: 'Settings' });
+  const dlg = page.getByRole('region', { name: 'Settings' });
   await dlg.getByRole('tab', { name: 'Administration' }).click();
   await dlg.getByRole('link', { name: 'Open administration' }).click();
   await expect(dlg).toBeHidden();
@@ -26,5 +26,5 @@ test('ADM-SET-01: administration is a tab in Settings, not a button in the top b
 test('ADM-SET-02: a person who is not an administrator has no Administration tab', async ({ browser }) => {
   const { page } = await newUser(browser, 'jana@example.com');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('tab', { name: 'Administration' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Settings' }).getByRole('tab', { name: 'Administration' })).toHaveCount(0);
 });

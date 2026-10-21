@@ -5,15 +5,13 @@
   'use strict';
   const A = window.TLApp;
   if (!A) return;
-  const { h, modal, S, saveSettings, api } = A;
+  const { h, S, saveSettings, api } = A;
 
-  function settingsDialog(initial) { // initial: the tab to open on, by name
+  function settingsDialog(initial) { // initial: the tab to open on, as in the address (security, api-tokens)
     const status = h('div', { class: 'saved muted', role: 'status' });
-    let redraw = false; // the list's rows depend on these: the screen is drawn again when the dialog closes
     const save = async ch => {
       status.textContent = 'Saving…';
       const ok = await saveSettings(ch);
-      if (ok && ('list_view' in ch || 'snippet_chars' in ch || 'columns' in ch || 'sort' in ch)) redraw = true;
       status.textContent = ok ? 'Saved' : 'Could not save the settings';
       status.className = 'saved ' + (ok ? 'muted' : 'err');
       return ok;
@@ -65,7 +63,7 @@
     };
     const saveCols = async (cols, moved, d) => {
       await save({ columns: cols.filter(c => c === 'key' || c === 'summary' || cols.includes(c)) });
-      redraw = true; drawCols();
+      drawCols();
       if (moved) { const b = columnsBox.querySelector('[aria-label="Move ' + (LABEL[moved] || fnames[moved] || moved) + (d < 0 ? ' earlier' : ' later') + '"]'); if (b && !b.disabled) b.focus(); }
     };
     drawCols();
@@ -78,7 +76,7 @@
       const so = S.settings.sort || {}; sortField.value = so.field || ''; sortDir.value = so.dir || 'asc'; sortDir.disabled = !so.field;
     };
     fillSort();
-    const saveSort = async () => { await save({ sort: { field: sortField.value, dir: sortDir.value } }); sortDir.disabled = !sortField.value; redraw = true; };
+    const saveSort = async () => { await save({ sort: { field: sortField.value, dir: sortDir.value } }); sortDir.disabled = !sortField.value };
     sortField.addEventListener('change', saveSort); sortDir.addEventListener('change', saveSort);
     // Jira (SPEC 18.1.1): the projects that save to Jira as the person need their own Jira API token. It is kept in memory only; here it is
     // set before the first save, replaced, or forgotten, and the link says where the token is created for that Jira site.
@@ -121,7 +119,7 @@
     };
     // the instance administrator's way into the administration pages (it was a button in the top bar)
     if (S.me && S.me.admin) panels.Administration = h('div', { class: 'set' }, h('span', {}),
-      h('p', { style: 'margin:0' }, h('a', { href: '#/admin/workflows', onclick: () => close() }, 'Open administration'), h('span', { class: 'muted' }, ' · workflows, fields, users, security and the rest of the instance settings')));
+      h('p', { style: 'margin:0' }, h('a', { href: '#/admin/workflows' }, 'Open administration'), h('span', { class: 'muted' }, ' · workflows, fields, users, security and the rest of the instance settings')));
     const tabs = h('div', { role: 'tablist', 'aria-label': 'Settings sections' });
     const box = h('div', {});
     const names = Object.keys(panels);
@@ -130,30 +128,50 @@
       for (const [k, p] of Object.entries(panels)) p.hidden = k !== name;
     };
     names.forEach((name, i) => {
-      const t = h('button', { role: 'tab', id: 'set-tab-' + i, 'aria-controls': 'set-panel-' + i, 'data-name': name, onclick: () => select_(name) }, name);
+      const t = h('button', { role: 'tab', id: 'set-tab-' + i, 'aria-controls': 'set-panel-' + i, 'data-name': name, onclick: () => { select_(name); history.replaceState(null, '', '#/settings/' + slug(name)); } }, name);
       t.addEventListener('keydown', e => { // arrow keys move between the tabs (the tab pattern); Tab goes into the panel
         const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : e.key === 'Home' ? -i : e.key === 'End' ? names.length - 1 - i : 0;
-        if (d) { e.preventDefault(); select_(names[(i + d + names.length) % names.length], true); }
+        if (d) { e.preventDefault(); const to = names[(i + d + names.length) % names.length]; select_(to, true); history.replaceState(null, '', '#/settings/' + slug(to)); }
       });
       tabs.append(t);
       Object.assign(panels[name], { id: 'set-panel-' + i, role: 'tabpanel' }); panels[name].setAttribute('aria-labelledby', 'set-tab-' + i);
       box.append(panels[name]);
     });
-    select_(typeof initial === 'string' && panels[initial] ? initial : names[0]);
+    select_(names.find(n => slug(n) === initial) || names[0]);
     // the Jira tab exists only for a person who has a project that saves to Jira
     drawJira().then(n => {
       if (n) return;
       const t = tabs.querySelector('[data-name="Jira"]'); if (t) t.remove();
       jiraPanel.remove(); delete panels.Jira; names.splice(names.indexOf('Jira'), 1);
     });
-    const close = modal(h('div', { class: 'settings' }, h('h2', {}, 'Settings'), tabs, box, status,
-      h('div', { class: 'actions' }, h('span', { class: 'grow' }), h('button', { class: 'btn primary', onclick: () => close() }, 'Done'))));
-    close.scrim.querySelector('.dialog').classList.add('settings');
+    const done = h('button', { class: 'btn primary', onclick: () => { location.hash = A.S.settingsFrom && !/^#\/(settings|account)/.test(A.S.settingsFrom) ? A.S.settingsFrom : '#/'; } }, 'Done');
+    const app = A.clear(document.getElementById('app'));
+    app.append(A.topbar(), h('div', { class: 'page settings', id: 'settings-page', role: 'region', 'aria-label': 'Settings' }, h('h2', {}, 'Settings'), tabs, box, status,
+      h('div', { class: 'actions' }, h('span', { class: 'grow' }), done)));
     // a change made in another tab or by the view buttons shows here too
     const sync = () => { chars.value = S.settings.snippet_chars; };
     A.P.listeners.push(sync);
-    const obs = new MutationObserver(() => { if (!close.scrim.isConnected) { A.P.listeners.splice(A.P.listeners.indexOf(sync), 1); obs.disconnect(); if (redraw) A.route(); } });
-    obs.observe(document.body, { childList: true });
+    // Escape goes back, as it closed the dialog (not while a dialog opened from here is up, nor while a control keeps the key)
+    const esc = e => {
+      if (!document.getElementById('settings-page')) return document.removeEventListener('keydown', esc);
+      if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.scrim')) return;
+      if (e.target && e.target.closest && e.target.closest('select, [aria-expanded=true]')) return;
+      done.click();
+    };
+    document.addEventListener('keydown', esc);
+    const obs = new MutationObserver(() => { if (!document.getElementById('settings-page')) { A.P.listeners.splice(A.P.listeners.indexOf(sync), 1); obs.disconnect(); } });
+    obs.observe(document.getElementById('app'), { childList: true });
   }
-  A.EXT.settings = settingsDialog;
+  // Settings is a screen of its own (#/settings/<tab>), like the administration pages, not a dialog
+  const slug = name => name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  function openSettings(tab) { // as a click handler it gets the event: only a name is a tab
+    if (!/^#\/(settings|account)/.test(location.hash)) A.S.settingsFrom = location.hash || '#/';
+    location.hash = '#/settings' + (typeof tab === 'string' && tab ? '/' + slug(tab) : '');
+  }
+  A.EXT.routes.push({ re: /^#\/settings(?:\/([a-z0-9-]+))?\/?$/, run: m => {
+    const want = m[1] || '';
+    // the tab is chosen by its address; the dialog's own tab names are matched without case
+    settingsDialog(want);
+  } });
+  A.EXT.settings = openSettings;
 })();
