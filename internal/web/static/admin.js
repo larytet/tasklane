@@ -9,7 +9,7 @@
   const CATS = [['todo', 'To Do'], ['in_progress', 'In progress'], ['done', 'Done']];
 
   function adminTabs(active) {
-    return h('nav', { class: 'tabs', 'aria-label': 'Administration' }, h('span', { class: 'tabs-title' }, 'Administration'),
+    return h('nav', { class: 'tabs', 'aria-label': 'Administration' }, active === '' ? null : h('a', { href: '#/settings', class: 'tab' }, 'Settings'), h('span', { class: 'tabs-title' }, 'Administration'),
       h('a', { href: '#/admin/workflows', class: 'tab', 'aria-current': active === 'workflows' ? 'page' : null }, 'Workflows'),
       h('a', { href: '#/admin/automation', class: 'tab', 'aria-current': active === 'automation' ? 'page' : null }, 'Automation'),
       h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
@@ -782,6 +782,7 @@
     await load();
   }
 
+  A.EXT.adminTabs = adminTabs;
   A.EXT.routes.push({ re: /^#\/admin\/roles\/?$/, run: () => rolesView() });
   A.EXT.routes.push({ re: /^#\/admin\/security\/?$/, run: () => securityView() });
   A.EXT.routes.push({ re: /^#\/admin\/git\/?$/, run: () => gitView() });

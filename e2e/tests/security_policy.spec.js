@@ -75,7 +75,7 @@ test('SEC-04: requiring a second factor holds members of the organization to the
   // the member signs in with the password and is taken to the account page, told why
   const mem = await signIn(browser, `member${tag}@org.example`, 'password123');
   await expect(mem.page.getByText(/Your organization requires a second factor/)).toBeVisible();
-  await expect(mem.page).toHaveURL(/#\/account/);
+  await expect(mem.page).toHaveURL(/#\/settings\/security/);
   await expect(mem.page.getByRole('heading', { name: 'Two-factor authentication' })).toBeVisible();
   // everything else is refused
   const r = await mem.ctx.request.fetch('/api/v1/projects', { headers: H });

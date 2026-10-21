@@ -117,9 +117,6 @@
       ...accountPanels,
       Jira: jiraPanel,
     };
-    // the instance administrator's way into the administration pages (it was a button in the top bar)
-    if (S.me && S.me.admin) panels.Administration = h('div', { class: 'set' }, h('span', {}),
-      h('p', { style: 'margin:0' }, h('a', { href: '#/admin/workflows' }, 'Open administration'), h('span', { class: 'muted' }, ' · workflows, fields, users, security and the rest of the instance settings')));
     const tabs = h('div', { role: 'tablist', 'aria-label': 'Settings sections' });
     const box = h('div', {});
     const names = Object.keys(panels);
@@ -146,7 +143,7 @@
     });
     const done = h('button', { class: 'btn primary', onclick: () => { location.hash = A.S.settingsFrom && !/^#\/(settings|account)/.test(A.S.settingsFrom) ? A.S.settingsFrom : '#/'; } }, 'Done');
     const app = A.clear(document.getElementById('app'));
-    app.append(A.topbar(), h('div', { class: 'page settings', id: 'settings-page', role: 'region', 'aria-label': 'Settings' }, h('h2', {}, 'Settings'), tabs, box, status,
+    app.append(A.topbar(), h('div', { class: 'page settings', id: 'settings-page', role: 'region', 'aria-label': 'Settings' }, h('h2', {}, 'Settings'), tabs, S.me && S.me.admin && A.EXT.adminTabs ? A.EXT.adminTabs('') : null, box, status,
       h('div', { class: 'actions' }, h('span', { class: 'grow' }), done)));
     // a change made in another tab or by the view buttons shows here too
     const sync = () => { chars.value = S.settings.snippet_chars; };

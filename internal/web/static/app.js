@@ -99,7 +99,7 @@
   // take them there and say why
   function showSecondFactorRequired() {
     banner('warn', 'Your organization requires a second factor to sign in. Set up an authenticator app or a passkey to continue.');
-    if (location.hash !== '#/account') location.hash = '#/account';
+    if (!location.hash.startsWith('#/settings')) location.hash = '#/settings/security';
   }
   function showReload() {
     banner('warn', 'A newer version of Tasklane is available. ', h('button', { class: 'btn', onclick: () => location.reload() }, 'Reload'), ' Your drafts are kept.');
