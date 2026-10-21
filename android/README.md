@@ -13,11 +13,20 @@ It follows the device's light or dark setting (screenshots are in the [main READ
 `Authorization: Bearer`. Sign out also sends it as the cookie, because that is the only form the server's logout revokes.
 The token lives in app-private storage (`allowBackup` is off). The server address may be plain `http` for a LAN install.
 
+## Install on a phone
+
+Download `tasklane-android-<version>.apk` from the [Releases](https://github.com/larytet/tasklane/releases) page and open it
+on the phone (Android 8.0 or newer). Android asks once to allow installs from your browser or file manager. Or from a computer:
+`adb install tasklane-android-0.1.0.apk`. Check the download against the `.sha256` file next to it. Updates install over the
+old version as long as they are signed with the same key. The app asks for the server address, so a self-hosted install
+works as it is, over `https` or plain `http` on your network.
+
 ## Build
 
 Needs JDK 17+ and the Android SDK (platform 35, build-tools 35). Point `local.properties` at it (`sdk.dir=...`).
 
     ./gradlew :app:assembleDebug          # app/build/outputs/apk/debug/app-debug.apk
+    ./gradlew :app:assembleRelease        # signed if ~/Android/tasklane-release.properties (or $TASKLANE_SIGNING) exists
     ./gradlew :app:testDebugUnitTest      # 13 mock-server tests
 
 `LiveServerTest` runs the real client against a real server and is skipped unless `TASKLANE_IT_URL`, `TASKLANE_IT_EMAIL`
@@ -37,3 +46,9 @@ the server needs; run it once per theme:
     python3 scripts/happy_path.py dark     # and: light
 
 The emulator reaches your machine at `10.0.2.2`; the script signs in to `http://10.0.2.2:18091`.
+
+## Signing a release
+
+`app/build.gradle.kts` reads `storeFile`, `storePassword`, `keyAlias` and `keyPassword` from a properties file outside the
+repository (`$TASKLANE_SIGNING`, default `~/Android/tasklane-release.properties`). Without it `assembleRelease` makes an
+unsigned APK that will not install. Keep the key: an app signed with a different key cannot update an installed one.

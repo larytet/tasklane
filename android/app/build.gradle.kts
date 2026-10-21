@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+// Release signing comes from a properties file kept outside the repository (TASKLANE_SIGNING, default
+// ~/Android/tasklane-release.properties); without it the release build is unsigned and only the debug build installs.
+val signing = Properties().apply {
+    val f = file(System.getenv("TASKLANE_SIGNING") ?: "${System.getProperty("user.home")}/Android/tasklane-release.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -17,9 +26,18 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (signing.containsKey("storeFile")) create("release") {
+            storeFile = file(signing.getProperty("storeFile"))
+            storePassword = signing.getProperty("storePassword")
+            keyAlias = signing.getProperty("keyAlias")
+            keyPassword = signing.getProperty("keyPassword")
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
     compileOptions {
