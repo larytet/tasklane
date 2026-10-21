@@ -174,6 +174,8 @@ When sign-in fails, *Try a sign-in* says why, and the server log names the provi
   so nothing typed is lost, and a save that would overwrite someone else's change opens a merge dialog instead of clobbering it.
 - **Built for agents.** A built-in MCP server lets AI coding agents pick up tickets, report progress, link PRs and hand
   work to a human for review, under the same permissions and audit as people.
+- **A native Android app.** Sign in (with a second factor if your account has one), search and browse issues, read boards
+  and the inbox, and comment, from a phone, against the same REST API. Light and dark. See [android/](android/README.md).
 
 ## What it looks like
 
@@ -187,122 +189,57 @@ When sign-in fails, *Try a sign-in* says why, and the server log names the provi
 - **Dashboards** - gadgets backed by saved filters.
 - **Admin** - projects, workflows, schemes, custom fields, permissions, SSO, audit log.
 
-## Mockups
+## Screenshots
 
-Wireframes in dark mode (the reference theme). Tokens, type and spacing are in [DESIGN.md](DESIGN.md).
+Real screenshots of a running server with a small demo project, not mockups. Shots are in dark mode (the
+reference theme), with one light-theme shot for the web UI and one for the Android app. Tokens, type and spacing are in
+[DESIGN.md](DESIGN.md).
 
-### Issues inbox (phone)
+### Web
 
-```
-┌──────────────────────────────────────┐
-│ ☰  🔍 Search or TQL…            (AM) │
-├──────────────────────────────────────┤
-│ (Assigned to me) Reported Watching ▸ │  filter chips
-├──────────────────────────────────────┤
-│ ● ▣ ABC-142  Checkout fails on 3DS…  │  ● = unread, summary bold
-│     [In Progress]  ⇧  (JK)   2m  📎2 │
-├──────────────────────────────────────┤
-│   ▣ ABC-139  Add CSV export          │
-│     [To Do]        =  (AM)   1h  💬4 │
-├──────────────────────────────────────┤
-│   ▣ ABC-131  Sprint rollover job     │
-│     [Done]         ⇩  (RS)   3d      │
-├──────────────────────────────────────┤
-│   ◀ swipe: transition   assign ▶     │
-├──────────────────────────────────────┤
-│  ⌂ Home   ☰ Issues   ▦ Boards   ⋯    │  bottom bar
-└──────────────────────────────────────┘
-```
+**Issue list.** Search box with plain text and TQL, bulk select, density and column controls.
 
-### Ticket as a thread, with presence
+![The issue list, dark theme](docs/screenshots/web-dark-issues.png)
 
-```
-┌────────────────────────────────────────────────────────────┐
-│ ←  ABC-142   ☆     (JK)(AM)●(RS)  3 here        ‹  ›   ⋮  │  presence stack, prev/next
-├────────────────────────────────────────────────────────────┤
-│ Checkout fails on 3DS challenge                  Saved ✓   │  subject, editable in place
-│ [In Progress ▾]  ⇧ High  (JK) Jana K.   bug  payments      │
-│ ▸ Details · Sprint Week 2026-W43 · Fix 2.4 · 5 pts         │  collapsed metadata
-├────────────────────────────────────────────────────────────┤
-│ (AM) Arkady M.  · 2 days ago        ◔ Jana K. is editing   │  advisory: nobody is locked out
-│  After the issuer redirects back, the order stays in       │
-│  “pending”. Steps to reproduce:                            │
-│  1. Use test card 4000 …                                   │
-│ ┌────────┐ ┌────────┐ ┌──────────────────┐                 │
-│ │ ▨ img  │ │ ▨ img  │ │ 📄 trace.log 48K │  3 attachments  │  chip strip
-│ └────────┘ └────────┘ └──────────────────┘   ⬇ download all│
-├────────────────────────────────────────────────────────────┤
-│ ▸ 3 earlier comments                                       │
-│ ·· Jana changed status To Do → In Progress · 1h            │  slim activity line
-│ (RS) Ravi S. · 20m                                         │
-│  Reproduced on staging. Looks like the return URL is lost. │
-│  👍 2                                                       │
-├────────────────────────────────────────────────────────────┤
-│ ▸ Subtasks 2/3 ███████░░░   ▸ Linked issues (1)            │
-├────────────────────────────────────────────────────────────┤
-│ ┌────────────────────────────────────────────────────────┐ │
-│ │ Reply…    @ mention   📎      □ Internal   ▸ Send      │ │  sticky reply bar
-│ └────────────────────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────────┘
-```
+**Ticket as a thread.** Comments, history and fields side by side, a sticky reply bar, and a watch toggle.
 
-### Conflict dialog (two people saved the same description)
+![A ticket with its comment thread, dark theme](docs/screenshots/web-dark-issue.png)
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│ Jana K. saved changes to the description while you were editing   (2 min)│
-│ 2 changes by Jana, 1 block changed by both                               │
-├───────────────────────┬───────────────────────────┬──────────────────────┤
-│ THEIR CHANGES         │ MERGED RESULT (editable)  │ YOUR CHANGES         │
-│ + added a retry note  │  Steps to reproduce:      │ + step 3 clarified   │
-│ - removed old step 4  │  1. Use test card 4000 …  │                      │
-│                       │ ⚠ Block 2 changed by both │ ⚠ block 2: "Expected │
-│ ⚠ block 2: "Expected  │  [ theirs | mine | edit ] │   result: order …"   │
-│   result: pending"    │                           │                      │
-├───────────────────────┴───────────────────────────┴──────────────────────┤
-│ [Save merged result]  [Keep mine]  [Keep theirs]  [Copy mine and reload] │
-└──────────────────────────────────────────────────────────────────────────┘
-   Keeping mine never destroys their version: it stays in history and can be restored.
-```
+**Conflict dialog.** Two people saved the same description: their changes, your changes and an editable merged result,
+with the block both of you changed called out. Keeping yours never destroys theirs; it stays in history and can be
+restored. The banner at the top right shows who else is on the ticket.
 
-### Board (desktop)
+![The merge dialog after two people saved the same description, dark theme](docs/screenshots/web-dark-conflict.png)
 
-```
-┌────┬───────────────────────────────────────────────────────────────────┐
-│ ⌂  │ Payments · Week 2026-W43   [Only mine] [Recent]   Complete sprint │
-│ ☰  ├───────────────────┬───────────────────┬───────────────────────────┤
-│ ▦  │ TO DO        3    │ IN PROGRESS  2/2  │ DONE                 5    │
-│ ⏱  ├───────────────────┼───────────────────┼───────────────────────────┤
-│ 📊 │▌Retry webhooks    │▌Checkout fails    │ Sprint rollover job       │
-│ ⚙  │ ▣ ABC-150  ⇧ (AM) │ ▣ ABC-142  ⇧ (JK) │ ▣ ABC-131  ✓   (RS)       │
-│    │                   │ 5 pts             │                           │
-│    │ Add CSV export    │ Fix card form     │ Dark theme tokens         │
-│    │ ▣ ABC-139  = (AM) │ ▣ ABC-144  = (RS) │ ▣ ABC-120  ✓   (AM)       │
-│    │                   │  ⚠ at WIP limit   │                           │
-│    │ + Create          │                   │                           │
-└────┴───────────────────┴───────────────────┴───────────────────────────┘
-      ▌ = epic color      dragging a card shows a drop line; blocked moves explain why
-```
+**Board.** Columns from the workflow, cards with priority, assignee and estimate; a "Move to" control on every card
+(drag and drop works too).
 
-### Backlog and weekly sprints
+![A scrum board with an active sprint, dark theme](docs/screenshots/web-dark-board.png)
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│ ▾ Week 2026-W43   Oct 19 – Oct 25   ● active    12 issues          │
-│   Goal: ship 3DS fix and CSV export                                │
-│   [To Do 8][In Progress 5][Done 13]   capacity ███████░░ 26/32 pts │
-│   ⋮⋮ ▣ ABC-142  Checkout fails on 3DS challenge  [In Progress] (JK) │
-│   ⋮⋮ ▣ ABC-139  Add CSV export                   [To Do]       (AM) │
-│   + Create issue                                [Complete sprint]  │
-├────────────────────────────────────────────────────────────────────┤
-│ ▾ Week 2026-W44   Oct 26 – Nov 1   future (auto-created)  4 issues │
-│   ⋮⋮ ▣ ABC-155  Audit log export                 [To Do]       —    │
-├────────────────────────────────────────────────────────────────────┤
-│ ▾ Backlog   38 issues                                               │
-│   ⋮⋮ ▣ ABC-160  Saved filter subscriptions       [To Do]       —    │
-│   ⋮⋮ ▣ ABC-161  Bulk transition preview          [To Do]       —    │
-└────────────────────────────────────────────────────────────────────┘
-```
+**Backlog and weekly sprints.** The active sprint with its goal and progress, future sprints created automatically,
+and the rest of the backlog below.
+
+![The backlog and weekly sprints, dark theme](docs/screenshots/web-dark-backlog.png)
+
+**Light theme.**
+
+![The board in the light theme](docs/screenshots/web-light-board.png)
+
+### Android
+
+A native app (Kotlin, Jetpack Compose) for reading and commenting from a phone: sign in, search, open an issue, read a
+board column by column, check the inbox. It follows the device's day and night setting. See
+[android/README.md](android/README.md) for what it does and how to build it.
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/android-dark-issues.png" width="200" alt="Issue list, dark"><br><sub>Issues</sub></td>
+<td align="center"><img src="docs/screenshots/android-dark-issue.png" width="200" alt="Issue with comments, dark"><br><sub>Issue</sub></td>
+<td align="center"><img src="docs/screenshots/android-dark-board.png" width="200" alt="Board, dark"><br><sub>Board</sub></td>
+<td align="center"><img src="docs/screenshots/android-dark-inbox.png" width="200" alt="Inbox, dark"><br><sub>Inbox</sub></td>
+<td align="center"><img src="docs/screenshots/android-light-issues.png" width="200" alt="Issue list, light"><br><sub>Light theme</sub></td>
+</tr>
+</table>
 
 ## Goals
 
@@ -332,6 +269,7 @@ is kept in [STATUS.md](STATUS.md) (milestones, the issues found on the way and h
 | Sign-in (password, second factor, passkeys, OpenID Connect, SAML, LDAP), SCIM, roles, groups, permission schemes, audit log, privacy export and erasure | built |
 | Organizations (tenants), hosted edition with plans, metering and invoices | built |
 | E-mail in and out, Git integration (GitHub and GitLab, read-only), MCP server for agents | built |
+| Android app (Kotlin, Jetpack Compose): sign-in, browse, search, boards, inbox, comments | built, read and comment only; editing, creating and moving issues, passkey sign-in and push are not built |
 | Several nodes, Redis or Valkey event bus, OpenSearch, S3 storage, rolling upgrades, backup and restore, Helm chart | built |
 | Jira REST API under `/rest/api/3`, write-back to Jira | not built |
 | The editor on the rich-text model (the converters between Markdown, Jira's document format and the model are built and tested; the page still edits plain text) | partly built |
@@ -348,6 +286,7 @@ lost draft. That is about 1% of the saves and half of the sessions the specifica
 - Go (API server, workers), PostgreSQL, optional OpenSearch (an additional service) for search at scale
 - REST API (Tasklane's own; a Jira-compatible subset under `/rest/api/3` is planned, not built), webhooks and an MCP server
 - Web UI: server-delivered SPA
+- Android app: Kotlin, Jetpack Compose, Material 3, OkHttp (`android/`); talks to the same REST API
 
 ## Related projects
 

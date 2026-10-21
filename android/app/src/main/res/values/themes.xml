@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Tasklane" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- dark clock and icons on the light app bar (the system draws them white by default under edge-to-edge) -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>
