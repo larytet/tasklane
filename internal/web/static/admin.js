@@ -15,6 +15,7 @@
       h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
       h('a', { href: '#/admin/email', class: 'tab', 'aria-current': active === 'email' ? 'page' : null }, 'Email'),
       h('a', { href: '#/admin/git', class: 'tab', 'aria-current': active === 'git' ? 'page' : null }, 'Git'),
+      h('a', { href: '#/admin/jira', class: 'tab', 'aria-current': active === 'jira' ? 'page' : null }, 'Jira'),
       h('a', { href: '#/admin/roles', class: 'tab', 'aria-current': active === 'roles' ? 'page' : null }, 'Roles'),
       h('a', { href: '#/admin/security', class: 'tab', 'aria-current': active === 'security' ? 'page' : null }, 'Security'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
@@ -632,6 +633,90 @@
   }
 
 
+  // Jira (SPEC 18.1.1): the connections, which are locked after every start of Tasklane until an administrator supplies the account's API
+  // token (kept in memory only), and which mirrored projects save people's changes to Jira instead of only reading from it.
+  async function jiraView() {
+    const app = document.getElementById('app'); clear(app);
+    const conns = h('div', { class: 'list', role: 'list', 'aria-label': 'Jira connections' });
+    const projs = h('div', { class: 'list', role: 'list', 'aria-label': 'Mirrored Jira projects' });
+    const row = (...c) => h('div', { class: 'row', role: 'listitem' }, ...c);
+    const none = t => row(h('span', { class: 'muted' }, t));
+    const btn = (label, aria, fn, cls) => h('button', { class: 'btn ' + (cls || 'ghost'), 'aria-label': aria, onclick: fn }, label);
+    const ago = t => { const s = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 1000)); return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; };
+
+    function unlockDialog(c) {
+      const tok = h('input', { type: 'password', id: 'jira-unlock-token', autocomplete: 'new-password', spellcheck: 'false', style: 'width:100%' });
+      const err = h('p', { class: 'err', role: 'alert' });
+      const go = h('button', { class: 'btn primary' }, 'Unlock');
+      const close = modal(h('div', {},
+        h('h2', {}, 'Unlock ' + c.name),
+        h('p', {}, 'Tasklane reads this Jira site as ', h('strong', {}, c.email), '. Its API token is kept only in memory: it is never written to disk or to the database, so it has to be supplied again after every start of Tasklane. Until then the mirror is served as it was and marked out of date.'),
+        h('p', {}, h('a', { href: c.token_page, target: '_blank', rel: 'noopener noreferrer' }, 'Create an API token'), ' at ', h('code', {}, c.token_page), ' while signed in to that account, then paste it here.'),
+        h('label', { for: 'jira-unlock-token' }, 'API token of ' + c.email), tok, err,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), go)));
+      go.onclick = async () => {
+        go.disabled = true; err.textContent = '';
+        const r = await api('POST', '/api/v1/jira/connections/' + c.id + '/unlock', { token: tok.value.trim() });
+        tok.value = '';
+        if (r.status === 200) { close(); toast(c.name + ' is unlocked; the sync is starting.'); load(); } else { go.disabled = false; err.textContent = errText(r); }
+      };
+    }
+
+    function confirmWrite(p, sel, prev) {
+      const go = h('button', { class: 'btn primary' }, 'Save changes to Jira');
+      const close = modal(h('div', {},
+        h('h2', {}, 'Save changes to Jira from ' + p.project + '?'),
+        h('ul', {},
+          h('li', {}, 'An edit made in Tasklane is saved to Jira at once, as the person who made it, with their own Jira API token. Each person is asked for it at their first save and it is kept in memory only.'),
+          h('li', {}, 'Jira decides who may edit: someone without permission in Jira gets Jira’s refusal.'),
+          h('li', {}, 'A change someone made in Jira since the person opened the issue is reported, never overwritten without their say.'),
+          h('li', {}, 'What can be saved: summary, description (when it is plain text), labels, priority, assignee, new comments and transitions. Everything else is still edited in Jira.'),
+          h('li', {}, 'Agents, automation and email do not write to Jira.')),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), go)));
+      go.onclick = async () => {
+        const r = await api('PUT', '/api/v1/jira/projects/' + p.project + '/mode', { mode: 'write_through' });
+        close();
+        if (r.status === 200) toast(p.project + ' now saves changes to Jira.'); else toast(errText(r));
+        load();
+      };
+      // closing the dialog any other way leaves the project as it was
+      const gone = new MutationObserver(() => { if (!close.scrim.isConnected) { gone.disconnect(); sel.value = prev; } });
+      gone.observe(document.body, { childList: true });
+    }
+
+    async function load() {
+      const [cr, pr] = await Promise.all([api('GET', '/api/v1/jira/connections'), api('GET', '/api/v1/jira/status')]);
+      clear(conns); clear(projs);
+      if (cr.status !== 200) conns.append(none(errText(cr)));
+      else if (!cr.data.length) conns.append(none('No Jira connection. Create one with POST /api/v1/jira/connections, then mirror a project.'));
+      else for (const c of cr.data) {
+        conns.append(row(h('span', { class: 'sum' }, h('strong', {}, c.name), ' ', h('span', { class: 'muted' }, c.site_url + ' · account ' + c.email + ' · token ' + (c.token_fingerprint || 'none') + (c.live_tokens ? ' · ' + c.live_tokens + ' ' + (c.live_tokens === 1 ? 'person holds' : 'people hold') + ' a personal token' : ''))),
+          h('span', { class: c.locked ? 'err' : '', role: 'status' }, c.locked ? 'Locked: waiting for the account’s token' : 'Unlocked'),
+          btn(c.locked ? 'Unlock…' : 'Replace token…', (c.locked ? 'Unlock ' : 'Replace the token of ') + c.name, () => unlockDialog(c), c.locked ? 'primary' : 'ghost')));
+      }
+      if (pr.status !== 200) { projs.append(none(errText(pr))); return; }
+      if (!pr.data.length) projs.append(none('No project is mirrored from Jira.'));
+      for (const p of pr.data) {
+        const sel = h('select', { 'aria-label': 'What happens to changes made in Tasklane to ' + p.project }, h('option', { value: 'read_only' }, 'Read only: edit in Jira'), h('option', { value: 'write_through' }, 'Save changes to Jira'));
+        sel.value = p.mode;
+        sel.addEventListener('change', async () => {
+          if (sel.value === 'write_through') { confirmWrite(p, sel, p.mode); return; }
+          const r = await api('PUT', '/api/v1/jira/projects/' + p.project + '/mode', { mode: sel.value });
+          if (r.status === 200) toast(p.project + ' is read only again; people’s Jira tokens for it were forgotten.'); else toast(errText(r));
+          load();
+        });
+        const state = (p.synced_at ? 'synced ' + ago(p.synced_at) : 'not synced yet') + (p.issues ? ' · ' + p.issues + ' issues' : '');
+        projs.append(row(h('span', { class: 'sum' }, h('strong', {}, p.project), ' ', h('span', { class: 'muted' }, 'Jira ' + p.jira_key + ' · ' + p.connection + ' · ' + state)),
+          p.locked ? h('span', { class: 'err' }, 'Sync waiting: the connection is locked') : (p.last_error ? h('span', { class: 'err' }, p.last_error) : null), sel));
+      }
+    }
+    app.append(topbar(), adminTabs('jira'), h('div', { class: 'page' }, h('h2', {}, 'Jira'),
+      h('p', { class: 'muted' }, 'A mirrored Jira project is read here from a copy that follows Jira. It is read only until you choose, per project, to save people’s changes to Jira. No Jira credential is stored in the database: after every start of Tasklane a connection is locked until you supply its token, and each person supplies their own at their first save (Settings, Jira).'),
+      h('h3', {}, 'Connections'), conns,
+      h('h3', { style: 'margin-top:16px' }, 'Projects'), projs));
+    await load();
+  }
+
   // Security: the organization's policy (a second factor for everyone, the networks that may sign in, the longest session).
   async function securityView() {
     const app = document.getElementById('app'); clear(app);
@@ -700,6 +785,7 @@
   A.EXT.routes.push({ re: /^#\/admin\/roles\/?$/, run: () => rolesView() });
   A.EXT.routes.push({ re: /^#\/admin\/security\/?$/, run: () => securityView() });
   A.EXT.routes.push({ re: /^#\/admin\/git\/?$/, run: () => gitView() });
+  A.EXT.routes.push({ re: /^#\/admin\/jira\/?$/, run: () => jiraView() });
   A.EXT.routes.push({ re: /^#\/admin\/email\/?$/, run: () => emailView() });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/([0-9a-f-]{36})/, run: m => editorView(m[1]) });
   A.EXT.routes.push({ re: /^#\/admin\/workflows\/?$/, run: () => listView() });

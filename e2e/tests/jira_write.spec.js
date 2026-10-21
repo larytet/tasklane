@@ -33,7 +33,8 @@ test('WT-04: a save that needs a Jira token asks for it, says where it stays, an
   await expect(dlg).toContainText('kept only in memory for this session');
   await expect(dlg).toContainText('never written to disk or to the database');
   await expect(dlg).toContainText('disappears when you sign out or when Tasklane restarts');
-  await expect(dlg.getByRole('link', { name: /Create an API token in Atlassian/ })).toHaveAttribute('href', TOKEN_PAGE);
+  await expect(dlg.getByRole('link', { name: 'Create an API token' })).toHaveAttribute('href', TOKEN_PAGE);
+  await expect(dlg.getByText(TOKEN_PAGE)).toBeVisible(); // where it goes is shown, not only linked
   const tok = dlg.getByLabel('Jira API token');
   await expect(tok).toHaveAttribute('type', 'password');
   await expect(tok).toHaveAttribute('autocomplete', 'new-password');

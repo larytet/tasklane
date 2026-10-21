@@ -79,6 +79,25 @@
     fillSort();
     const saveSort = async () => { await save({ sort: { field: sortField.value, dir: sortDir.value } }); sortDir.disabled = !sortField.value; redraw = true; };
     sortField.addEventListener('change', saveSort); sortDir.addEventListener('change', saveSort);
+    // Jira (SPEC 18.1.1): the projects that save to Jira as the person need their own Jira API token. It is kept in memory only; here it is
+    // set before the first save, replaced, or forgotten, and the link says where the token is created for that Jira site.
+    const jiraList = h('div', { class: 'list', role: 'list', 'aria-label': 'Jira connections that need your token' });
+    const drawJira = async () => {
+      const r = await api('GET', '/api/v1/jira/session-token');
+      while (jiraList.firstChild) jiraList.firstChild.remove();
+      if (r.status !== 200) { jiraList.append(h('div', { class: 'row muted', role: 'listitem' }, 'Could not read your Jira tokens.')); return 0; }
+      for (const c of r.data) {
+        const detail = { connection_id: c.connection_id, connection: c.connection, site_url: c.site_url, token_page: c.token_page };
+        jiraList.append(h('div', { class: 'row', role: 'listitem' },
+          h('span', { class: 'sum' }, h('strong', {}, c.connection), ' ', h('span', { class: 'muted' }, c.site_url + ' · ' + c.projects.join(', '))),
+          h('span', { class: c.has_token ? '' : 'err', role: 'status' }, c.has_token ? 'Token set for this session' : 'No token: you are asked at your first save'),
+          h('button', { class: 'btn', 'aria-label': (c.has_token ? 'Replace' : 'Set') + ' your token for ' + c.connection, onclick: async () => { if (await A.askJiraToken(detail)) drawJira(); } }, c.has_token ? 'Replace token…' : 'Set token…'),
+          c.has_token ? h('button', { class: 'btn ghost', 'aria-label': 'Forget your token for ' + c.connection, onclick: async () => { await api('DELETE', '/api/v1/jira/session-token?connection=' + encodeURIComponent(c.connection_id)); drawJira(); } }, 'Forget') : null,
+          h('a', { href: c.token_page, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Where to create a token for ' + c.connection }, 'Create a token')));
+      }
+      return r.data.length;
+    };
+    const jiraPanel = h('div', {}, h('p', { class: 'muted', style: 'margin-top:0' }, 'Some projects save your changes to Jira as you, and for those Tasklane needs your personal Jira API token. The token is kept only in memory for this session: it is never written to disk or to the database, and it is forgotten when you sign out or when Tasklane restarts.'), jiraList);
     const panels = {
       Appearance: h('div', { class: 'set' },
         radios('Theme', 'theme', [['', 'This device'], ['dark', 'Dark'], ['light', 'Light']]),
@@ -95,6 +114,7 @@
       Keyboard: h('div', { class: 'set' },
         check('Single-key shortcuts', 'shortcuts'),
         h('span', {}), h('p', { class: 'muted', style: 'margin:0' }, 'Shortcuts such as c to create and j/k to move. Ctrl+K and Ctrl+Enter work either way.')),
+      Jira: jiraPanel,
     };
     const tabs = h('div', { role: 'tablist', 'aria-label': 'Settings sections' });
     const box = h('div', {});
@@ -114,6 +134,12 @@
       box.append(panels[name]);
     });
     select_(names[0]);
+    // the Jira tab exists only for a person who has a project that saves to Jira
+    drawJira().then(n => {
+      if (n) return;
+      const t = tabs.querySelector('[data-name="Jira"]'); if (t) t.remove();
+      jiraPanel.remove(); delete panels.Jira; names.splice(names.indexOf('Jira'), 1);
+    });
     const close = modal(h('div', { class: 'settings' }, h('h2', {}, 'Settings'), tabs, box, status,
       h('div', { class: 'actions' }, h('a', { href: '#/account', onclick: () => close() }, 'Security, sessions and two-factor'), h('span', { class: 'grow' }), h('button', { class: 'btn primary', onclick: () => close() }, 'Done'))));
     close.scrim.querySelector('.dialog').classList.add('settings');

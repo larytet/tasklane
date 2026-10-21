@@ -66,6 +66,11 @@ func (s *Server) registerJira(mux *http.ServeMux) {
 		}
 		s.reply(w, map[string]bool{"ok": true}, s.Svc.SetJiraSessionToken(r.Context(), actorOf(r), in.Connection, in.Email, in.Token))
 	}))
+	// Which connections need this person's token, and whether this node holds one (never the token): the Settings page.
+	s.handle(mux, "GET /api/v1/jira/session-token", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		v, err := s.Svc.JiraTokenStatus(r.Context(), actorOf(r))
+		s.reply(w, v, err)
+	}))
 	s.handle(mux, "DELETE /api/v1/jira/session-token", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.Svc.ClearJiraSessionToken(actorOf(r), r.URL.Query().Get("connection"))
 		s.json(w, 200, map[string]bool{"ok": true})

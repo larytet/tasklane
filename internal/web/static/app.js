@@ -55,8 +55,9 @@
       const page = d.token_page || 'https://id.atlassian.com/manage-profile/security/api-tokens';
       close = modal(h('div', {},
         h('h2', {}, 'Save to Jira as you'),
+        d.connection ? h('p', { class: 'muted' }, 'Jira: ' + d.connection + (d.site_url ? ' (' + d.site_url + ')' : '')) : null,
         h('p', { id: 'jira-token-note' }, 'Tasklane needs your personal Jira API token to save changes as you. The token is kept only in memory for this session. It is never written to disk or to the database, and it disappears when you sign out or when Tasklane restarts.'),
-        h('p', {}, h('a', { href: page, target: '_blank', rel: 'noopener noreferrer' }, 'Create an API token in Atlassian'), ' (a scoped token is best where your site allows it), then paste it here.'),
+        h('p', {}, h('a', { href: page, target: '_blank', rel: 'noopener noreferrer' }, 'Create an API token'), ' at ', h('code', {}, page), ' (a scoped token is best where your site allows it), then paste it here.'),
         h('label', { for: 'jira-token' }, 'Jira API token'), tok,
         h('label', { for: 'jira-email', style: 'display:block;margin-top:8px' }, 'Atlassian account email (optional)'), email,
         err,
@@ -1739,7 +1740,7 @@
   }
   // the agile views (agile.js) plug in here
   const EXT = { routes: [], settings: null };
-  window.TLApp = { b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS, createDialog, projectDialog, undoToast, WANT_UNDO };
+  window.TLApp = { askJiraToken, b64u, bell, h, clear, api, toast, topbar, modal, S, EXT, avatar, lozenge, PRI, timer: (fn, ms) => S.timers.push(setInterval(fn, ms)), route, P, saveSettings, PREF_DEFAULTS, createDialog, projectDialog, undoToast, WANT_UNDO };
   window.addEventListener('hashchange', route);
   boot();
 })();

@@ -58,6 +58,8 @@ type JiraConnection struct {
 	// this connection here; it is a count and never names anyone (WT-17).
 	Locked     bool `json:"locked"`
 	LiveTokens int  `json:"live_tokens"`
+	// TokenPage is where the account's API token is created, for the unlock dialog.
+	TokenPage string `json:"token_page"`
 }
 
 type JiraConnIn struct {
@@ -216,7 +218,7 @@ func (s *Service) ListJiraConnections(ctx context.Context, a Actor) ([]JiraConne
 		var c JiraConnection
 		rows.Scan(&c.ID, &c.Name, &c.SiteURL, &c.Email, &c.TokenFP, &c.WebhookFP, &c.AllowPrivate)
 		_, unlocked := s.vault().Service(c.ID)
-		c.Locked, c.LiveTokens = !unlocked, s.vault().Users(c.ID)
+		c.Locked, c.LiveTokens, c.TokenPage = !unlocked, s.vault().Users(c.ID), JiraTokenPageFor(c.SiteURL)
 		out = append(out, c)
 	}
 	return out, rows.Err()

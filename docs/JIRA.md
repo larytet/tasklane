@@ -61,6 +61,21 @@ every 5 minutes. **A project whose permission data is older than 15 minutes is i
 reports, the index) and counted in a warning; comments with a Jira visibility restriction become internal comments, which
 readers never see.
 
+## In the browser
+
+**Administrators:** *Administration, Jira* shows each connection (site, account, `Locked` or `Unlocked`, how many people hold a
+personal token) with an **Unlock…** button: a dialog asks for the account's API token and links to where it is created. It also
+shows each mirrored project with a choice between *Read only: edit in Jira* and *Save changes to Jira*; the second explains what
+it does and asks before it takes effect. This replaces the API calls below for everyday use.
+
+**Everyone:** *Settings, Jira* (only for a person who has a project that saves to Jira) shows each connection that needs their token,
+whether one is set for this session, and buttons to **Set**, **Replace** or **Forget** it, with a link to where it is created. The
+token is never shown again. The same dialog opens by itself at a person's first save if no token was set.
+
+**Where a token is created depends on the Jira site.** For Jira Cloud (`*.atlassian.net`) the link is
+`https://id.atlassian.com/manage-profile/security/api-tokens`; for any other site it is that site's own profile page
+(`<site>/secure/ViewProfile.jspa`). The address is shown as text next to the link.
+
 ## Write-through
 
 `PUT /api/v1/jira/projects/{key}/mode` `{"mode":"write_through"}` (administrators; `read_only` switches it back). The mirrored
@@ -113,7 +128,6 @@ updated by Tasklane).
 Attachment files (metadata and lazy fetch), worklogs, versions and components, Jira boards, sprints and rank, custom field
 values, OAuth 2.0 (3LO) credentials, the "verify with Jira" permission mode, permission schemes and custom-field grants (these
 fail closed through the security-level rule and the role-based membership), issue-level erasure reports and account closures
-from Jira, Atlassian sign-in, admin screens (the API is complete), the `tasklane jira-unlock` command (the unlock is an API call
-for now), dropping the now-empty `jira_connection.token_enc` column (a contract migration for a later release), and **runs against
+from Jira, Atlassian sign-in, the `tasklane jira-unlock` command (the unlock is the Jira tab or an API call), dropping the now-empty `jira_connection.token_enc` column (a contract migration for a later release), and **runs against
 a real Jira site**: the Jira double was written from Jira's documentation, and whether the public edit API refuses stale writes,
 whether API tokens work for Google-SSO accounts and whether scoped tokens can do these edits are all unverified.

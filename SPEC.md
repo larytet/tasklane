@@ -1160,8 +1160,8 @@ record: Tasklane never holds a change that Jira has not accepted.
   checks the token with Jira's `myself` call; the email it returns must equal the connection's email, otherwise the token
   is refused and not kept. Creating a connection takes the same path. Environment variables such as `JIRA_API_TOKEN` are
   not read by Tasklane and must not be needed to run it. In a cluster each node that syncs a project needs the unlock;
-  a node that takes over a project stays locked until it has been unlocked. *Built:* the API call only; the
-  `tasklane jira-unlock` command and the Admin tab button are not built.
+  a node that takes over a project stays locked until it has been unlocked. *Built:* the API call and the
+  Jira tab of the administrator panel (WT-21); the `tasklane jira-unlock` command is not built.
 - **WT-04 Each person writes with their own token.** The first time a person saves to a `write_through` project and this
   node holds no live token for their session, the save is held (the draft is kept, section 4.5) and a dialog asks for a Jira
   API token. The dialog shows a link to Atlassian's token page (`https://id.atlassian.com/manage-profile/security/api-tokens`;
@@ -1232,10 +1232,30 @@ record: Tasklane never holds a change that Jira has not accepted.
 - **WT-17 Admin tab.** Per project: mode. Per connection: `locked` or `unlocked` since when (never the token), the number of
   people holding a live token (a count, not names), and the recent write outcomes (accepted, conflicts, rejections, failures).
   *Built:* the status API carries the mode, the locked flag and the count; the outcomes are in the audit log (`jira.write`) and
-  are not summarized in the status; there is no Admin screen for it yet (the API is complete).
+  are not summarized in the status; the Jira tab of the administrator panel (WT-21) shows the mode, the locked state and the count.
 - **WT-18 One person, several tabs (should).** A save, and a draft change, made in one tab are pushed to the same person's
   other tabs, as Jira's own editor does, so a person cannot collide with themselves. This is independent of the rest and can follow later.
   *Not built.* (A saved change already reaches the person's other tabs through the issue's live events.)
+- **WT-19 Where a token is created depends on the Jira site.** Every place that asks for a token links to the page where it is
+  created for that site and also shows the address in text: Atlassian's token page
+  (`https://id.atlassian.com/manage-profile/security/api-tokens`) for a Jira Cloud site (`atlassian.net`, `atlassian.com`,
+  `jira.com`, matched on the whole host so a look-alike name does not count), and the profile page of the site itself
+  (`<site>/secure/ViewProfile.jspa`) for any other, where a Jira that Atlassian does not host manages tokens. The answer
+  `428 token_required` and the connection list carry it as `token_page`.
+- **WT-20 A person can see what is asked of them.** `GET /api/v1/jira/session-token` (anyone signed in) lists the connections
+  that have a write-through project the person can see, with the site, the projects they can see, the token page and whether
+  this node holds a token for them (never the token). A project the person cannot see is not named to them.
+- **WT-21 Administrator panel, Jira tab.** An administrator sees the connections (site, account, token fingerprint, `Locked` or
+  `Unlocked`, how many people hold a personal token) and can unlock or replace a connection's token in a dialog that says it is kept
+  in memory only and links to where it is created for the account; and sees the mirrored projects (sync age, issue count, errors,
+  whether the connection is locked) and chooses per project between "read only: edit in Jira" and "save changes to Jira". Choosing
+  the second asks first, in words: saved at once as the person, with their own token; Jira decides who may edit; a change in
+  Jira since the person opened the issue is reported; what can be saved; agents, automation and email do not write. Cancel leaves
+  the project as it was. Going back to read only needs no question and says the tokens were forgotten.
+- **WT-22 Settings, Jira tab.** A person whose projects save to Jira sees, in their Settings, each connection that needs their
+  token, whether one is set, and can set it before their first save, replace it, or forget it, with the link of WT-19 and the same
+  statement as the save dialog (kept only in memory, never written to disk or the database, gone at sign-out or restart). A person
+  with no such project has no Jira tab.
 
 **Design**
 

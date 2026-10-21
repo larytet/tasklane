@@ -235,7 +235,7 @@ func TestWT04_TokenRequiredThenWriteAsThePerson(t *testing.T) {
 	ch := domain.Changes{Priority: wtStr("high")}
 	_, err := r.e.Svc.UpdateFields(ctx, r.e.Admin, "WEB-1", nil, false, ch)
 	var tr *domain.ErrTokenRequired
-	if !errors.As(err, &tr) || tr.TokenPage != domain.JiraTokenPage || tr.ConnectionID != r.conn.ID {
+	if !errors.As(err, &tr) || tr.TokenPage != domain.JiraTokenPageFor(r.jm.URL) || tr.ConnectionID != r.conn.ID {
 		t.Fatalf("no token must ask for one: %v", err)
 	}
 	if len(r.jm.Writes()) != 0 {
@@ -654,6 +654,56 @@ func TestWT10_Assignee(t *testing.T) {
 	}
 	if got := fmt.Sprint(r.jm.Field("WEB-1", "assignee")); !strings.Contains(got, "acc-alice") {
 		t.Fatalf("Jira has %v", got)
+	}
+}
+
+// WT-19: the link to where a token is created depends on the Jira site.
+func TestWT19_TokenPageDependsOnTheSite(t *testing.T) {
+	for site, want := range map[string]string{
+		"https://acme.atlassian.net":         "https://id.atlassian.com/manage-profile/security/api-tokens",
+		"https://ACME.Atlassian.NET/":        "https://id.atlassian.com/manage-profile/security/api-tokens",
+		"https://jira.atlassian.com":         "https://id.atlassian.com/manage-profile/security/api-tokens",
+		"https://acme.jira.com":              "https://id.atlassian.com/manage-profile/security/api-tokens",
+		"https://jira.example.org":           "https://jira.example.org/secure/ViewProfile.jspa",
+		"https://jira.example.org/":          "https://jira.example.org/secure/ViewProfile.jspa",
+		"https://evilatlassian.net":          "https://evilatlassian.net/secure/ViewProfile.jspa", // a look-alike host is not Atlassian's
+		"https://atlassian.net.evil.example": "https://atlassian.net.evil.example/secure/ViewProfile.jspa",
+		"http://127.0.0.1:9999":              "http://127.0.0.1:9999/secure/ViewProfile.jspa",
+	} {
+		if got := domain.JiraTokenPageFor(site); got != want {
+			t.Errorf("%s: got %s, want %s", site, got, want)
+		}
+	}
+}
+
+// WT-20: a person is told which connections need their token, whether this node has one, and only the projects they can see.
+func TestWT20_TokenStatusForThePerson(t *testing.T) {
+	r := wtRig(t)
+	st, err := r.e.Svc.JiraTokenStatus(ctx, r.e.Admin)
+	if err != nil || len(st) != 1 || st[0].ConnectionID != r.conn.ID || st[0].HasToken || len(st[0].Projects) != 1 || st[0].Projects[0] != "WEB" || st[0].TokenPage != domain.JiraTokenPageFor(r.jm.URL) {
+		t.Fatalf("before a token: %+v %v", st, err)
+	}
+	r.giveToken(t)
+	if st, _ = r.e.Svc.JiraTokenStatus(ctx, r.e.Admin); !st[0].HasToken {
+		t.Fatal("a token this node holds must be reported")
+	}
+	r.e.Svc.ClearJiraSessionToken(r.e.Admin, r.conn.ID)
+	if st, _ = r.e.Svc.JiraTokenStatus(ctx, r.e.Admin); st[0].HasToken {
+		t.Fatal("a forgotten token must not be reported")
+	}
+	// a person with no access to the project is not told it exists
+	if st, err = r.e.Svc.JiraTokenStatus(ctx, r.e.Alice); err != nil || len(st) != 0 {
+		t.Fatalf("a person who cannot see the project: %+v %v", st, err)
+	}
+	// and a mirror that only reads needs nobody's token
+	if err := r.e.Svc.SetJiraProjectMode(ctx, r.e.Admin, "WEB", "read_only"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = r.e.Svc.JiraTokenStatus(ctx, r.e.Admin); len(st) != 0 {
+		t.Fatalf("a read-only project needs no token: %+v", st)
+	}
+	if _, err := r.e.Svc.JiraTokenStatus(ctx, domain.Actor{}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("anonymous: %v", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,66 @@ import (
 
 // JiraTokenPage is where a person creates an Atlassian API token.
 const JiraTokenPage = "https://id.atlassian.com/manage-profile/security/api-tokens"
+
+// JiraTokenPageFor is where a person creates an API token for a Jira site: Atlassian's token page for a Jira Cloud site, and the
+// profile page of the site itself for any other (a Jira that Atlassian does not host manages tokens there). The dialogs and settings link to it.
+func JiraTokenPageFor(siteURL string) string {
+	if u, err := url.Parse(strings.TrimSpace(siteURL)); err == nil {
+		h := strings.ToLower(u.Hostname())
+		for _, d := range []string{"atlassian.net", "atlassian.com", "jira.com"} {
+			if h == d || strings.HasSuffix(h, "."+d) {
+				return JiraTokenPage
+			}
+		}
+	}
+	return strings.TrimSuffix(strings.TrimSpace(siteURL), "/") + "/secure/ViewProfile.jspa"
+}
+
+// JiraTokenInfo is one Jira connection a person may be asked for a token for: some project they can see writes through to it.
+type JiraTokenInfo struct {
+	ConnectionID string   `json:"connection_id"`
+	Connection   string   `json:"connection"`
+	SiteURL      string   `json:"site_url"`
+	TokenPage    string   `json:"token_page"`
+	HasToken     bool     `json:"has_token"` // this node holds a live token for the person (it is never shown)
+	Projects     []string `json:"projects"`  // the write-through projects of the connection that the person can see
+}
+
+// JiraTokenStatus lists, for the signed-in person, the connections that need their token and whether this node holds one (settings page).
+func (s *Service) JiraTokenStatus(ctx context.Context, a Actor) ([]JiraTokenInfo, error) {
+	if a.ID == "" {
+		return nil, ErrForbidden
+	}
+	rows, err := s.DB.Query(ctx, `SELECT c.id::text,c.name,c.site_url,p.id::text,p.key FROM jira_connection c
+		JOIN jira_project jp ON jp.connection_id=c.id AND jp.mode='write_through' JOIN project p ON p.id=jp.project_id ORDER BY c.name,p.key`)
+	if err != nil {
+		return nil, err
+	}
+	type row struct{ cid, name, site, pid, key string }
+	var all []row
+	for rows.Next() {
+		var r row
+		rows.Scan(&r.cid, &r.name, &r.site, &r.pid, &r.key)
+		all = append(all, r)
+	}
+	rows.Close()
+	out := []JiraTokenInfo{}
+	idx := map[string]int{}
+	for _, r := range all {
+		if !a.Admin && s.role(ctx, a, r.pid) == "" {
+			continue // a project the person cannot see is not named to them
+		}
+		i, ok := idx[r.cid]
+		if !ok {
+			_, has := s.vault().User(a.ID, r.cid)
+			out = append(out, JiraTokenInfo{ConnectionID: r.cid, Connection: r.name, SiteURL: r.site, TokenPage: JiraTokenPageFor(r.site), HasToken: has, Projects: []string{}})
+			i = len(out) - 1
+			idx[r.cid] = i
+		}
+		out[i].Projects = append(out[i].Projects, r.key)
+	}
+	return out, nil
+}
 
 // JiraUserTokenTTL is how long a personal token stays in memory without being supplied again (WT-06).
 const JiraUserTokenTTL = 8 * time.Hour
@@ -119,7 +180,7 @@ func (s *Service) writeThrough(ctx context.Context, projectKey string) *wtTarget
 }
 
 func (t *wtTarget) tokenRequired() error {
-	return &ErrTokenRequired{ConnectionID: t.id, Connection: t.name, SiteURL: t.site, TokenPage: JiraTokenPage}
+	return &ErrTokenRequired{ConnectionID: t.id, Connection: t.name, SiteURL: t.site, TokenPage: JiraTokenPageFor(t.site)}
 }
 
 // notWritable is the refusal for what the first phase does not write (WT-10): the typed mirror error with the Jira address.

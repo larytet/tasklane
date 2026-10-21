@@ -497,6 +497,7 @@ func rows() []row {
 		{"POST /api/v1/jira/session-token", exp{anon: codes(401), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req {
 			return J("POST", "/api/v1/jira/session-token", map[string]any{"connection": f.jiraConn(), "token": "tok"})
 		}},
+		{"GET /api/v1/jira/session-token", authed, func(f *fixture) req { return J("GET", "/api/v1/jira/session-token", nil) }},
 		{"DELETE /api/v1/jira/session-token", authed, func(f *fixture) req { return J("DELETE", "/api/v1/jira/session-token", nil) }},
 		{"GET /api/v1/fields", authed, func(f *fixture) req { return J("GET", "/api/v1/fields", nil) }},
 		{"POST /api/v1/fields", adminer, func(f *fixture) req {
