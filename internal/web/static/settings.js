@@ -117,6 +117,8 @@
       ...accountPanels,
       Jira: jiraPanel,
     };
+    // the instance administrator's screens: the tab shows their own row of tabs
+    if (S.me && S.me.admin && A.EXT.adminTabs) panels.Administration = h('div', {}, A.EXT.adminTabs(''));
     const tabs = h('div', { role: 'tablist', 'aria-label': 'Settings sections' });
     const box = h('div', {});
     const names = Object.keys(panels);
@@ -135,15 +137,16 @@
       box.append(panels[name]);
     });
     select_(names.find(n => slug(n) === initial) || names[0]);
+    A.S.settingsNames = names;
     // the Jira tab exists only for a person who has a project that saves to Jira
     drawJira().then(n => {
       if (n) return;
       const t = tabs.querySelector('[data-name="Jira"]'); if (t) t.remove();
-      jiraPanel.remove(); delete panels.Jira; names.splice(names.indexOf('Jira'), 1);
+      jiraPanel.remove(); delete panels.Jira; names.splice(names.indexOf('Jira'), 1); A.S.settingsNames = names;
     });
     const done = h('button', { class: 'btn primary', onclick: () => { location.hash = A.S.settingsFrom && !/^#\/(settings|account)/.test(A.S.settingsFrom) ? A.S.settingsFrom : '#/'; } }, 'Done');
     const app = A.clear(document.getElementById('app'));
-    app.append(A.topbar(), h('div', { class: 'page settings', id: 'settings-page', role: 'region', 'aria-label': 'Settings' }, h('h2', {}, 'Settings'), tabs, S.me && S.me.admin && A.EXT.adminTabs ? A.EXT.adminTabs('') : null, box, status,
+    app.append(A.topbar(), h('div', { class: 'page settings', id: 'settings-page', role: 'region', 'aria-label': 'Settings' }, h('h2', {}, 'Settings'), tabs, box, status,
       h('div', { class: 'actions' }, h('span', { class: 'grow' }), done)));
     // a change made in another tab or by the view buttons shows here too
     const sync = () => { chars.value = S.settings.snippet_chars; };
@@ -171,4 +174,8 @@
     settingsDialog(want);
   } });
   A.EXT.settings = openSettings;
+  // the same row of tabs on an administration screen, as links back into Settings; Administration is the one selected
+  A.EXT.settingsRow = () => h('nav', { class: 'tabs', 'aria-label': 'Settings sections' },
+    ...(A.S.settingsNames || ['Appearance', 'List', 'Keyboard', 'Security', 'Sessions', 'API tokens', 'Administration']).map(n =>
+      h('a', { href: '#/settings/' + slug(n), class: 'tab', 'aria-current': n === 'Administration' ? 'page' : null }, n)));
 })();

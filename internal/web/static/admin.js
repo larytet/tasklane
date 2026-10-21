@@ -9,7 +9,7 @@
   const CATS = [['todo', 'To Do'], ['in_progress', 'In progress'], ['done', 'Done']];
 
   function adminTabs(active) {
-    return h('nav', { class: 'tabs', 'aria-label': 'Administration' }, active === '' ? null : h('a', { href: '#/settings', class: 'tab' }, 'Settings'), h('span', { class: 'tabs-title' }, 'Administration'),
+    const nav = h('nav', { class: 'tabs', 'aria-label': 'Administration' },
       h('a', { href: '#/admin/workflows', class: 'tab', 'aria-current': active === 'workflows' ? 'page' : null }, 'Workflows'),
       h('a', { href: '#/admin/automation', class: 'tab', 'aria-current': active === 'automation' ? 'page' : null }, 'Automation'),
       h('a', { href: '#/admin/identity', class: 'tab', 'aria-current': active === 'identity' ? 'page' : null }, 'Identity'),
@@ -19,6 +19,8 @@
       h('a', { href: '#/admin/roles', class: 'tab', 'aria-current': active === 'roles' ? 'page' : null }, 'Roles'),
       h('a', { href: '#/admin/security', class: 'tab', 'aria-current': active === 'security' ? 'page' : null }, 'Security'),
       h('a', { href: '#/admin/audit', class: 'tab', 'aria-current': active === 'audit' ? 'page' : null }, 'Audit log'));
+    // on an administration screen the person's own row of Settings tabs is above, with Administration selected; in Settings it is the tab
+    return active === '' || !A.EXT.settingsRow ? nav : h('div', {}, A.EXT.settingsRow(), nav);
   }
 
   // ---------- list ----------
