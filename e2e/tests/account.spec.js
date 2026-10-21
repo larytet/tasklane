@@ -62,6 +62,7 @@ test('SEC-04: two-factor enrolment, a second step at sign-in, and recovery codes
   expect(recovery).toHaveLength(10);
   await page.getByRole('button', { name: 'I have saved them' }).click();
   await expect(page.getByText('Two-factor authentication is on. 10 recovery codes are left.')).toBeVisible();
+  await page.getByRole('button', { name: 'Done' }).click(); // close Settings, where the account's sections are
   // sign out and in again: the password is no longer enough
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await page.getByLabel('Email').fill(email);
@@ -75,6 +76,7 @@ test('SEC-04: two-factor enrolment, a second step at sign-in, and recovery codes
   await page.getByLabel('Authentication code').fill(totp(secret, Date.now() + 30000));
   await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page.getByRole('button', { name: 'Create new' })).toBeVisible();
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Done' }).click(); // signing in on #/account opens Settings again
   // a recovery code works once
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await page.getByLabel('Email').fill(email);
@@ -108,6 +110,7 @@ test('SEC-04: sessions, API tokens and the password on the account page', async 
   await op.getByRole('button', { name: 'Sign in' }).click();
   await expect(op.getByRole('button', { name: 'Create new' })).toBeVisible();
   await page.goto('/#/account');
+  await page.getByRole('tab', { name: 'Sessions' }).click();
   await expect(page.getByText('(this session)')).toBeVisible();
   const rows = page.getByRole('region', { name: 'Sessions' }).getByRole('listitem');
   await expect(rows).toHaveCount(2);
@@ -118,9 +121,10 @@ test('SEC-04: sessions, API tokens and the password on the account page', async 
   await expect(rows).toHaveCount(1);
   expect((await other.request.get('/api/v1/bootstrap')).status()).toBe(401);
   // a token is shown once, works, and stops working when revoked
+  await page.getByRole('tab', { name: 'API tokens' }).click();
   await page.getByLabel('Token name').fill('ci ' + uniq());
   await page.getByRole('button', { name: 'Create token' }).click();
-  const token = (await page.getByRole('dialog').getByLabel('Token').textContent()).trim();
+  const token = (await page.getByRole('dialog').getByLabel('Token', { exact: true }).textContent()).trim();
   expect(token).toMatch(/^tl_/);
   await page.getByRole('button', { name: 'Done' }).click();
   const use = async () => (await page.request.get('/api/v1/bootstrap', { headers: { Authorization: 'Bearer ' + token }, failOnStatusCode: false })).status();
@@ -132,6 +136,7 @@ test('SEC-04: sessions, API tokens and the password on the account page', async 
   await page.getByRole('button', { name: /^Revoke token/ }).click();
   await expect.poll(bareUse).toBe(401);
   // changing the password ends the other sessions and shows what happened
+  await page.getByRole('tab', { name: 'Security' }).click();
   await page.getByLabel('Current password').fill('wrong');
   await page.getByLabel('New password').fill('second-password-2');
   await page.getByRole('button', { name: 'Change password' }).click();
@@ -287,6 +292,7 @@ test('MCP-04: an application asks for access, the person approves, and the token
   expect(mcp.status()).toBe(200);
   // it is listed under Account and disconnecting ends it at once
   await page.goto('/#/account');
+  await page.getByRole('tab', { name: 'API tokens' }).click();
   const row = page.getByRole('region', { name: 'Connected applications' }).getByRole('listitem').filter({ hasText: 'Claude Desktop' });
   await expect(row).toBeVisible();
   await row.getByRole('button', { name: 'Disconnect Claude Desktop' }).click();

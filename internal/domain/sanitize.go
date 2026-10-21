@@ -17,7 +17,20 @@ func checkSize(s string) error {
 // Sanitize removes control characters and markdown links whose scheme is not http, https or
 // mailto (SPEC 4.5, validation on save). It returns the cleaned text and a report of what was removed
 // so the saver can be told; nothing is dropped silently.
-func Sanitize(s string) (string, []string) {
+func Sanitize(s string) (string, []string) { return sanitize(s, schemeOK) }
+
+// dialectSchemeOK is schemeOK plus the three schemes of Tasklane's Markdown dialect (internal/richtext): a mention is
+// @[Name](user:ID), an issue link [KEY](issue:KEY) and an attachment ![name](attachment:ID). The parser turns each into a node of its
+// own, never a link, so none of them can carry a script; text that is Markdown for Jira (SPEC 18.1.1, WT-12) is cleaned with this.
+func dialectSchemeOK(dest string) bool {
+	u := strings.ToLower(strings.TrimSpace(dest))
+	return schemeOK(dest) || strings.HasPrefix(u, "user:") || strings.HasPrefix(u, "issue:") || strings.HasPrefix(u, "attachment:")
+}
+
+// SanitizeDialect is Sanitize for text in the Markdown dialect: mentions, issue links and attachments are kept.
+func SanitizeDialect(s string) (string, []string) { return sanitize(s, dialectSchemeOK) }
+
+func sanitize(s string, ok func(string) bool) (string, []string) {
 	var removed []string
 	s = strings.ToValidUTF8(s, "")
 	var b strings.Builder
@@ -33,7 +46,7 @@ func Sanitize(s string) (string, []string) {
 		removed = append(removed, "control characters")
 	}
 	s = strings.ReplaceAll(b.String(), "\r\n", "\n")
-	s = stripBadLinks(s, &removed)
+	s = stripBadLinks(s, &removed, ok)
 	return s, removed
 }
 
@@ -45,7 +58,7 @@ func schemeOK(dest string) bool {
 
 // stripBadLinks scans markdown links [text](dest) with balanced parentheses in dest, so
 // "javascript:alert(1)" cannot hide its tail from the scanner.
-func stripBadLinks(s string, removed *[]string) string {
+func stripBadLinks(s string, removed *[]string, ok func(string) bool) string {
 	var out strings.Builder
 	i := 0
 	for i < len(s) {
@@ -80,7 +93,7 @@ func stripBadLinks(s string, removed *[]string) string {
 		if f := strings.Fields(dest); len(f) > 0 {
 			dest = f[0]
 		}
-		if schemeOK(dest) {
+		if ok(dest) {
 			out.WriteString(s[i:j])
 		} else {
 			out.WriteString(s[i:lb])

@@ -2,6 +2,7 @@ package domain_test
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +23,62 @@ var other = jiramock.Account{Email: "other@example.com", AccountID: "acc-other",
 
 func wtStr(s string) *string { return &s }
 
+// richDescription is a description as Jira's editor makes one: a heading, bold text, a link, a mention, a list, a code block, and a panel
+// that Tasklane's model does not hold (it travels as an opaque block).
+func richDescription() jiramock.M {
+	txt := func(s string, marks ...jiramock.M) jiramock.M {
+		n := jiramock.M{"type": "text", "text": s}
+		if len(marks) > 0 {
+			ms := []any{}
+			for _, m := range marks {
+				ms = append(ms, m)
+			}
+			n["marks"] = ms
+		}
+		return n
+	}
+	item := func(s string) jiramock.M {
+		return jiramock.M{"type": "listItem", "content": []any{jiramock.M{"type": "paragraph", "content": []any{txt(s)}}}}
+	}
+	return jiramock.M{"type": "doc", "version": 1, "content": []any{
+		jiramock.M{"type": "heading", "attrs": jiramock.M{"level": float64(2)}, "content": []any{txt("Plan")}},
+		jiramock.M{"type": "paragraph", "content": []any{txt("Do "), txt("this", jiramock.M{"type": "strong"}), txt(" first, see "),
+			txt("the spec", jiramock.M{"type": "link", "attrs": jiramock.M{"href": "https://example.com/spec"}}), txt(", then ask "),
+			jiramock.M{"type": "mention", "attrs": jiramock.M{"id": "acc-ann", "text": "@Ann"}}}},
+		jiramock.M{"type": "bulletList", "content": []any{item("one"), item("two")}},
+		jiramock.M{"type": "codeBlock", "attrs": jiramock.M{"language": "go"}, "content": []any{txt("fmt.Println(1)")}},
+		jiramock.M{"type": "panel", "attrs": jiramock.M{"panelType": "info"}, "content": []any{jiramock.M{"type": "paragraph", "content": []any{txt("keep me")}}}},
+	}}
+}
+
+// adfNodeTypes counts the node types of a document (and marks as "mark:<type>").
+func adfNodeTypes(v any) map[string]int {
+	out := map[string]int{}
+	var walk func(any)
+	walk = func(n any) {
+		switch x := n.(type) {
+		case map[string]any:
+			if t, ok := x["type"].(string); ok {
+				out[t]++
+			}
+			if ms, ok := x["marks"].([]any); ok {
+				for _, m := range ms {
+					if mm, ok := m.(map[string]any); ok {
+						out["mark:"+fmt.Sprint(mm["type"])]++
+					}
+				}
+			}
+			if c, ok := x["content"].([]any); ok {
+				for _, e := range c {
+					walk(e)
+				}
+			}
+		}
+	}
+	walk(v)
+	return out
+}
+
 // wtRig is a mirrored project WEB that writes through, with the administrator holding a personal token.
 func wtRig(t *testing.T) *jiraRig {
 	t.Helper()
@@ -32,9 +89,7 @@ func wtRig(t *testing.T) *jiraRig {
 		is.Fields["labels"] = []any{"auth"}
 	})
 	r.issue(2, "Formatted", "To Do", "new", "Task", func(is *jiramock.Issue) {
-		is.Fields["description"] = jiramock.M{"type": "doc", "version": 1, "content": []any{
-			jiramock.M{"type": "bulletList", "content": []any{jiramock.M{"type": "listItem", "content": []any{jiramock.M{"type": "paragraph", "content": []any{jiramock.M{"type": "text", "text": "a bullet"}}}}}}},
-		}}
+		is.Fields["description"] = richDescription()
 	})
 	r.jm.Transitions = []jiramock.Trans{
 		{ID: "11", Name: "Start", From: "To Do", To: "In Progress"},
@@ -547,23 +602,18 @@ func TestWT12_TextAndComments(t *testing.T) {
 	if r.issueOf(t, "WEB-1").Summary != "Fix the login page" || fmt.Sprint(r.jm.Field("WEB-1", "summary")) != "Fix the login page" {
 		t.Fatal("summary not in both places")
 	}
-	// a plain description: paragraphs and line breaks survive
-	nb := "Alpha\nbeta\n\nGamma"
+	// a plain description: two paragraphs in Markdown are two paragraphs in Jira
+	nb := "Alpha\n\nGamma"
 	if _, err := r.e.Svc.ReplaceText(ctx, r.e.Admin, "WEB-1", "description", nb, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.bodyOf(t, "WEB-1", "description"); got != nb {
 		t.Fatalf("description in the mirror: %q", got)
 	}
-	// a description with a list cannot be written back without losing it: refused, nothing sent
+	if paras := adfNodeTypes(r.jm.Field("WEB-1", "description"))["paragraph"]; paras != 2 {
+		t.Fatalf("Jira has %d paragraphs", paras)
+	}
 	before := len(r.jm.Writes())
-	var rj *domain.JiraRejected
-	if _, err := r.e.Svc.ReplaceText(ctx, r.e.Admin, "WEB-2", "description", "changed", nil); !errors.As(err, &rj) || !strings.Contains(rj.Error(), "formatting") {
-		t.Fatalf("a formatted description: %v", err)
-	}
-	if len(r.jm.Writes()) != before {
-		t.Fatal("a lossy edit was sent")
-	}
 	// the text is compared with Jira's current text: someone edited it in Jira
 	r.jm.Change("WEB-1", "summary", "Changed in Jira", other)
 	var tc *domain.TextConflict
@@ -704,6 +754,132 @@ func TestWT20_TokenStatusForThePerson(t *testing.T) {
 	}
 	if _, err := r.e.Svc.JiraTokenStatus(ctx, domain.Actor{}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("anonymous: %v", err)
+	}
+}
+
+func findNode(v any, typ string) any {
+	switch x := v.(type) {
+	case map[string]any:
+		if x["type"] == typ {
+			return x
+		}
+		if c, ok := x["content"].([]any); ok {
+			for _, e := range c {
+				if n := findNode(e, typ); n != nil {
+					return n
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func asJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// WT-23: a description with formatting is edited as Markdown made from Jira's own document, and what is saved keeps the structure.
+func TestWT23_DescriptionIsEditedAsMarkdown(t *testing.T) {
+	r := wtRig(t)
+	r.giveToken(t)
+	body := r.bodyOf(t, "WEB-2", "description")
+	for _, want := range []string{"## Plan", "**this**", "[the spec](https://example.com/spec)", "@[Ann](user:acc-ann)", "- one", "- two", "```go", "fmt.Println(1)", "```adf-opaque"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("the Markdown lacks %q:\n%s", want, body)
+		}
+	}
+	// edit one line: everything else must reach Jira as it was
+	before := r.jm.Field("WEB-2", "description")
+	if _, err := r.e.Svc.PatchText(ctx, r.e.Admin, "WEB-2", "description", "- two", "- two and three"); err != nil {
+		t.Fatal(err)
+	}
+	after := r.jm.Field("WEB-2", "description")
+	b, a := adfNodeTypes(before), adfNodeTypes(after)
+	for _, k := range []string{"doc", "heading", "paragraph", "bulletList", "listItem", "codeBlock", "panel", "mention", "mark:strong", "mark:link"} {
+		if b[k] == 0 || b[k] != a[k] {
+			t.Errorf("%s: %d before, %d after", k, b[k], a[k])
+		}
+	}
+	if asJSON(findNode(before, "panel")) != asJSON(findNode(after, "panel")) {
+		t.Errorf("the panel, which the model does not hold, changed:\n%s\n%s", asJSON(findNode(before, "panel")), asJSON(findNode(after, "panel")))
+	}
+	if m := findNode(after, "mention").(map[string]any)["attrs"].(map[string]any); m["id"] != "acc-ann" {
+		t.Errorf("the mention lost its person: %v", m)
+	}
+	if !strings.Contains(asJSON(after), "two and three") {
+		t.Error("the edit did not reach Jira")
+	}
+	if got := r.bodyOf(t, "WEB-2", "description"); !strings.Contains(got, "- two and three") || !strings.Contains(got, "## Plan") {
+		t.Fatalf("the mirror after the save:\n%s", got)
+	}
+
+	// someone changes the description in Jira: the person is told, with Jira's text as Markdown
+	r.jm.Change("WEB-2", "description", jiramock.ADFParagraph("Rewritten in Jira"), other)
+	var tc *domain.TextConflict
+	if _, err := r.e.Svc.ReplaceText(ctx, r.e.Admin, "WEB-2", "description", "Mine", nil); !errors.As(err, &tc) || tc.Current != "Rewritten in Jira" || tc.By != "Other Person" {
+		t.Fatalf("conflict: %+v %v", tc, err)
+	}
+	// the sync brings a change made in Jira in as Markdown
+	r.jm.Change("WEB-2", "description", jiramock.M{"type": "doc", "version": 1, "content": []any{
+		jiramock.M{"type": "heading", "attrs": jiramock.M{"level": float64(2)}, "content": []any{jiramock.M{"type": "text", "text": "Hello"}}},
+		jiramock.M{"type": "paragraph", "content": []any{jiramock.M{"type": "text", "text": "it is "}, jiramock.M{"type": "text", "text": "bold", "marks": []any{jiramock.M{"type": "strong"}}}}}}}, other)
+	r.syncAs(t)
+	const md = "## Hello\n\nit is **bold**"
+	if got := r.bodyOf(t, "WEB-2", "description"); got != md {
+		t.Fatalf("the sync must store Markdown for a project that writes through: %q", got)
+	}
+
+	// emptying a description clears it in Jira
+	if _, err := r.e.Svc.ReplaceText(ctx, r.e.Admin, "WEB-1", "description", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if v := r.jm.Field("WEB-1", "description"); v != nil {
+		t.Fatalf("Jira has %v", v)
+	}
+	if got := r.bodyOf(t, "WEB-1", "description"); got != "" {
+		t.Fatalf("the mirror has %q", got)
+	}
+
+	// back to read only: the stored descriptions are plain text again
+	if err := r.e.Svc.SetJiraProjectMode(ctx, r.e.Admin, "WEB", "read_only"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.bodyOf(t, "WEB-2", "description"); strings.Contains(got, "##") || strings.Contains(got, "**") || !strings.Contains(got, "Hello") || !strings.Contains(got, "bold") {
+		t.Fatalf("read only must keep plain text: %q", got)
+	}
+	// and on again: Markdown
+	if err := r.e.Svc.SetJiraProjectMode(ctx, r.e.Admin, "WEB", "write_through"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.bodyOf(t, "WEB-2", "description"); got != md {
+		t.Fatalf("write through must keep Markdown: %q", got)
+	}
+}
+
+// WT-23: a link with a scheme that is not http, https or mailto is refused, and the dialect's own schemes are kept only as nodes.
+func TestWT23_UnsafeLinksAreRefusedAndMentionsKept(t *testing.T) {
+	r := wtRig(t)
+	r.giveToken(t)
+	before := len(r.jm.Writes())
+	var rj *domain.JiraRejected
+	// `user:` outside a mention (no @) stays a link with that scheme: not something Jira should be sent
+	if _, err := r.e.Svc.ReplaceText(ctx, r.e.Admin, "WEB-1", "description", "see [x](user:abc)", nil); !errors.As(err, &rj) {
+		t.Fatalf("a link with another scheme: %v", err)
+	}
+	if len(r.jm.Writes()) != before {
+		t.Fatal("a refused edit was sent")
+	}
+	// a script link is cleaned to its label by the cleaning every text goes through, so what reaches Jira is text
+	if _, err := r.e.Svc.ReplaceText(ctx, r.e.Admin, "WEB-1", "description", "click [here](javascript:alert(1))", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := asJSON(r.jm.Field("WEB-1", "description")); strings.Contains(got, "javascript") || !strings.Contains(got, "click here") {
+		t.Fatalf("Jira got %s", got)
+	}
+	// a mention written as a mention is a mention
+	if _, err := r.e.Svc.ReplaceText(ctx, r.e.Admin, "WEB-1", "description", "ask @[Ann](user:acc-ann) and see ABC", nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := adfNodeTypes(r.jm.Field("WEB-1", "description"))["mention"]; n != 1 {
+		t.Fatalf("%d mentions in Jira", n)
 	}
 }
 

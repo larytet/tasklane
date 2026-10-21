@@ -56,6 +56,7 @@ test('SEC-04: a passkey is added on the account page, finishes a sign-in after t
   expect((await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials.length).toBe(1);
 
   // signing out and in again: the password is no longer enough; the key finishes it
+  await page.getByRole('button', { name: 'Done' }).click(); // close Settings, where the passkeys are
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await signIn();
   await expect(page.getByText('Use your passkey or security key to finish signing in.')).toBeVisible();

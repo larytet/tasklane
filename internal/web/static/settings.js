@@ -1,12 +1,13 @@
 // The Settings dialog (SPEC 4.6): the person's own settings in one place, saved on the server as each one changes and applied at once,
-// without a reload. Security, sessions and two-factor stay on the Account page.
+// without a reload. Two-factor authentication, passkeys, the password, sessions and API tokens are here too (tabs Security, Sessions and
+// API tokens, built by account.js); the name in the top bar opens Settings on Security.
 (function () {
   'use strict';
   const A = window.TLApp;
   if (!A) return;
   const { h, modal, S, saveSettings, api } = A;
 
-  function settingsDialog() {
+  function settingsDialog(initial) { // initial: the tab to open on, by name
     const status = h('div', { class: 'saved muted', role: 'status' });
     let redraw = false; // the list's rows depend on these: the screen is drawn again when the dialog closes
     const save = async ch => {
@@ -98,6 +99,7 @@
       return r.data.length;
     };
     const jiraPanel = h('div', {}, h('p', { class: 'muted', style: 'margin-top:0' }, 'Some projects save your changes to Jira as you, and for those Tasklane needs your personal Jira API token. The token is kept only in memory for this session: it is never written to disk or to the database, and it is forgotten when you sign out or when Tasklane restarts.'), jiraList);
+    const accountPanels = A.EXT.accountSections ? A.EXT.accountSections() : {};
     const panels = {
       Appearance: h('div', { class: 'set' },
         radios('Theme', 'theme', [['', 'This device'], ['dark', 'Dark'], ['light', 'Light']]),
@@ -114,6 +116,7 @@
       Keyboard: h('div', { class: 'set' },
         check('Single-key shortcuts', 'shortcuts'),
         h('span', {}), h('p', { class: 'muted', style: 'margin:0' }, 'Shortcuts such as c to create and j/k to move. Ctrl+K and Ctrl+Enter work either way.')),
+      ...accountPanels,
       Jira: jiraPanel,
     };
     const tabs = h('div', { role: 'tablist', 'aria-label': 'Settings sections' });
@@ -133,7 +136,7 @@
       Object.assign(panels[name], { id: 'set-panel-' + i, role: 'tabpanel' }); panels[name].setAttribute('aria-labelledby', 'set-tab-' + i);
       box.append(panels[name]);
     });
-    select_(names[0]);
+    select_(typeof initial === 'string' && panels[initial] ? initial : names[0]);
     // the Jira tab exists only for a person who has a project that saves to Jira
     drawJira().then(n => {
       if (n) return;
@@ -141,7 +144,7 @@
       jiraPanel.remove(); delete panels.Jira; names.splice(names.indexOf('Jira'), 1);
     });
     const close = modal(h('div', { class: 'settings' }, h('h2', {}, 'Settings'), tabs, box, status,
-      h('div', { class: 'actions' }, h('a', { href: '#/account', onclick: () => close() }, 'Security, sessions and two-factor'), h('span', { class: 'grow' }), h('button', { class: 'btn primary', onclick: () => close() }, 'Done'))));
+      h('div', { class: 'actions' }, h('span', { class: 'grow' }), h('button', { class: 'btn primary', onclick: () => close() }, 'Done'))));
     close.scrim.querySelector('.dialog').classList.add('settings');
     // a change made in another tab or by the view buttons shows here too
     const sync = () => { chars.value = S.settings.snippet_chars; };

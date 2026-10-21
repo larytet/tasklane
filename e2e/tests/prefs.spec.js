@@ -35,7 +35,7 @@ for (const theme of ['dark', 'light']) {
     await expect(dlg.getByRole('tabpanel')).toContainText('Density');
     await axe(u.page, 'settings dialog, list');
     await u.page.keyboard.press('End');
-    await expect(dlg.getByRole('tab', { name: 'Keyboard' })).toBeFocused();
+    await expect(dlg.getByRole('tab', { name: 'API tokens' })).toBeFocused(); // the last tab: Settings now holds the account's sections too
     await u.page.keyboard.press('Home');
     await expect(dlg.getByRole('tab', { name: 'Appearance' })).toBeFocused();
     // focus stays inside the dialog

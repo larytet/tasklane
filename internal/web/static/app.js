@@ -258,7 +258,7 @@
     draw();
     return box;
   }
-  function settingsDialog() { if (EXT.settings) EXT.settings(); }
+  function settingsDialog(tab) { if (EXT.settings) EXT.settings(typeof tab === 'string' ? tab : undefined); } // as a click handler it gets the event: only a name is a tab
 
   function moreMenu() {
     const d = h('details', { class: 'topmore' });
@@ -302,7 +302,7 @@
       S.me && S.me.admin ? h('button', { class: 'btn ghost', onclick: () => { location.hash = '#/admin/workflows'; } }, 'Admin') : null,
       h('button', { class: 'btn ghost', id: 'settings-btn', 'aria-label': 'Settings', 'aria-haspopup': 'dialog', title: 'Settings', onclick: settingsDialog }, '⚙'),
       h('button', { class: 'btn ghost', 'aria-label': 'Toggle theme', onclick: () => saveSettings({ theme: document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' }) }, '◐'),
-      S.me ? h('button', { class: 'btn ghost', 'aria-label': 'Account and security', onclick: () => { location.hash = '#/account'; } }, S.me.label) : null,
+      S.me ? h('button', { class: 'btn ghost', 'aria-label': 'Account and security', 'aria-haspopup': 'dialog', onclick: () => settingsDialog('Security') }, S.me.label) : null,
       h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/v1/logout'); S.me = null; forgetPrefs(); route(); } }, 'Sign out'));
   }
 
@@ -851,8 +851,18 @@
   function modal(content) {
     const prev = document.activeElement;
     const scrim = h('div', { class: 'scrim', onmousedown: e => { if (e.target === scrim) close(); } }, h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true' }, content));
-    function close() { scrim.remove(); document.removeEventListener('keydown', key); if (prev && prev.focus) prev.focus(); }
+    // A dialog opened over another (a setup dialog over Settings) makes the one below inert and hidden from assistive technology until
+    // it closes, so only one dialog is ever reachable.
+    const under = [...document.querySelectorAll('.scrim')].pop();
+    if (under) { under.inert = true; under.setAttribute('aria-hidden', 'true'); }
+    function close() {
+      scrim.remove(); document.removeEventListener('keydown', key);
+      if (under && under.isConnected) { under.inert = false; under.removeAttribute('aria-hidden'); }
+      if (prev && prev.focus) prev.focus();
+    }
     function key(e) {
+      const open = document.querySelectorAll('.scrim'); // dialogs stack (a setup dialog over Settings): only the top one answers the keyboard
+      if (open.length && open[open.length - 1] !== scrim) return;
       if (e.key === 'Escape' && !scrim.dataset.sticky) close();
       if (e.key === 'Tab') { // focus trap
         const f = [...scrim.querySelectorAll('button,input,textarea,select,a[href]')].filter(x => !x.disabled);
@@ -1336,6 +1346,7 @@
       if (windowed) showWindow(ed.body, 0);
       const state = h('span', { class: 'state', role: 'status' }, st.dirty ? 'Draft saved' : '');
       box.append(h('div', { class: 'chips' }, h('strong', {}, 'Description'), h('span', { class: 'grow' })), h('div', { id: 'editing-warning' }));
+      if (writesThrough()) box.append(h('p', { class: 'muted note', id: 'md-note' }, 'This description is Markdown made from the one in Jira. It is converted back to Jira’s format when you save; a block shown as an adf-opaque fence is kept as it is.'));
       if (ed.restored) box.append(h('div', { class: 'banner warn' }, 'Restored your unsaved draft from ' + L.relTime(ed.restored.at) + '.',
         h('button', { class: 'btn', onclick: () => { setFull(v.issue.description); ed.body = v.issue.description; ed.baseSeq = v.issue.description_seq; ed.restored = null; setLocalDraft(key, 'description', null); render(); } }, 'Discard')));
       box.append(h('div', { id: 'changed-banner' }));

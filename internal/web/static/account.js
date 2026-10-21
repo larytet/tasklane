@@ -7,10 +7,9 @@
   const errText = r => (r.data && r.data.error) || 'Something went wrong';
   const when = iso => iso ? new Date(iso).toLocaleString() : 'never';
 
-  async function accountView() {
-    const app = clear(document.getElementById('app'));
-    const body = h('div', { class: 'page' });
-    app.append(topbar(), h('nav', { class: 'tabs', 'aria-label': 'Account' }, h('span', { class: 'tabs-title' }, 'Account and security')), body);
+  // The account's sections (two-factor authentication, passkeys, password, sessions, connected applications and API tokens) live in Settings,
+  // in the tabs Security, Sessions and API tokens. This builds them, each loading its own data, and Settings puts them in its tabs.
+  function buildAccount() {
     const section = (title, ...kids) => h('section', { class: 'card', style: 'padding:12px;margin:12px 0', 'aria-label': title }, h('h2', { style: 'margin:0 0 8px' }, title), ...kids);
 
     // ----- two-factor authentication
@@ -163,15 +162,33 @@
         h('button', { class: 'btn ghost', 'aria-label': 'Disconnect ' + g.client, onclick: async () => { const x = await api('DELETE', '/api/v1/me/oauth/grants/' + g.id); if (x.status === 200) loadApps(); else toast(errText(x)); } }, 'Disconnect')));
     }
 
-    body.append(
-      section('Two-factor authentication', mfaBox),
-      section('Passkeys and security keys', h('p', { class: 'muted' }, 'A passkey or security key can finish signing in after your password, beside an authenticator app. Adding or removing one asks for your password again.'), keysBox),
-      section('Password', pwBox),
-      section('Sessions', h('div', { class: 'chips' }, others), sessBox),
-      section('Connected applications', h('p', { class: 'muted' }, 'Applications such as AI assistants that you allowed to act for you, with the permissions you gave them. They never do more than you can.'), appsBox),
-      section('API tokens', h('div', { class: 'chips' }, tname, tdays, newTok), tmsg, tokBox));
-    await Promise.all([loadMFA(), loadKeys(), loadSessions(), loadTokens(), loadApps()]);
+    const panels = {
+      Security: h('div', {},
+        section('Two-factor authentication', mfaBox),
+        section('Passkeys and security keys', h('p', { class: 'muted' }, 'A passkey or security key can finish signing in after your password, beside an authenticator app. Adding or removing one asks for your password again.'), keysBox),
+        section('Password', pwBox)),
+      Sessions: h('div', {}, section('Sessions', h('div', { class: 'chips' }, others), sessBox)),
+      'API tokens': h('div', {},
+        section('Connected applications', h('p', { class: 'muted' }, 'Applications such as AI assistants that you allowed to act for you, with the permissions you gave them. They never do more than you can.'), appsBox),
+        section('API tokens', h('div', { class: 'chips' }, tname, tdays, newTok), tmsg, tokBox)),
+    };
+    Promise.all([loadMFA(), loadKeys(), loadSessions(), loadTokens(), loadApps()]);
+    return panels;
   }
+
+  // #/account is where a person is sent who must set up a second factor (the organization requires one) and where old links point:
+  // a short page that opens Settings on its Security tab. Nothing behind it asks the server for anything, so a refusal cannot send the
+  // person back here in a loop.
+  function accountView() {
+    // Settings opens when a person arrives here (also after signing in again on this address), not at every redraw of the page they are on
+    const fresh = !document.getElementById('account-shell');
+    const app = clear(document.getElementById('app'));
+    app.append(topbar(), h('div', { class: 'page', id: 'account-shell' }, h('h2', {}, 'Account and security'),
+      h('p', {}, 'Two-factor authentication, passkeys, your password, sessions and API tokens are in Settings.'),
+      h('button', { class: 'btn primary', id: 'open-account-settings', onclick: () => A.EXT.settings('Security') }, 'Open Settings')));
+    if (fresh) A.EXT.settings('Security');
+  }
+  A.EXT.accountSections = buildAccount;
 
   // the screen an application sends a person to when it asks for access (OAuth authorization)
   async function consentView(query) {

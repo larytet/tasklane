@@ -93,8 +93,7 @@ without being supplied again. A write is never made with the sync's credential: 
 preferred where the site allows it. The login method (LDAP, SSO) and Jira's (Google, Atlassian) do not matter: an API token belongs to
 the Atlassian account, though an administrator may disable API tokens or cap their lifetime, and then people cannot save.
 
-**What can be saved:** summary, description (only when it is plain text: paragraphs and line breaks; a description with lists,
-links, code or other formatting is edited in Jira, and Tasklane says so rather than flatten it), labels, priority, assignee
+**What can be saved:** summary, description (edited as Markdown, see below), labels, priority, assignee
 (for a person with a linked Jira account), new comments (public ones; plain text) and transitions. Everything else keeps the
 `read_only_mirror` answer with the Jira link: create, delete, move, clone, convert, estimate, custom fields, sprints, rank,
 attachments, internal comments and editing a comment. Automation, Git rules, email and MCP write tools do not write to Jira.
@@ -110,6 +109,16 @@ draft is kept and the mirror is unchanged. When Jira accepts, Tasklane reads the
 so the mirror equals Jira at that moment, and the later poll or webhook for the same change changes nothing (the sync is
 idempotent per Jira issue id, `updated` and changelog id). Every attempt is in the audit log (`jira.write`: who, issue, field
 names, accepted, conflict, rejected or failed, and Jira's status), never a token.
+
+**Descriptions are edited as Markdown.** In a project that writes through, the description you see and edit is the Markdown form
+of Jira's own document (headings, **bold**, _italic_, `code`, links, lists, quotes, code blocks, tables, `@[Name](user:ID)`
+mentions, `[KEY](issue:KEY)` issue links). Tasklane converts Jira → Markdown when it reads the issue from Jira (the sync, and when
+you switch the project to writing), and Markdown → Jira only when you save, and it checks both ways that nothing is lost. Parts
+Tasklane's model has no form for (a panel, an expand, media, a status lozenge, a text colour, a paragraph containing an emoji) appear
+as a fenced `adf-opaque` block holding the original; leave it alone and it goes back to Jira exactly as it was. If a description
+cannot be converted without loss, or a link you typed has a scheme other than http, https or mailto, the save is refused with a
+link to edit it in Jira. Emptying the description clears it in Jira. Switching the project back to read only turns the stored
+descriptions back into plain text. The read view shows the Markdown source.
 
 **Known limits.** Jira Cloud's edit call is not known to refuse a stale write by itself (its web editor does; the public API is
 unproven), which is why Tasklane compares first. A collision inside the few hundred milliseconds between that check and the send

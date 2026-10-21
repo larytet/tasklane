@@ -350,8 +350,10 @@ func (s *Service) applyJiraIssue(ctx context.Context, cl *jira.Client, pid, pkey
 		}
 		var desc string
 		var adf any = f["description"]
-		if adf != nil {
-			desc, _ = jira.ADFText(adf)
+		if adf != nil { // Markdown in a project that writes through to Jira, plain text otherwise (SPEC 18.1.1, WT-12)
+			var wt bool
+			tx.QueryRow(ctx, `SELECT mode='write_through' FROM jira_project WHERE project_id::text=$1`, pid).Scan(&wt)
+			desc = descriptionBody(adf, wt)
 		}
 		var parent any
 		if p := jmap(f, "parent"); p != nil {

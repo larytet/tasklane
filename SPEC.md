@@ -178,7 +178,13 @@ Transition, assign, comment, log work, watch, vote, link, create subtask, flag/i
   convert, a delete whose plan has blockers or drops) keep their plan dialog.
 - **Settings dialog** (top bar and palette): one place for the person's own settings, stored server side and following
   them across devices: theme, density, short or long list view, columns and sort, font size, reduced motion, high
-  contrast, keyboard shortcuts on or off. Security, sessions and two-factor stay on the Account page.
+  contrast, keyboard shortcuts on or off. The account's own security is in the same dialog, in the tabs **Security**
+  (two-factor authentication, passkeys and security keys, the password), **Sessions**, and **API tokens** (connected
+  applications and API tokens); the person's name in the top bar opens it on Security. There is no separate Account page:
+  `#/account` is a short page that opens Settings on Security, which is where a person is sent when the organization requires
+  a second factor and they have none (nothing behind it asks the server for anything, so a refusal cannot send them back in a
+  loop). A dialog opened from Settings (a setup dialog) sits above it: the one below is inert and hidden from assistive
+  technology until it closes, and Escape closes one dialog at a time.
 - **Onboarding hints:** a first-time user sees one tooltip each for `c`, the view buttons and Settings, at most one per
   session; dismissed hints are remembered per person. Hints never cover a dialog or take focus, and the `c` hint is not
   shown when shortcuts are off or on touch devices.
@@ -1213,11 +1219,23 @@ record: Tasklane never holds a change that Jira has not accepted.
 - **WT-12 Text fidelity.** Descriptions and comments are written as Atlassian Document Format produced from the rich-text
   model (`internal/richtext`). Nodes Tasklane does not understand are kept as opaque blocks and sent back unchanged. If a
   document cannot be converted without loss, the edit of that field is refused with a link to Jira (fail closed). Property tests
-  cover round trips against documents full of unsupported nodes. *Built:* the editor still works on plain text and the mirror
-  keeps a plain-text copy of a description, so the first phase writes a description (or a new comment) only when Jira's own
-  document is plain, that is paragraphs of unformatted text and line breaks, and checks that Jira's text view of what it wrote is
-  the text again; any other description (a list, a link, code, a mention) is edited in Jira. The rich-text converters are not
-  yet on this path; that follows the editor moving to the rich-text model.
+  cover round trips against documents full of unsupported nodes. *Built (WT-23):* a description is edited as Markdown, see
+  WT-23. A new comment is written as plain paragraphs and line breaks, checked by reading Jira's text view of it back; the
+  converters are not on the comment path yet.
+- **WT-23 A description is edited as Markdown, made from Jira's own document.** For a project that writes through, the stored
+  text of a description is the Markdown form (the dialect of `internal/richtext`: headings, bold, italic, strike, code, links,
+  lists, quotes, rules, code blocks, tables, mentions `@[Name](user:ID)`, issue links `[KEY](issue:KEY)`) of the original Jira
+  document, which the sync keeps. The conversion happens at two moments only: Jira to Markdown when the sync applies an issue and
+  when a project is switched to write-through (the stored descriptions are then rewritten, as plain text again when it is
+  switched back), and Markdown to Jira when a person saves. Every screen still reads PostgreSQL. A block the model does not hold
+  (a panel, an expand, media, a status lozenge, a colour, a paragraph with an emoji) is kept in the Markdown as an opaque fenced
+  block, `adf-opaque`, and written back byte for byte. The rules that keep it lossless: the Markdown made from Jira's document must
+  read back as the same model and the model must survive a trip through Jira's JSON, or the description is edited in Jira; the
+  edited Markdown must convert to a document that reads back as the same model, and carry no link with a scheme other than
+  http, https, mailto or a relative address, or the save is refused with a link to Jira; the dialect's own link schemes (`user:`,
+  `issue:`, `attachment:`) are kept by the cleaning that every saved text goes through, which for any other link drops it to its
+  label. An emptied description clears the description in Jira. The conflict rule is WT-08's, with Jira's Markdown shown. The
+  read view shows the Markdown source; search indexes it as it is.
 - **WT-13 Jira slow, down or rate limited.** The save fails with a typed error that states the cause and `Retry-After`; the
   draft is kept; the mirror is unchanged. The write path honours the same egress policy and per-site limits as the sync, and
   has its own timeout shorter than the page's.

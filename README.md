@@ -63,7 +63,7 @@ grep ADMIN .env    # the administrator you will sign in as
 | Variable | Meaning |
 |---|---|
 | `TASKLANE_DB_PASSWORD` | PostgreSQL password (required) |
-| `TASKLANE_ADMIN_EMAIL`, `TASKLANE_ADMIN_PASSWORD` | the first administrator. It is created at the first start only, so changing these later does nothing; change the password on the Account page instead. |
+| `TASKLANE_ADMIN_EMAIL`, `TASKLANE_ADMIN_PASSWORD` | the first administrator. It is created at the first start only, so changing these later does nothing; change the password in Settings, Security (the name in the top bar) instead. |
 | `TASKLANE_BASE_URL` | the address people use; sign-in redirects and links in mail point here |
 | `TASKLANE_SSO_ALLOW_PRIVATE` | `true` lets Tasklane reach identity providers on private addresses. LDAP domain controllers almost always are. Set it in `.env` or export it. |
 

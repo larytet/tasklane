@@ -153,5 +153,5 @@ test('WT-22: with no project that saves to Jira, Settings has no Jira tab', asyn
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('tab', { name: 'Appearance' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Jira' })).toHaveCount(0);
-  await expect(page.getByRole('tab')).toHaveCount(3); // Appearance, List, Keyboard
+  await expect(page.getByRole('tab')).toHaveCount(6); // Appearance, List, Keyboard, Security, Sessions, API tokens
 });

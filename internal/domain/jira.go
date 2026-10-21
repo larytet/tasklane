@@ -473,5 +473,9 @@ func (s *Service) SetJiraProjectMode(ctx context.Context, a Actor, projectKey, m
 		s.DB.Exec(ctx, anyStatusTransitions, pid) // the statuses already mirrored get their "Move" now; new ones get it from the sync
 	}
 	s.auditDirect(ctx, a, "jira.mode", strings.ToUpper(projectKey), map[string]any{"mode": mode})
+	// descriptions are edited as Markdown while a project writes through and kept as plain text otherwise (WT-12): rewrite the stored ones
+	if err := s.renderDescriptions(ctx, projectKey, mode == "write_through"); err != nil {
+		return fmt.Errorf("the mode is set, but the stored descriptions could not all be rewritten (the sync rewrites each when Jira next changes the issue): %w", err)
+	}
 	return nil
 }

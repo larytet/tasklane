@@ -514,41 +514,6 @@ func (s *Service) wtUpdateFields(ctx context.Context, a Actor, is Issue, t *wtTa
 	return out, nil
 }
 
-// adfIsPlain says whether a Jira document is only paragraphs of unformatted text and line breaks: the one shape Tasklane can write back
-// without losing anything while the editor works on plain text (WT-12). Anything else is edited in Jira.
-func adfIsPlain(adf any) bool {
-	if adf == nil {
-		return true
-	}
-	doc, _ := adf.(map[string]any)
-	if doc == nil || doc["type"] != "doc" {
-		return false
-	}
-	for _, b := range kids(doc) {
-		bm, _ := b.(map[string]any)
-		if bm == nil || bm["type"] != "paragraph" {
-			return false
-		}
-		for _, in := range kids(bm) {
-			im, _ := in.(map[string]any)
-			switch {
-			case im == nil:
-				return false
-			case im["type"] == "hardBreak":
-			case im["type"] == "text":
-				if m, _ := im["marks"].([]any); len(m) > 0 {
-					return false
-				}
-			default:
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func kids(n map[string]any) []any { k, _ := n["content"].([]any); return k }
-
 // plainADF writes text as paragraphs (blank lines between them) with line breaks inside. The caller checks the round trip.
 func plainADF(text string) map[string]any {
 	var blocks []any
@@ -612,7 +577,11 @@ func (s *Service) wtSaveText(ctx context.Context, a Actor, is Issue, t *wtTarget
 	if err != nil {
 		return TextResult{}, err
 	}
-	clean, removed := Sanitize(nb)
+	sanitize := Sanitize
+	if field == "description" {
+		sanitize = SanitizeDialect // a description is Markdown for Jira: its mentions, issue links and attachments must survive
+	}
+	clean, removed := sanitize(nb)
 	if field == "summary" {
 		clean = strings.TrimSpace(clean)
 	}
@@ -639,17 +608,20 @@ func (s *Service) wtSaveText(ctx context.Context, a Actor, is Issue, t *wtTarget
 		if field == "summary" {
 			now = jstr(f, "summary")
 		} else {
-			now, _ = jira.ADFText(f["description"])
-			if !adfIsPlain(f["description"]) {
+			// the description is edited as Markdown made from Jira's own document; one that cannot be turned into Markdown and back
+			// without losing something is edited in Jira
+			md, ok := descriptionMarkdown(f["description"])
+			if !ok {
 				return t.lossy(is.Key, "this description")
 			}
+			now = md
 		}
 		// The text is compared with Jira's current text and a difference opens the editor's own conflict dialog (a TextConflict that
 		// carries Jira's text). "keep mine" and "merge" are what the person chose after that dialog showed them Jira's text, so
 		// those saves go ahead; the window between the dialog and the send is the accepted race.
 		if mode != "keep_mine" && mode != "merge" && strings.TrimSpace(now) != strings.TrimSpace(cur) {
 			by, at := lastJiraChange(curJ, field)
-			mine, _ := Sanitize(nb)
+			mine, _ := sanitize(nb)
 			var when time.Time
 			if at != nil {
 				when = *at
@@ -658,11 +630,15 @@ func (s *Service) wtSaveText(ctx context.Context, a Actor, is Issue, t *wtTarget
 		}
 		var value any = clean
 		if field == "description" {
-			doc, ok := plainBody(clean)
-			if !ok {
-				return t.lossy(is.Key, "this text")
+			if strings.TrimSpace(clean) == "" {
+				value = nil // an emptied description is cleared in Jira, not written as an empty document
+			} else {
+				doc, ok := markdownToADF(clean)
+				if !ok {
+					return t.lossy(is.Key, "this text")
+				}
+				value = doc
 			}
-			value = doc
 		}
 		if err := cl.EditIssue(ctx, key, map[string]any{field: value}); err != nil {
 			return s.wtErr(a, t, is.Key, err)
