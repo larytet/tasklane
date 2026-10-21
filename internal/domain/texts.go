@@ -132,6 +132,12 @@ func (s *Service) mutateText(ctx context.Context, a Actor, key, field, mode, sav
 	if err != nil {
 		return TextResult{}, err
 	}
+	if t := s.writeThrough(ctx, is.Project); t != nil {
+		if is.Archived != nil {
+			return TextResult{}, ErrForbidden
+		}
+		return s.wtSaveText(ctx, a, is, t, field, mode, fn)
+	}
 	if !canWrite(role) {
 		return TextResult{}, ErrForbidden
 	}

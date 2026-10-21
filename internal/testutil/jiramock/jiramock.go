@@ -49,6 +49,15 @@ type Server struct {
 	downAfter  int // when > 0, the Jira goes down after this many search requests have been answered
 	searches   int
 	Now        func() time.Time
+	// write support (see jirawrite.go)
+	Accounts    map[string]*Account // other people who may sign in, by email
+	Transitions []Trans
+	writes      []Write
+	fail        []injected
+	slowWrite   time.Duration
+	// OnWrite runs before a write is applied, with the server unlocked: a test uses it to change the issue in "another person's" name
+	// between the client's check and its send.
+	OnWrite func(method, path string)
 }
 
 func New(email, token string) *Server {
@@ -174,13 +183,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	u, p, ok := r.BasicAuth()
-	if !ok || u != s.Email || p != s.Token {
+	who, known := s.identity(u, p)
+	if !ok || !known {
 		w.WriteHeader(401)
 		json.NewEncoder(w).Encode(M{"message": "unauthorized"})
 		return
 	}
 	if r.Method != "GET" {
-		w.WriteHeader(405)
+		s.write(w, r, who)
 		return
 	}
 	s.mu.Lock()
@@ -190,7 +200,22 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	write := func(v any) { w.Header().Set("Content-Type", "application/json"); json.NewEncoder(w).Encode(v) }
 	switch {
 	case path == "/rest/api/3/myself":
-		write(M{"accountId": "acc-sync", "displayName": "Sync Bot", "emailAddress": s.Email, "timeZone": s.TZ.String()})
+		write(M{"accountId": who.AccountID, "displayName": who.Name, "emailAddress": who.Email, "timeZone": s.TZ.String()})
+	case regexp.MustCompile(`^/rest/api/3/issue/[^/]+$`).MatchString(path):
+		is := s.byKeyOrID(strings.Split(path, "/")[5])
+		if is == nil {
+			w.WriteHeader(404)
+			json.NewEncoder(w).Encode(M{"errorMessages": []string{"Issue does not exist or you do not have permission to see it."}})
+			return
+		}
+		write(s.issueItem(is, q.Get("fields"), q.Get("expand")))
+	case regexp.MustCompile(`^/rest/api/3/issue/[^/]+/transitions$`).MatchString(path):
+		is := s.byKeyOrID(strings.Split(path, "/")[5])
+		if is == nil {
+			w.WriteHeader(404)
+			return
+		}
+		write(M{"transitions": s.availableTransitions(is)})
 	case path == "/rest/api/3/search/jql":
 		if s.downAfter > 0 && s.searches >= s.downAfter {
 			s.down = true

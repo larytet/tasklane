@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +13,9 @@ import (
 	"time"
 )
 
-// Client reads one Jira Cloud site with a service account's API token (basic authentication). It only sends GET requests,
-// honours 429 and Retry-After, and paces itself so a backfill cannot starve other users of the site's quota.
+// Client talks to one Jira Cloud site with one API token (basic authentication): the sync's service account, or one person's own
+// token for a write (write.go). Reads honour 429 and Retry-After and pace themselves so a backfill cannot starve other users of the
+// site's quota; a write is sent once and never repeated (SPEC 18.1.1).
 type Client struct {
 	Site     string // https://example.atlassian.net
 	Email    string
@@ -58,9 +60,26 @@ func (c *Client) sleep(d time.Duration) {
 }
 
 func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
+	return c.do(ctx, "GET", path, q, nil, out, true)
+}
+
+// send makes one write. A write is never repeated by the client: a rate limit or an error is reported at once, because a repeated
+// POST could add a comment twice and a repeated transition could apply a decision made on stale data (SPEC 18.1.1, WT-07, WT-09).
+func (c *Client) send(ctx context.Context, method, path string, body, out any) error {
+	return c.do(ctx, method, path, nil, body, out, false)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, q url.Values, body, out any, retry bool) error {
 	u := strings.TrimSuffix(c.Site, "/") + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
+	}
+	var payload []byte
+	if body != nil {
+		var err error
+		if payload, err = json.Marshal(body); err != nil {
+			return err
+		}
 	}
 	max := c.MaxWait
 	if max == 0 {
@@ -71,25 +90,32 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 			c.sleep(gap)
 		}
 		c.lastReq = c.now()
-		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+		var rd io.Reader
+		if payload != nil {
+			rd = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, u, rd)
 		if err != nil {
 			return err
 		}
 		req.SetBasicAuth(c.Email, c.Token)
 		req.Header.Set("Accept", "application/json")
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		c.Requests++
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
 			return err
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+		rb, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 		resp.Body.Close()
 		switch {
 		case resp.StatusCode/100 == 2:
-			if out == nil {
+			if out == nil || len(bytes.TrimSpace(rb)) == 0 {
 				return nil
 			}
-			if err := json.Unmarshal(body, out); err != nil {
+			if err := json.Unmarshal(rb, out); err != nil {
 				return fmt.Errorf("jira %s: unexpected response: %v", path, err)
 			}
 			return nil
@@ -98,15 +124,17 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 			if n, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
 				wait = time.Duration(n) * time.Second
 			}
-			if wait > max || attempt >= 4 {
+			if !retry || wait > max || attempt >= 4 {
 				return &ErrRateLimited{Until: c.now().Add(wait)}
 			}
 			c.sleep(wait)
-		case resp.StatusCode >= 500 && attempt < 3:
+		case retry && resp.StatusCode >= 500 && attempt < 3:
 			c.sleep(time.Duration(200<<attempt) * time.Millisecond)
 		default:
-			b := strings.TrimSpace(string(body))
-			if len(b) > 200 {
+			b := strings.TrimSpace(string(rb))
+			if len(b) > 2000 && !retry {
+				b = b[:2000] // a refusal of a write carries Jira's messages by field: keep them
+			} else if len(b) > 200 && retry {
 				b = b[:200]
 			}
 			return &ErrStatus{Status: resp.StatusCode, Path: path, Body: b}

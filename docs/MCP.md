@@ -56,7 +56,7 @@ Authorization is checked **at every notification**: the token must still work (a
 
 ## Mirrored (Jira) projects
 
-A project mirrored from Jira is read-only in Tasklane (SPEC 18.1). For an agent that means: every **read** tool, resource and prompt works on mirrored data (the same visibility rules apply, and a mirrored project whose Jira permissions were not refreshed in the last fifteen minutes is invisible to everyone), and every **write** tool is refused with the same typed error that names the project and the Jira address: *project WEB is mirrored from Jira and is read-only here: make the change in Jira (https://…)*. Bulk tools report that refusal for each issue and change nothing. A subscriber to a mirrored issue is notified when the mirror brings a change in from Jira.
+A project mirrored from Jira is read-only for agents (SPEC 18.1), including a project that writes through to Jira for people (SPEC 18.1.1): an edit needs a person's own Jira token, so no MCP write tool writes to Jira. For an agent that means: every **read** tool, resource and prompt works on mirrored data (the same visibility rules apply, and a mirrored project whose Jira permissions were not refreshed in the last fifteen minutes is invisible to everyone), and every **write** tool is refused with the same typed error that names the project and the Jira address: *project WEB is mirrored from Jira and is read-only here: make the change in Jira (https://…)*. Bulk tools report that refusal for each issue and change nothing. A subscriber to a mirrored issue is notified when the mirror brings a change in from Jira.
 
 Every tool is classified in the tests, so a new tool cannot reach mirrored data without saying how it behaves there. The table is checked against the tool list:
 

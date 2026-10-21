@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/larytet/tasklane/internal/credvault"
 	"github.com/larytet/tasklane/internal/egress"
 	"github.com/larytet/tasklane/internal/mail"
 	"net"
@@ -67,6 +68,9 @@ type Service struct {
 	derived         []byte
 	gateOnce        sync.Once
 	gate            *gate
+	// vaultOnce and vlt: the memory-only holder of Jira credentials (SPEC 18.1.1); see vault().
+	vaultOnce sync.Once
+	vlt       *credvault.Vault
 	// TrashRetention is how long a deleted issue stays restorable (default 30 days).
 	TrashRetention time.Duration
 	// MailRawDays and MailBounceDays are the retention of inbound mail and of bounce records, in days (0 keeps them, once

@@ -550,6 +550,17 @@ func (s *Service) restore(ctx context.Context, dir string, replace bool) (*Resto
 		rep.Tables++
 		rep.Rows += tag.RowsAffected()
 	}
+	// A backup made before Jira credentials left the database (SPEC 18.1.1, WT-01) may carry a stored token: none is restored. The
+	// restored connections are locked until an administrator unlocks them.
+	var hasTok bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='jira_connection' AND column_name='token_enc')`).Scan(&hasTok); err != nil {
+		return nil, err
+	}
+	if hasTok {
+		if _, err := tx.Exec(ctx, `UPDATE jira_connection SET token_enc = ''::bytea`); err != nil {
+			return nil, err
+		}
+	}
 	for name, sq := range man.Sequences {
 		if sq.Last == nil {
 			continue

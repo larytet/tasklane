@@ -487,6 +487,17 @@ func rows() []row {
 		{"POST /api/v1/jira/projects/{key}/reconcile", adminer, func(f *fixture) req { return J("POST", "/api/v1/jira/projects/"+f.mirrored()+"/reconcile", nil) }},
 		{"POST /api/v1/jira/projects/{key}/cutover", adminer, func(f *fixture) req { return J("POST", "/api/v1/jira/projects/"+f.mirrored()+"/cutover", nil) }},
 		{"GET /api/v1/jira/status", adminer, func(f *fixture) req { return J("GET", "/api/v1/jira/status", nil) }},
+		{"POST /api/v1/jira/connections/{id}/unlock", adminer, func(f *fixture) req {
+			return J("POST", "/api/v1/jira/connections/"+f.jiraConn()+"/unlock", map[string]any{"token": "tok"})
+		}},
+		{"PUT /api/v1/jira/projects/{key}/mode", adminer, func(f *fixture) req {
+			return J("PUT", "/api/v1/jira/projects/"+f.mirrored()+"/mode", map[string]any{"mode": "write_through"})
+		}},
+		// anyone signed in may offer a token; Jira refuses these (the mock knows one account, not theirs), which is the answer they get
+		{"POST /api/v1/jira/session-token", exp{anon: codes(401), outsider: codes(400), viewer: codes(400), member: codes(400), admin: codes(400)}, func(f *fixture) req {
+			return J("POST", "/api/v1/jira/session-token", map[string]any{"connection": f.jiraConn(), "token": "tok"})
+		}},
+		{"DELETE /api/v1/jira/session-token", authed, func(f *fixture) req { return J("DELETE", "/api/v1/jira/session-token", nil) }},
 		{"GET /api/v1/fields", authed, func(f *fixture) req { return J("GET", "/api/v1/fields", nil) }},
 		{"POST /api/v1/fields", adminer, func(f *fixture) req {
 			f.n++

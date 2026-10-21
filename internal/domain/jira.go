@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/larytet/tasklane/internal/credvault"
 	"github.com/larytet/tasklane/internal/egress"
 	"github.com/larytet/tasklane/internal/jira"
 )
@@ -53,6 +54,10 @@ type JiraConnection struct {
 	TokenFP      string `json:"token_fingerprint"`
 	WebhookFP    string `json:"webhook_fingerprint"`
 	AllowPrivate bool   `json:"allow_private"`
+	// Locked: no service credential is held in memory on this node (WT-03). LiveTokens counts the people who hold a personal token for
+	// this connection here; it is a count and never names anyone (WT-17).
+	Locked     bool `json:"locked"`
+	LiveTokens int  `json:"live_tokens"`
 }
 
 type JiraConnIn struct {
@@ -71,23 +76,83 @@ func (s *Service) jiraEgress(allowPrivate bool) egress.Policy {
 	return pol
 }
 
-func (s *Service) jiraClient(ctx context.Context, connID string) (*jira.Client, string, error) {
-	var site, email string
-	var tokEnc []byte
-	var priv bool
+// vault is the memory-only holder of Jira credentials (SPEC 18.1.1, WT-01 to WT-06). Nothing in it is ever written to the database.
+func (s *Service) vault() *credvault.Vault {
+	s.vaultOnce.Do(func() { s.vlt = credvault.New(s.Now, JiraUserTokenTTL) })
+	return s.vlt
+}
+
+// ErrJiraLocked is returned when a connection has no service credential in memory: after a start, a restart or a node taking over,
+// an administrator has to unlock it (WT-03). The sync waits and the mirror keeps being served, marked stale.
+type ErrJiraLocked struct{ Connection string }
+
+func (e *ErrJiraLocked) Error() string {
+	return fmt.Sprintf("the Jira connection %q is locked: waiting for an administrator to supply its credentials (POST /api/v1/jira/connections/{id}/unlock)", e.Connection)
+}
+
+type jiraConnInfo struct {
+	id, name, site, email, actor string
+	allowPrivate                 bool
+}
+
+func (s *Service) jiraConn(ctx context.Context, connID string) (jiraConnInfo, error) {
+	c := jiraConnInfo{id: connID}
 	var by *string
-	if err := s.DB.QueryRow(ctx, `SELECT site_url,email,token_enc,allow_private,created_by::text FROM jira_connection WHERE id::text=$1`, connID).Scan(&site, &email, &tokEnc, &priv, &by); err != nil {
-		return nil, "", ErrNotFound
+	if err := s.DB.QueryRow(ctx, `SELECT name,site_url,email,allow_private,created_by::text FROM jira_connection WHERE id::text=$1`, connID).Scan(&c.name, &c.site, &c.email, &c.allowPrivate, &by); err != nil {
+		return c, ErrNotFound
 	}
-	tok, err := s.unseal(ctx, tokEnc)
+	if by != nil {
+		c.actor = *by
+	}
+	return c, nil
+}
+
+// clientFor builds a client for one credential. A person's token is never put into a client that the sync shares.
+func (s *Service) clientFor(c jiraConnInfo, cr credvault.Cred) *jira.Client {
+	return &jira.Client{Site: c.site, Email: cr.Email, Token: cr.Token, HTTP: s.jiraEgress(c.allowPrivate).Client(), MaxWait: 30 * time.Second, MinGap: 0, Now: s.Now}
+}
+
+// jiraClient returns the sync's client: the connection's service credential from memory, or ErrJiraLocked.
+func (s *Service) jiraClient(ctx context.Context, connID string) (*jira.Client, string, error) {
+	c, err := s.jiraConn(ctx, connID)
 	if err != nil {
 		return nil, "", err
 	}
-	actor := ""
-	if by != nil {
-		actor = *by
+	cr, ok := s.vault().Service(connID)
+	if !ok {
+		return nil, "", &ErrJiraLocked{Connection: c.name}
 	}
-	return &jira.Client{Site: site, Email: email, Token: tok, HTTP: s.jiraEgress(priv).Client(), MaxWait: 30 * time.Second, MinGap: 0, Now: s.Now}, actor, nil
+	return s.clientFor(c, cr), c.actor, nil
+}
+
+// UnlockJiraConnection supplies the service credential of a connection (administrators): it is checked with Jira, must belong to the
+// connection's account, and is then kept in memory only. The sync of the connection's projects wakes at once.
+func (s *Service) UnlockJiraConnection(ctx context.Context, a Actor, connID, token string) error {
+	if err := adminOnly(a); err != nil {
+		return err
+	}
+	c, err := s.jiraConn(ctx, connID)
+	if err != nil {
+		return err
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return invalid("the API token is required")
+	}
+	me, err := s.clientFor(c, credvault.Cred{Email: c.email, Token: token}).Myself(ctx)
+	if err != nil {
+		var st *jira.ErrStatus
+		if errors.As(err, &st) && (st.Status == 401 || st.Status == 403) {
+			return invalid("Jira rejected the credentials: check the API token")
+		}
+		return invalid("cannot reach Jira at %s: %v", c.site, err)
+	}
+	if me.Email != "" && !strings.EqualFold(me.Email, c.email) {
+		return invalid("this token belongs to %s, not to the connection's account %s", me.Email, c.email)
+	}
+	s.vault().PutService(connID, c.email, me.AccountID, token)
+	_, err = s.DB.Exec(ctx, `UPDATE jira_project SET wake=true WHERE connection_id::text=$1`, connID)
+	return err
 }
 
 // CreateJiraConnection stores a read-only service-account connection after proving the credentials work. The webhook
@@ -107,7 +172,8 @@ func (s *Service) CreateJiraConnection(ctx context.Context, a Actor, in JiraConn
 		return JiraConnection{}, "", invalid("the service account's email and API token are required")
 	}
 	cl := &jira.Client{Site: in.SiteURL, Email: in.Email, Token: in.Token, HTTP: s.jiraEgress(in.AllowPrivate).Client(), Now: s.Now}
-	if _, err := cl.Myself(ctx); err != nil {
+	me, err := cl.Myself(ctx)
+	if err != nil {
 		var st *jira.ErrStatus
 		if errors.As(err, &st) && (st.Status == 401 || st.Status == 403) {
 			return JiraConnection{}, "", invalid("Jira rejected the credentials: check the email and the API token")
@@ -117,23 +183,22 @@ func (s *Service) CreateJiraConnection(ctx context.Context, a Actor, in JiraConn
 	raw := make([]byte, 24)
 	rand.Read(raw)
 	secret := hex.EncodeToString(raw)
-	tokEnc, err := s.seal(ctx, in.Token)
+	whEnc, err := s.seal(ctx, secret) // the webhook secret authenticates Jira to Tasklane, not Tasklane to Jira: it stays stored
 	if err != nil {
 		return JiraConnection{}, "", err
 	}
-	whEnc, err := s.seal(ctx, secret)
-	if err != nil {
-		return JiraConnection{}, "", err
-	}
+	// the token itself is never stored (SPEC 18.1.1, WT-01): the row keeps the account and a short fingerprint, the process keeps the token
 	c := JiraConnection{Name: in.Name, SiteURL: in.SiteURL, Email: in.Email, TokenFP: fingerprint(in.Token), WebhookFP: fingerprint(secret), AllowPrivate: in.AllowPrivate}
-	err = s.DB.QueryRow(ctx, `INSERT INTO jira_connection(name,site_url,email,token_enc,token_fp,webhook_secret_enc,webhook_fp,allow_private,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text`,
-		c.Name, c.SiteURL, c.Email, tokEnc, c.TokenFP, whEnc, c.WebhookFP, c.AllowPrivate, nilIfEmpty(a.ID)).Scan(&c.ID)
+	err = s.DB.QueryRow(ctx, `INSERT INTO jira_connection(name,site_url,email,token_enc,token_fp,webhook_secret_enc,webhook_fp,allow_private,created_by) VALUES($1,$2,$3,''::bytea,$4,$5,$6,$7,$8) RETURNING id::text`,
+		c.Name, c.SiteURL, c.Email, c.TokenFP, whEnc, c.WebhookFP, c.AllowPrivate, nilIfEmpty(a.ID)).Scan(&c.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "jira_connection_name_key") {
 			return c, "", invalid("a connection called %q already exists", c.Name)
 		}
 		return c, "", err
 	}
+	s.vault().PutService(c.ID, in.Email, me.AccountID, in.Token)
+	c.Locked = false
 	return c, secret, nil
 }
 
@@ -150,6 +215,8 @@ func (s *Service) ListJiraConnections(ctx context.Context, a Actor) ([]JiraConne
 	for rows.Next() {
 		var c JiraConnection
 		rows.Scan(&c.ID, &c.Name, &c.SiteURL, &c.Email, &c.TokenFP, &c.WebhookFP, &c.AllowPrivate)
+		_, unlocked := s.vault().Service(c.ID)
+		c.Locked, c.LiveTokens = !unlocked, s.vault().Users(c.ID)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -226,13 +293,15 @@ type MirrorInfo struct {
 	LagSeconds float64    `json:"lag_seconds"`
 	Stale      bool       `json:"stale"` // the last sync failed or is older than a few minutes: "synced N min ago"
 	Error      string     `json:"error,omitempty"`
+	// Mode is read_only or write_through: the page offers its editors only for write_through, where a save goes to Jira (SPEC 18.1.1).
+	Mode string `json:"mode"`
 }
 
 func (s *Service) mirrorInfo(ctx context.Context, projectKey string) *MirrorInfo {
 	var m MirrorInfo
 	var synced *time.Time
-	err := s.DB.QueryRow(ctx, `SELECT c.site_url,jp.jira_key,jp.synced_at,jp.last_error FROM project p JOIN jira_project jp ON jp.project_id=p.id JOIN jira_connection c ON c.id=jp.connection_id WHERE p.key=$1`, strings.ToUpper(projectKey)).
-		Scan(&m.SiteURL, &m.JiraKey, &synced, &m.Error)
+	err := s.DB.QueryRow(ctx, `SELECT c.site_url,jp.jira_key,jp.synced_at,jp.last_error,jp.mode FROM project p JOIN jira_project jp ON jp.project_id=p.id JOIN jira_connection c ON c.id=jp.connection_id WHERE p.key=$1`, strings.ToUpper(projectKey)).
+		Scan(&m.SiteURL, &m.JiraKey, &synced, &m.Error, &m.Mode)
 	if err != nil {
 		return nil
 	}
@@ -260,6 +329,11 @@ type JiraProjectStatus struct {
 	Backfilled bool       `json:"backfilled"`
 	LastError  string     `json:"last_error,omitempty"`
 	Warnings   []string   `json:"warnings"`
+	// Mode is read_only or write_through (SPEC 18.1.1); Locked says that this node holds no service credential for the connection, so the
+	// sync is waiting for an administrator (WT-03); LiveTokens counts the people holding a personal token for the connection here (WT-17).
+	Mode       string `json:"mode"`
+	Locked     bool   `json:"locked"`
+	LiveTokens int    `json:"live_tokens"`
 	// Mail says what email does for this project: Tasklane sends none while it is mirrored (Jira keeps sending its own) and inbound
 	// mail addressed to it waits in quarantine. Tasklane cannot see Jira's notification settings, so it cannot say whether they are on.
 	Mail string `json:"mail"`
@@ -270,19 +344,19 @@ func (s *Service) JiraStatus(ctx context.Context, a Actor) ([]JiraProjectStatus,
 	if err := adminOnly(a); err != nil {
 		return nil, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT p.id::text,p.key,jp.jira_key,c.name,jp.watermark,jp.synced_at,jp.perm_synced_at,jp.issues_synced,jp.backfilled,jp.last_error
+	rows, err := s.DB.Query(ctx, `SELECT p.id::text,p.key,jp.jira_key,c.name,jp.watermark,jp.synced_at,jp.perm_synced_at,jp.issues_synced,jp.backfilled,jp.last_error,jp.mode,c.id::text
 		FROM jira_project jp JOIN project p ON p.id=jp.project_id JOIN jira_connection c ON c.id=jp.connection_id ORDER BY p.key`)
 	if err != nil {
 		return nil, err
 	}
 	type row struct {
-		pid string
-		st  JiraProjectStatus
+		pid, conn string
+		st        JiraProjectStatus
 	}
 	var all []row
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.pid, &r.st.Project, &r.st.JiraKey, &r.st.Connection, &r.st.Watermark, &r.st.SyncedAt, &r.st.PermAt, &r.st.Issues, &r.st.Backfilled, &r.st.LastError)
+		rows.Scan(&r.pid, &r.st.Project, &r.st.JiraKey, &r.st.Connection, &r.st.Watermark, &r.st.SyncedAt, &r.st.PermAt, &r.st.Issues, &r.st.Backfilled, &r.st.LastError, &r.st.Mode, &r.conn)
 		all = append(all, r)
 	}
 	rows.Close()
@@ -292,6 +366,8 @@ func (s *Service) JiraStatus(ctx context.Context, a Actor) ([]JiraProjectStatus,
 		if st.SyncedAt != nil {
 			st.LagSeconds = s.Now().Sub(*st.SyncedAt).Seconds()
 		}
+		_, unlocked := s.vault().Service(r.conn)
+		st.Locked, st.LiveTokens = !unlocked, s.vault().Users(r.conn)
 		st.PermFresh = st.PermAt != nil && s.Now().Sub(*st.PermAt) < permFreshFor
 		st.Warnings = []string{}
 		st.Mail = "Tasklane sends no email for this project (Jira sends its own, and Tasklane cannot see whether those are on); mail sent to the project\u2019s address is held in quarantine. Email starts after cut-over to native."
@@ -347,9 +423,10 @@ func (s *Service) CutOverJira(ctx context.Context, a Actor, projectKey string) e
 	if err := adminOnly(a); err != nil {
 		return err
 	}
-	return s.tx(ctx, func(tx pgx.Tx) error {
+	var connID string
+	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var pid string
-		if err := tx.QueryRow(ctx, `SELECT p.id::text FROM project p JOIN jira_project jp ON jp.project_id=p.id WHERE p.key=$1 FOR UPDATE OF p`, strings.ToUpper(projectKey)).Scan(&pid); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT p.id::text,jp.connection_id::text FROM project p JOIN jira_project jp ON jp.project_id=p.id WHERE p.key=$1 FOR UPDATE OF p`, strings.ToUpper(projectKey)).Scan(&pid, &connID); err != nil {
 			return ErrNotFound
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM jira_project WHERE project_id::text=$1`, pid); err != nil {
@@ -360,4 +437,39 @@ func (s *Service) CutOverJira(ctx context.Context, a Actor, projectKey string) e
 		}
 		return outbox(ctx, tx, "project:"+strings.ToUpper(projectKey), "project.cutover", map[string]any{"project": projectKey, "actor": a.Label, "actor_id": a.ID})
 	})
+	if err == nil {
+		s.dropTokensIfNoWriteThrough(ctx, connID) // WT-16
+	}
+	return err
+}
+
+// dropTokensIfNoWriteThrough forgets every person's token for a connection once none of its projects writes through any more.
+func (s *Service) dropTokensIfNoWriteThrough(ctx context.Context, connID string) {
+	var n int
+	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM jira_project WHERE connection_id::text=$1 AND mode='write_through'`, connID).Scan(&n); err == nil && n == 0 {
+		s.vault().DropUsers(connID)
+	}
+}
+
+// SetJiraProjectMode chooses read_only or write_through for a mirrored project (administrators, WT-15). Leaving write_through drops the
+// people's tokens held for the connection when no other project of it still writes through (WT-16).
+func (s *Service) SetJiraProjectMode(ctx context.Context, a Actor, projectKey, mode string) error {
+	if err := adminOnly(a); err != nil {
+		return err
+	}
+	if mode != "read_only" && mode != "write_through" {
+		return invalid("mode is read_only or write_through")
+	}
+	var connID string
+	err := s.DB.QueryRow(ctx, `UPDATE jira_project SET mode=$2 WHERE project_id=(SELECT id FROM project WHERE key=$1) RETURNING connection_id::text`, strings.ToUpper(projectKey), mode).Scan(&connID)
+	if err != nil {
+		return ErrNotFound
+	}
+	if mode == "read_only" {
+		s.dropTokensIfNoWriteThrough(ctx, connID)
+	} else if pid, err := s.projectID(ctx, projectKey); err == nil {
+		s.DB.Exec(ctx, anyStatusTransitions, pid) // the statuses already mirrored get their "Move" now; new ones get it from the sync
+	}
+	s.auditDirect(ctx, a, "jira.mode", strings.ToUpper(projectKey), map[string]any{"mode": mode})
+	return nil
 }

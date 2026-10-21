@@ -10,10 +10,11 @@ custom fields, workflows - without the weight, and with the enterprise basics (S
 
 - **A replacement for Jira, not a lookalike.** The same vocabulary (project, issue type, workflow, sprint, epic, filter), a
   JQL-compatible query language (TQL), keys that look like Jira's (`ABC-123`) and keep working after a move, and a way
-  in: import a Jira project, or run a read-only one-way mirror of your Jira site while you switch. Boards, backlogs,
+  in: import a Jira project, or mirror your Jira site while you switch (read-only by default, or saving each edit to
+  Jira as the person who made it, see below). Boards, backlogs,
   sprints, custom fields, workflows, automation, approvals, a customer portal, dashboards and releases are built.
   What is *not* there yet: the Jira REST API under `/rest/api/3` (tools written against Jira's API need a small
-  adaptation; Tasklane has its own documented REST API, webhooks and an MCP server for agents) and write-back to Jira.
+  adaptation; Tasklane has its own documented REST API, webhooks and an MCP server for agents).
 - **Many sites on one installation.** An installation can serve several **organizations**, each a separate tenant
   with its own people, projects, administrators, security policy and mail domain, and nothing visible across the line
   (enforced by the database, not only by the application: [docs/ORGANIZATIONS.md](docs/ORGANIZATIONS.md)). A
@@ -161,7 +162,11 @@ Sign out, then sign in with `jana.k`, `CORP\jana.k` or `jana.k@corp.example.com`
 When sign-in fails, *Try a sign-in* says why, and the server log names the provider and the reason
 (`docker compose logs tasklane`). Details are in [docs/IDENTITY.md](docs/IDENTITY.md).
 
-**Optional: mirror a Jira Cloud project.** A read-only copy gives a fast UI over Jira data; see [docs/JIRA.md](docs/JIRA.md).
+**Optional: mirror a Jira Cloud project.** A copy gives a fast UI over Jira data. It is read-only by default; a project can
+instead *write through*, so that an edit made in Tasklane is saved to Jira at once, with the person's own Jira API token,
+and a change made in Jira since the person opened the issue is reported instead of overwritten. **No Jira credential is
+ever stored in PostgreSQL:** the mirror's own token is supplied by an administrator after each start, and each person's
+token is asked for when they first save, and both live in memory only. See [docs/JIRA.md](docs/JIRA.md).
 
 ## Design stance
 
@@ -247,9 +252,9 @@ board column by column, check the inbox. It follows the device's day and night s
 - Familiar to anyone who has used Jira: same vocabulary (project, issue type, workflow, sprint, epic, filter).
 - A single Go binary plus PostgreSQL; one install, one command. No JVM, no plugins runtime required to get started.
 - Custom fields and workflows are data, not code: admins change them in the UI with no deploy.
-- Work with Jira, not instead of it at first: a read-only, one-way mirror of Jira into Tasklane gives a fast UI over your
-  Jira data (edits stay in Jira), and the same machinery imports a project when you are ready to switch. Export to Jira is by
-  CSV; write-back to Jira is a later add-on.
+- Work with Jira, not instead of it at first: a mirror of Jira in Tasklane gives a fast UI over your Jira data (read-only,
+  or writing each edit through to Jira as the person who made it), and the same machinery imports a project when you are
+  ready to switch. Export to Jira is by CSV.
 - Open exchange formats: a JSON bundle and a CSV bundle for the full project, plus basic importers for GitHub Issues,
   Trello, Linear, Asana and generic CSV. No lock-in.
 - Email in and out: threaded notifications, reply by email, create issues by email, with spoofing and loop protection.
@@ -266,13 +271,13 @@ is kept in [STATUS.md](STATUS.md) (milestones, the issues found on the way and h
 | Area | State |
 |---|---|
 | Tracker, workflows, custom fields, boards, backlog, sprints, dashboards, releases, approvals, automation, customer portal | built |
-| Lifecycle (convert, move, clone, trash, bulk jobs), import and export (JSON and CSV bundles; Jira, GitHub Issues, Trello, Linear, Asana and generic CSV in), Jira mirror (read-only, one way) | built |
+| Lifecycle (convert, move, clone, trash, bulk jobs), import and export (JSON and CSV bundles; Jira, GitHub Issues, Trello, Linear, Asana and generic CSV in), Jira mirror (read-only by default; optional write-through of summary, description, labels, priority, assignee, comments and transitions, with no Jira credential stored in the database) | built, not yet run against a real Jira site |
 | Sign-in (password, second factor, passkeys, OpenID Connect, SAML, LDAP), SCIM, roles, groups, permission schemes, audit log, privacy export and erasure | built |
 | Organizations (tenants), hosted edition with plans, metering and invoices | built |
 | E-mail in and out, Git integration (GitHub and GitLab, read-only), MCP server for agents | built |
 | Android app (Kotlin, Jetpack Compose): sign-in, browse, search, boards, inbox, comments | built, read and comment only; editing, creating and moving issues, passkey sign-in and push are not built |
 | Several nodes, Redis or Valkey event bus, OpenSearch, S3 storage, rolling upgrades, backup and restore, Helm chart | built |
-| Jira REST API under `/rest/api/3`, write-back to Jira | not built |
+| Jira REST API under `/rest/api/3`; Jira write-through of create, delete, move, custom fields, sprints and attachments | not built |
 | The editor on the rich-text model (the converters between Markdown, Jira's document format and the model are built and tested; the page still edits plain text) | partly built |
 | Payment, tax and PDF invoices | not built (out of scope: Tasklane hands invoices to your billing system) |
 

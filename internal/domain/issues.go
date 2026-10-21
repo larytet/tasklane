@@ -419,6 +419,16 @@ type Changes struct {
 	ClearEstimate bool     `json:"clear_estimate,omitempty"`
 	// Custom sets custom field values by key or name; a null value clears the field
 	Custom map[string]any `json:"custom,omitempty"`
+	// Base is what the editor started from. A save to a project that writes through to Jira compares Jira's current values with it
+	// (SPEC 18.1.1, WT-08); without it the mirror's current values stand in for it. Native projects ignore it.
+	Base *ChangeBase `json:"base,omitempty"`
+}
+
+// ChangeBase carries the values of the fields being changed as the editor loaded them.
+type ChangeBase struct {
+	Priority *string   `json:"priority,omitempty"`
+	Assignee *string   `json:"assignee,omitempty"` // a Tasklane user id, "" for unassigned
+	Labels   *[]string `json:"labels,omitempty"`
 }
 
 // UpdateFields applies scalar changes. baseVersion is the issue version the caller last saw
@@ -428,6 +438,12 @@ func (s *Service) UpdateFields(ctx context.Context, a Actor, key string, baseVer
 	is, role, err := s.access(ctx, a, key)
 	if err != nil {
 		return is, err
+	}
+	if t := s.writeThrough(ctx, is.Project); t != nil { // Jira decides who may edit; the save goes to Jira first (SPEC 18.1.1)
+		if is.Archived != nil {
+			return is, ErrForbidden
+		}
+		return s.wtUpdateFields(ctx, a, is, t, ch)
 	}
 	// editing needs write access; the one exception is a person who has the assign permission (a custom role grants it) and is only
 	// changing who the issue is assigned to
@@ -664,6 +680,12 @@ func (s *Service) Transition(ctx context.Context, a Actor, key, transitionID str
 	is, role, err := s.access(ctx, a, key)
 	if err != nil {
 		return is, err
+	}
+	if t := s.writeThrough(ctx, is.Project); t != nil {
+		if is.Archived != nil {
+			return is, ErrForbidden
+		}
+		return s.wtTransition(ctx, a, is, t, transitionID)
 	}
 	if is.Archived != nil || !s.canIn(ctx, a, is.Project, role, "transition") {
 		return is, ErrForbidden

@@ -825,6 +825,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil {
 		s.Svc.Logout(r.Context(), c.Value)
 	}
+	s.Svc.DropJiraTokensOf(actorOf(r).ID) // a person's Jira tokens live as long as their session (SPEC 18.1.1, WT-02)
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1})
 	s.json(w, 200, map[string]bool{"ok": true})
 }
@@ -977,6 +978,11 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		uch *domain.UndoChanged
 		upe *domain.UIPrefError
 		upc *domain.UIPrefConflict
+		trq *domain.ErrTokenRequired
+		jcf *domain.JiraConflict
+		jrj *domain.JiraRejected
+		jun *domain.JiraUnavailable
+		jlk *domain.ErrJiraLocked
 	)
 	switch {
 	case err == nil:
@@ -1017,6 +1023,22 @@ func (s *Server) replyStatus(w http.ResponseWriter, ok int, v any, err error) {
 		s.fail(w, 409, "blocked", be.Error(), be.Plan)
 	case errors.As(err, &rom):
 		s.fail(w, 403, "read_only_mirror", rom.Error(), map[string]string{"project": rom.Project, "jira_url": rom.SiteURL})
+	case errors.As(err, &trq): // Jira write-through (SPEC 18.1.1): the save is held and the page asks for a token, then repeats it
+		s.fail(w, 428, "token_required", trq.Error(), map[string]string{"connection_id": trq.ConnectionID, "connection": trq.Connection, "site_url": trq.SiteURL, "token_page": trq.TokenPage})
+	case errors.As(err, &jcf):
+		s.fail(w, 409, "jira_conflict", jcf.Error(), jcf)
+	case errors.As(err, &jrj):
+		st := 422
+		if jrj.Status == 409 {
+			st = 409
+		}
+		s.fail(w, st, "jira_rejected", jrj.Error(), jrj)
+	case errors.As(err, &jun):
+		ra := int(jun.RetryAfter.Seconds()) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(ra))
+		s.fail(w, 503, "jira_unavailable", jun.Error(), map[string]any{"retry_after": ra})
+	case errors.As(err, &jlk):
+		s.fail(w, 503, "jira_locked", jlk.Error(), map[string]string{"connection": jlk.Connection})
 	case errors.As(err, &ce):
 		s.fail(w, 409, "conflict", ce.Error(), nil)
 	case errors.As(err, &nd):

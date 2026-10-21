@@ -228,8 +228,17 @@ func (s *Service) ensureJiraStatus(ctx context.Context, tx pgx.Tx, pid, name, ca
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO status(workflow_id,name,category,position) SELECT p.workflow_id,$2,$3,COALESCE((SELECT max(position)+1 FROM status WHERE workflow_id=p.workflow_id),0) FROM project p WHERE p.id::text=$1
 		ON CONFLICT (workflow_id,name) DO UPDATE SET category=EXCLUDED.category RETURNING id::text`, pid, name, cat).Scan(&id)
+	if err == nil { // a project that writes through offers a move to every status it has seen; Jira decides whether the move is possible (WT-09)
+		_, err = tx.Exec(ctx, anyStatusTransitions+` AND st.id::text=$2`, pid, id)
+	}
 	return id, err
 }
+
+// anyStatusTransitions adds "Move" (from any status, to this one) for the statuses of a write-through project that lack it. A mirrored
+// workflow has no transitions of its own: Jira owns them, and the move that Jira refuses is reported to the person with Jira's reason.
+const anyStatusTransitions = `INSERT INTO transition(workflow_id,name,from_status,to_status)
+	SELECT st.workflow_id,'Move',NULL,st.id FROM status st JOIN project p ON p.workflow_id=st.workflow_id JOIN jira_project jp ON jp.project_id=p.id
+	WHERE p.id::text=$1 AND jp.mode='write_through' AND NOT EXISTS (SELECT 1 FROM transition t WHERE t.workflow_id=st.workflow_id AND t.from_status IS NULL AND t.to_status=st.id)`
 
 func (s *Service) ensureJiraType(ctx context.Context, tx pgx.Tx, name string, subtask bool) (string, error) {
 	level := 0
@@ -711,7 +720,8 @@ func (s *Service) RunJiraWorkers(ctx context.Context, logf func(string, ...any))
 			rows.Close()
 			for _, id := range ids {
 				var paused *ErrPaused
-				if _, err := s.syncJira(ctx, id, false); err != nil && !errors.Is(err, ErrSyncBusy) && !errors.As(err, &paused) && ctx.Err() == nil { // a pause is expected: the sync resumes when it ends
+				var locked *ErrJiraLocked
+				if _, err := s.syncJira(ctx, id, false); err != nil && !errors.Is(err, ErrSyncBusy) && !errors.As(err, &paused) && !errors.As(err, &locked) && ctx.Err() == nil { // a pause and a locked connection are expected: the sync resumes when they end
 					logf("jira sync: %v", err)
 				}
 			}
@@ -729,7 +739,8 @@ func (s *Service) RunJiraWorkers(ctx context.Context, logf func(string, ...any))
 				}
 				rows.Close()
 				for _, x := range list {
-					if _, err := s.reconcileJira(ctx, x.pid, x.conn, x.jk, x.jql, x.pk); err != nil && ctx.Err() == nil {
+					var locked *ErrJiraLocked
+					if _, err := s.reconcileJira(ctx, x.pid, x.conn, x.jk, x.jql, x.pk); err != nil && !errors.As(err, &locked) && ctx.Err() == nil {
 						logf("jira reconcile: %v", err)
 					}
 				}

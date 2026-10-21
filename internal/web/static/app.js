@@ -27,7 +27,48 @@
     dec: s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)),
   };
   const CLIENT_VERSION = 1;
+  // A save to a Jira project that writes through needs the person's own Jira token (SPEC 18.1.1). The server answers 428 token_required;
+  // the person pastes a token into the dialog below and the same request is sent again, once. Every write path gets this for free.
   async function api(method, path, body, headers) {
+    let r = await rawApi(method, path, body, headers);
+    if (r.status === 428 && r.data && r.data.code === 'token_required' && path.indexOf('/api/v1/jira/session-token') !== 0) {
+      if (await askJiraToken(r.data.detail || {})) r = await rawApi(method, path, body, headers);
+    }
+    return r;
+  }
+  let jiraTokenAsk = null; // one dialog at a time: saves made while it is open wait for its answer
+  function askJiraToken(d) {
+    if (jiraTokenAsk) return jiraTokenAsk;
+    jiraTokenAsk = new Promise(resolve => {
+      const tok = h('input', { type: 'password', id: 'jira-token', autocomplete: 'new-password', spellcheck: 'false', 'aria-describedby': 'jira-token-note', style: 'width:100%' });
+      const email = h('input', { type: 'email', id: 'jira-email', autocomplete: 'off', placeholder: 'only if it differs from your Tasklane email', style: 'width:100%' });
+      const err = h('p', { class: 'note', role: 'alert', style: 'color:var(--danger,#c33)' });
+      const save = h('button', { class: 'btn primary', id: 'jira-token-save' }, 'Save token');
+      let close;
+      const done = ok => { jiraTokenAsk = null; close(); resolve(ok); };
+      save.onclick = async () => {
+        save.disabled = true; err.textContent = '';
+        const r = await rawApi('POST', '/api/v1/jira/session-token', { connection: d.connection_id, email: email.value.trim(), token: tok.value.trim() });
+        tok.value = '';
+        if (r.status === 200) done(true); else { save.disabled = false; err.textContent = (r.data && r.data.error) || 'Jira did not accept the token.'; }
+      };
+      const page = d.token_page || 'https://id.atlassian.com/manage-profile/security/api-tokens';
+      close = modal(h('div', {},
+        h('h2', {}, 'Save to Jira as you'),
+        h('p', { id: 'jira-token-note' }, 'Tasklane needs your personal Jira API token to save changes as you. The token is kept only in memory for this session. It is never written to disk or to the database, and it disappears when you sign out or when Tasklane restarts.'),
+        h('p', {}, h('a', { href: page, target: '_blank', rel: 'noopener noreferrer' }, 'Create an API token in Atlassian'), ' (a scoped token is best where your site allows it), then paste it here.'),
+        h('label', { for: 'jira-token' }, 'Jira API token'), tok,
+        h('label', { for: 'jira-email', style: 'display:block;margin-top:8px' }, 'Atlassian account email (optional)'), email,
+        err,
+        h('div', { class: 'actions' }, h('button', { class: 'btn', id: 'jira-token-cancel', onclick: () => done(false) }, 'Cancel'), save)));
+      // Escape and a click outside close the dialog without going through done(): that is "no", seen the moment the dialog leaves the page
+      // (an observer, not a timer: a save made right after Escape must open a new dialog, not be answered by the one just closed)
+      const gone = new MutationObserver(() => { if (!document.body.contains(close.scrim)) { gone.disconnect(); if (jiraTokenAsk) { jiraTokenAsk = null; resolve(false); } } });
+      gone.observe(document.body, { childList: true });
+    });
+    return jiraTokenAsk;
+  }
+  async function rawApi(method, path, body, headers) {
     const r = await fetch(path, { method, credentials: 'same-origin', headers: Object.assign({ 'X-Requested-With': 'tasklane', 'Content-Type': 'application/json', 'X-Tasklane-Client': String(CLIENT_VERSION) }, headers || {}), body: body === undefined ? undefined : JSON.stringify(body) });
     let data = null; try { data = await r.json(); } catch (e) { /* empty body, 304 */ }
     if (r.status === 426 && data && data.code === 'client_too_old') showReload();
@@ -928,7 +969,12 @@
         h('button', { class: 'btn ghost', id: 'next-issue', disabled: !n.next, onclick: () => go(n.next), 'aria-label': 'Next issue in the list' }, '›'));
     }
 
-    function canEdit() { return !v.mirror && (v.role === 'member' || v.role === 'admin'); } // a mirrored issue is edited in Jira
+    // a mirrored issue is edited in Jira, unless its project writes through: then Jira is asked on every save and decides who may edit
+    function writesThrough() { return !!(v.mirror && v.mirror.mode === 'write_through'); }
+    // canEditAll is the native rule. A write-through project saves only summary, description, labels, priority, assignee, comments and
+    // transitions to Jira (canEdit); the actions menu, attachments, versions, custom fields and approvals stay off for it, as they are refused anyway.
+    function canEditAll() { return !v.mirror && (v.role === 'member' || v.role === 'admin'); }
+    function canEdit() { return writesThrough() ? !v.issue.archived : canEditAll(); }
 
     function render() {
       const is = v.issue;
@@ -938,14 +984,14 @@
         h('button', { class: 'btn ghost', onclick: () => history.back(), 'aria-label': 'Back' }, '←'),
         h('span', { class: 'key' }, is.key), pager(is.key), h('span', { class: 'grow' }), h('span', { id: 'pres', class: 'chips', style: 'margin:0' }), viewControls(false),
         h('button', { class: 'btn', id: 'watch-btn', 'aria-pressed': 'false' }, 'Watch'),
-        canEdit() ? h('button', { class: 'btn', 'aria-haspopup': 'dialog', onclick: actionsMenu }, 'Actions ▾') : null));
+        canEditAll() ? h('button', { class: 'btn', 'aria-haspopup': 'dialog', onclick: actionsMenu }, 'Actions ▾') : null));
       if (st.deleted) root.append(h('div', { class: 'banner danger', role: 'alert' }, 'This issue was deleted' + (st.deleted.by ? ' by ' + st.deleted.by : '') + '. Anything you were typing stays in your draft. ', h('a', { href: '#/trash/' + is.project }, 'Open the trash')));
       fillPresence();
       fillWatch();
       if (v.mirror) {
         const m = v.mirror, ago = m.synced_at ? L.relTime(m.synced_at) : 'not yet';
         root.append(h('div', { class: 'banner ' + (m.stale ? 'warn' : 'info'), role: 'status' },
-          'Mirrored from Jira and read-only here. Synced ' + ago + (m.stale && m.error ? ' (the last sync failed: ' + m.error + ')' : '') + '. ',
+          (writesThrough() ? 'Mirrored from Jira. Your changes are saved to Jira as you. Synced ' : 'Mirrored from Jira and read-only here. Synced ') + ago + (m.stale && m.error ? ' (the last sync failed: ' + m.error + ')' : '') + '. ',
           h('a', { href: m.site_url.replace(/\/$/, '') + '/browse/' + encodeURIComponent(m.issue_key || is.key), rel: 'noopener noreferrer', target: '_blank' }, 'Edit in Jira')));
       }
       if (is.archived) {
@@ -989,7 +1035,7 @@
       const list = v.approvals || [];
       const pending = list.some(a => a.status === 'pending');
       const box = h('section', { class: 'card', 'aria-label': 'Approvals', style: 'padding:10px 12px;margin:12px 0' });
-      if (!list.length && !canEdit()) return h('span', { hidden: true });
+      if (!list.length && !canEditAll()) return h('span', { hidden: true });
       box.append(h('h3', { style: 'margin:0 0 6px' }, 'Approvals'));
       const word = { pending: 'Waiting', granted: 'Approved', rejected: 'Rejected', cancelled: 'Withdrawn' };
       for (const ap of list) {
@@ -1003,10 +1049,10 @@
           const act = d => async () => { const r = await api('POST', '/api/v1/approvals/' + ap.id + '/decision', { decision: d, comment: c.value }); if (r.status === 200) await reloadAll(); else toast((r.data && r.data.error) || 'Could not record the decision'); };
           row.append(h('div', { class: 'chips' }, c, h('button', { class: 'btn primary', onclick: act('approve') }, 'Approve'), h('button', { class: 'btn', onclick: act('reject') }, 'Reject')));
         }
-        if (ap.status === 'pending' && canEdit()) row.append(h('div', {}, h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/approvals/' + ap.id + '/cancel'); if (r.status === 200) await reloadAll(); else toast((r.data && r.data.error) || 'Could not withdraw it'); } }, 'Withdraw the request')));
+        if (ap.status === 'pending' && canEditAll()) row.append(h('div', {}, h('button', { class: 'btn ghost', onclick: async () => { const r = await api('POST', '/api/v1/approvals/' + ap.id + '/cancel'); if (r.status === 200) await reloadAll(); else toast((r.data && r.data.error) || 'Could not withdraw it'); } }, 'Withdraw the request')));
         box.append(row);
       }
-      if (canEdit() && !pending) {
+      if (canEditAll() && !pending) {
         const who = h('input', { type: 'text', 'aria-label': 'Approvers', placeholder: 'ana@example.com, group:Release managers, reporter', style: 'min-width:min(300px,100%)' });
         const rule = h('select', { 'aria-label': 'Approval rule' }, h('option', { value: 'all' }, 'Everyone'), h('option', { value: 'any' }, 'Any one'), h('option', { value: 'n' }, 'At least N'));
         const n = h('input', { type: 'number', 'aria-label': 'How many must approve', min: 1, value: 2, style: 'width:70px', hidden: true });
@@ -1145,7 +1191,7 @@
       trans.addEventListener('change', async () => {
         if (!trans.value) return;
         const r = await api('POST', '/api/v1/issues/' + key + '/transitions', { transition: trans.value, base_version: is.version }, WANT_UNDO);
-        if (r.status === 200) { undoToast(key + ' moved to ' + r.data.status + '.', r, () => reloadAll()); await reloadAll(); } else scalarError(r, () => api('POST', '/api/v1/issues/' + key + '/transitions', { transition: trans.value }).then(reloadAll));
+        if (r.status === 200) { undoToast(key + ' moved to ' + r.data.status + '.', r, () => reloadAll()); await reloadAll(); } else scalarError(r, () => api('POST', '/api/v1/issues/' + key + '/transitions', { transition: trans.value }).then(reloadAll), undefined, true);
       });
       const pri = h('select', { 'aria-label': 'Priority', disabled: !canEdit() }, Object.keys(PRI).map(p => h('option', { value: p, selected: p === is.priority }, PRI[p] + ' ' + p)));
       pri.addEventListener('change', () => patch({ priority: pri.value }, 'priority'));
@@ -1157,7 +1203,7 @@
       const vlist = h('datalist', { id: 'vers-list' });
       api('GET', '/api/v1/projects/' + is.project + '/versions').then(r => { if (r.status === 200) r.data.versions.filter(x => !x.archived).forEach(x => vlist.append(h('option', { value: x.name }))); });
       const verInput = (kind, label, vals) => {
-        const el = h('input', { type: 'text', value: vals.join(', '), placeholder: label.toLowerCase(), 'aria-label': label, list: 'vers-list', disabled: !canEdit(), style: 'width:150px' });
+        const el = h('input', { type: 'text', value: vals.join(', '), placeholder: label.toLowerCase(), 'aria-label': label, list: 'vers-list', disabled: !canEditAll(), style: 'width:150px' });
         el.addEventListener('change', async () => {
           const r = await api('PUT', '/api/v1/issues/' + key + '/versions', { [kind]: el.value.split(/\s*,\s*/).filter(Boolean) });
           if (r.status === 200) await reloadAll(); else { toast((r.data && r.data.error) || 'Could not set versions'); el.value = vals.join(', '); }
@@ -1169,13 +1215,28 @@
         h('span', { class: 'muted' }, is.type + ' · reported by ' + is.reporter.name));
     }
     async function patch(ch, field) {
-      const r = await api('PATCH', '/api/v1/issues/' + key, Object.assign({ base_version: v.issue.version }, ch));
+      const is = v.issue;
+      // a project that writes through carries what the form started from, so Jira's current value can be compared with it (WT-08)
+      const base = writesThrough() ? { priority: is.priority, assignee: is.assignee ? is.assignee.id : '', labels: is.labels || [] } : null;
+      const send = (b, extra) => api('PATCH', '/api/v1/issues/' + key, Object.assign({ base_version: is.version }, ch, b ? { base: b } : {}, extra));
+      const r = await send(base);
       if (r.status === 200) { await reloadAll(); return; }
-      scalarError(r, () => api('PATCH', '/api/v1/issues/' + key, ch).then(reloadAll), field);
+      // "overwrite with mine" after a conflict: the base is now what Jira has, which the person has just been shown
+      let again = () => send(base).then(reloadAll);
+      if (r.status === 409 && r.data.code === 'jira_conflict') {
+        const nb = Object.assign({}, base);
+        (r.data.detail.fields || []).forEach(f => { nb[f.field] = f.current; });
+        again = () => send(nb).then(reloadAll);
+      }
+      scalarError(r, again, field);
     }
-    function scalarError(r, reapply, field) {
+    function scalarError(r, reapply, field, noOverwrite) {
       if (r.status === 409 && r.data.code === 'version_conflict') {
         toast('Someone else changed ' + (r.data.detail.fields || [field]).join(', ') + '; your change was not applied.', { label: 'Reapply', fn: reapply });
+      } else if (r.status === 409 && r.data.code === 'jira_conflict') { // changed in Jira since this page was loaded (SPEC 18.1.1)
+        const fs = r.data.detail.fields || [];
+        toast('Changed in Jira since you opened this: ' + fs.map(f => f.field + ' is now "' + f.jira + '"' + (f.by ? ' (' + f.by + ')' : '')).join('; ') + '. Nothing was saved.',
+          noOverwrite ? undefined : { label: 'Overwrite', fn: reapply });
       } else toast((r.data && r.data.error) || 'Could not save');
       reloadAll();
     }
@@ -1199,7 +1260,7 @@
         box.hidden = false;
         box.append(h('strong', {}, tab.name === 'Details' ? 'Fields' : tab.name));
         for (const f of fs) {
-          const ctl = fieldControl(f, (is.custom || {})[f.key], !canEdit()); // the server enforces per-field edit roles
+          const ctl = fieldControl(f, (is.custom || {})[f.key], !canEditAll()); // the server enforces per-field edit roles
           const err = h('span', { class: 'err', role: 'alert' });
           ctl.el.addEventListener('change', async () => {
             const r2 = await api('PATCH', '/api/v1/issues/' + key, { custom: { [f.key]: ctl.get() } });
@@ -1414,13 +1475,13 @@
         }
         chip.append(h('div', {}, h('div', { class: 'nm' }, a.name), h('div', { class: 'muted' }, a.scan_state === 'blocked' ? 'Blocked: malware signature' : L.bytes(a.size) + (a.type_flag ? ' · type mismatch' : ''))));
         if (a.scan_state === 'clean') chip.append(h('button', { class: 'btn ghost', 'aria-label': 'Download ' + a.name, onclick: async () => { const r = await api('POST', '/api/v1/attachments/' + a.id + '/link'); if (r.status === 200) window.open(r.data.url, '_blank', 'noopener'); } }, '⬇'));
-        if (v.request && canEdit() && !a.from_customer && a.scan_state === 'clean') chip.append(h('button', { class: 'btn ghost', 'aria-pressed': String(!!a.customer_visible), 'aria-label': (a.customer_visible ? 'Hide ' : 'Share ') + a.name + (a.customer_visible ? ' from the customer' : ' with the customer'), title: a.customer_visible ? 'Visible to the customer' : 'Internal: click to share with the customer', onclick: async () => { const r = await api('PUT', '/api/v1/attachments/' + a.id + '/customer-visible', { visible: !a.customer_visible }); if (r.status === 200) reloadAll(); else toast((r.data && r.data.error) || 'Could not change that'); } }, a.customer_visible ? '👁' : '🔒'));
+        if (v.request && canEditAll() && !a.from_customer && a.scan_state === 'clean') chip.append(h('button', { class: 'btn ghost', 'aria-pressed': String(!!a.customer_visible), 'aria-label': (a.customer_visible ? 'Hide ' : 'Share ') + a.name + (a.customer_visible ? ' from the customer' : ' with the customer'), title: a.customer_visible ? 'Visible to the customer' : 'Internal: click to share with the customer', onclick: async () => { const r = await api('PUT', '/api/v1/attachments/' + a.id + '/customer-visible', { visible: !a.customer_visible }); if (r.status === 200) reloadAll(); else toast((r.data && r.data.error) || 'Could not change that'); } }, a.customer_visible ? '👁' : '🔒'));
         if (v.request && a.from_customer) chip.append(h('span', { class: 'muted', title: 'Sent by the customer' }, 'customer'));
-        if (canEdit()) chip.append(h('button', { class: 'btn ghost', 'aria-label': 'Remove ' + a.name, onclick: async () => { await api('DELETE', '/api/v1/issues/' + key + '/attachments/' + a.id); reloadAll(); } }, '×'));
+        if (canEditAll()) chip.append(h('button', { class: 'btn ghost', 'aria-label': 'Remove ' + a.name, onclick: async () => { await api('DELETE', '/api/v1/issues/' + key + '/attachments/' + a.id); reloadAll(); } }, '×'));
         strip.append(chip);
       }
       const wrap = h('div', {}, strip);
-      if (canEdit()) {
+      if (canEditAll()) {
         const file = h('input', { type: 'file', multiple: true, class: 'sr', id: 'file' });
         file.addEventListener('change', () => uploadFiles([...file.files]));
         wrap.append(file, h('label', { for: 'file', class: 'btn' }, '📎 Attach'), h('span', { class: 'muted' }, ' or paste a screenshot / drop files'));
@@ -1433,9 +1494,9 @@
         if (await uploadOne(key, f)) await reloadAll();
       }
     }
-    root.addEventListener('paste', e => { const fs = [...(e.clipboardData ? e.clipboardData.files : [])]; if (fs.length && canEdit()) { e.preventDefault(); uploadFiles(fs); } });
+    root.addEventListener('paste', e => { const fs = [...(e.clipboardData ? e.clipboardData.files : [])]; if (fs.length && canEditAll()) { e.preventDefault(); uploadFiles(fs); } });
     root.addEventListener('dragover', e => e.preventDefault());
-    root.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length && canEdit()) { e.preventDefault(); uploadFiles([...e.dataTransfer.files]); } });
+    root.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length && canEditAll()) { e.preventDefault(); uploadFiles([...e.dataTransfer.files]); } });
 
     // ----- development (Git): collapsed, filled from Tasklane's own store; the provider is never asked from here
     function developmentEl() {

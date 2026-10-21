@@ -1127,8 +1127,9 @@ it when Jira deletes it, and honours account closures and erasure requests repor
 
 ### 18.1.1 Jira write-through (editing a mirrored project in Tasklane)
 
-Status: specified, not built. The assumptions in the last paragraph of this section must be verified against a real Jira
-site before the conflict design below is relaxed.
+Status: **built (M5.75) against a recorded Jira double; never run against a real Jira site.** The assumptions in the last
+paragraph of this section must be verified against a real Jira site before the conflict design below is relaxed. Where the
+build differs from the text below, a *Built:* note says so.
 
 **Goal.** A person edits a mirrored issue in Tasklane's fast UI; the edit is made in Jira, as that person, at once; if Jira
 or Tasklane detects that someone else changed the same thing, the person is told and decides. Jira remains the system of
@@ -1143,7 +1144,10 @@ record: Tasklane never holds a change that Jira has not accepted.
   request log, an MCP or REST answer, or a core dump. A migration removes `jira_connection.token_enc` (the column is
   overwritten with empty values, then dropped, and the backup format no longer has it). A connection keeps only the site
   URL, the account email and a short non-reversible fingerprint. A test dumps the whole database after an unlock and searches
-  it for the token (it must not appear).
+  it for the token (it must not appear). *Built:* the migration (0081, expand) erases the stored values and the code never
+  writes anything but an empty value to the column; the column itself is dropped by a contract migration in a later release
+  (a contract migration cannot ship in the same release as the code that stops using the column, and this repository's
+  migration tests assume none exists yet). A restore of an older backup erases the column again.
 - **WT-02 Memory only.** Keys are held in a credential holder in the memory of the Tasklane process. An entry ends on
   logout, on session expiry, when Jira rejects it (401), when the project leaves `write_through`, and when the process
   stops (so a restart or upgrade empties the holder). The service disables core dumps and keeps the holder out of swap
@@ -1156,7 +1160,8 @@ record: Tasklane never holds a change that Jira has not accepted.
   checks the token with Jira's `myself` call; the email it returns must equal the connection's email, otherwise the token
   is refused and not kept. Creating a connection takes the same path. Environment variables such as `JIRA_API_TOKEN` are
   not read by Tasklane and must not be needed to run it. In a cluster each node that syncs a project needs the unlock;
-  a node that takes over a project stays locked until it has been unlocked.
+  a node that takes over a project stays locked until it has been unlocked. *Built:* the API call only; the
+  `tasklane jira-unlock` command and the Admin tab button are not built.
 - **WT-04 Each person writes with their own token.** The first time a person saves to a `write_through` project and this
   node holds no live token for their session, the save is held (the draft is kept, section 4.5) and a dialog asks for a Jira
   API token. The dialog shows a link to Atlassian's token page (`https://id.atlassian.com/manage-profile/security/api-tokens`;
@@ -1173,7 +1178,9 @@ record: Tasklane never holds a change that Jira has not accepted.
 - **WT-06 Token lifetime.** A token is tied to the Tasklane session and is dropped with it. Each node holds its own;
   another node that receives the person's request without a token asks again (session affinity is allowed but not
   required). A 401 from Jira discards the token and asks again. Tokens expire in Jira (administrators may cap their lifetime
-  or disable API tokens); the dialog shows Jira's message when a token cannot be created or is refused.
+  or disable API tokens); the dialog shows Jira's message when a token cannot be created or is refused. *Built:* a token is
+  kept per person and connection (not per session id, which an actor does not carry) and ends at logout, at a refusal by Jira,
+  when the project leaves write-through, and eight hours after it was supplied.
 
 *Writes and conflicts*
 
@@ -1192,11 +1199,12 @@ record: Tasklane never holds a change that Jira has not accepted.
   rejects as simultaneous (HTTP 409), a validator, a required field, a permission refusal or a deleted or moved issue is
   shown to the person with Jira's text. Tasklane retries nothing on its own: a retry could apply a decision made on stale
   data. A transition is sent with the id from a fresh read of the available transitions; its required screen fields are asked for.
-- **WT-10 What can be written in this phase.** Summary, description, labels, priority, assignee, due date, comments (add
-  and edit) and transitions. Not in this phase: create, delete, move, clone, convert, custom fields, sprints and rank,
-  attachments, worklogs, versions, components and links. Each of these keeps the `read_only_mirror` answer with the Jira
-  link. Automation, Git rules, email and MCP write tools do not write to Jira in this phase either; they get the same typed
-  refusal.
+- **WT-10 What can be written in this phase.** Summary, description, labels, priority, assignee, comments (add) and
+  transitions. Not in this phase: create, delete, move, clone, convert, estimate, custom fields, due date, editing a comment,
+  internal comments, sprints and rank, attachments, worklogs, versions, components and links. Each of these keeps the
+  `read_only_mirror` answer with the Jira link. Automation, Git rules, email and MCP write tools do not write to Jira in this
+  phase either; they get the same typed refusal. *Built:* a mirrored workflow has no transitions of its own, so a write-through
+  project offers a "Move" to every status the mirror has seen and Jira says at save time whether that move exists (WT-09).
 - **WT-11 After Jira accepts.** Tasklane reads the issue back (fields and the new changelog entries) and applies it in one
   transaction exactly as the sync would, so the mirror equals Jira at that moment; history rows carry the Jira author (the
   person). When the same change comes back later through the poll or a webhook it is a no-op, because the sync is idempotent
@@ -1205,7 +1213,11 @@ record: Tasklane never holds a change that Jira has not accepted.
 - **WT-12 Text fidelity.** Descriptions and comments are written as Atlassian Document Format produced from the rich-text
   model (`internal/richtext`). Nodes Tasklane does not understand are kept as opaque blocks and sent back unchanged. If a
   document cannot be converted without loss, the edit of that field is refused with a link to Jira (fail closed). Property tests
-  cover round trips against documents full of unsupported nodes.
+  cover round trips against documents full of unsupported nodes. *Built:* the editor still works on plain text and the mirror
+  keeps a plain-text copy of a description, so the first phase writes a description (or a new comment) only when Jira's own
+  document is plain, that is paragraphs of unformatted text and line breaks, and checks that Jira's text view of what it wrote is
+  the text again; any other description (a list, a link, code, a mention) is edited in Jira. The rich-text converters are not
+  yet on this path; that follows the editor moving to the rich-text model.
 - **WT-13 Jira slow, down or rate limited.** The save fails with a typed error that states the cause and `Retry-After`; the
   draft is kept; the mirror is unchanged. The write path honours the same egress policy and per-site limits as the sync, and
   has its own timeout shorter than the page's.
@@ -1219,8 +1231,11 @@ record: Tasklane never holds a change that Jira has not accepted.
   people's tokens held for it. Cut-over keeps its current meaning (Jira is no longer updated by Tasklane).
 - **WT-17 Admin tab.** Per project: mode. Per connection: `locked` or `unlocked` since when (never the token), the number of
   people holding a live token (a count, not names), and the recent write outcomes (accepted, conflicts, rejections, failures).
+  *Built:* the status API carries the mode, the locked flag and the count; the outcomes are in the audit log (`jira.write`) and
+  are not summarized in the status; there is no Admin screen for it yet (the API is complete).
 - **WT-18 One person, several tabs (should).** A save, and a draft change, made in one tab are pushed to the same person's
   other tabs, as Jira's own editor does, so a person cannot collide with themselves. This is independent of the rest and can follow later.
+  *Not built.* (A saved change already reaches the person's other tabs through the issue's live events.)
 
 **Design**
 

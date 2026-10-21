@@ -64,6 +64,12 @@ func (s *Service) AddComment(ctx context.Context, a Actor, key, body string, int
 	if err != nil {
 		return Comment{}, err
 	}
+	if t := s.writeThrough(ctx, is.Project); t != nil {
+		if is.Archived != nil {
+			return Comment{}, ErrForbidden
+		}
+		return s.wtAddComment(ctx, a, is, t, body, internal)
+	}
 	if is.Archived != nil || !s.canIn(ctx, a, is.Project, role, "comment") { // archived work stays read-only whatever a scheme says
 		return Comment{}, ErrForbidden
 	}
