@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,6 +20,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.tasklane.android.data.*
+
+private const val LENS_ROWS = 200
 
 /** Issue list with a search box; [project] narrows it to one project. Pages of 50 load as the list scrolls. */
 @Composable
@@ -31,22 +34,28 @@ fun IssuesScreen(api: TasklaneApi, project: String?, onUnauthorized: () -> Unit,
             if (submitted.isNotBlank()) add(submitted.trim())
         }
     }
+    var lens by rememberSaveable { mutableStateOf(true) }
     Column(Modifier.fillMaxSize()) {
+      Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             text, { text = it },
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.weight(1f),
             placeholder = { Text("Search issues") }, singleLine = true,
             leadingIcon = { Icon(Icons.Default.Search, null) },
             trailingIcon = { if (text.isNotEmpty()) IconButton({ text = ""; submitted = "" }) { Icon(Icons.Default.Clear, "Clear") } },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { submitted = text }),
         )
-        PagedIssues(api, q, onUnauthorized, onOpen)
+        IconToggleButton(lens, { lens = it }) {
+            Icon(Icons.Default.ZoomIn, "Lens", tint = if (lens) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+      }
+        PagedIssues(api, q, lens, onUnauthorized, onOpen)
     }
 }
 
 @Composable
-private fun PagedIssues(api: TasklaneApi, filters: List<String>, onUnauthorized: () -> Unit, onOpen: (String) -> Unit) {
+private fun PagedIssues(api: TasklaneApi, filters: List<String>, lens: Boolean, onUnauthorized: () -> Unit, onOpen: (String) -> Unit) {
     // the project clause is TQL and the search words are plain text, so they are joined as TQL only when both are present
     val project = filters.firstOrNull { it.startsWith("project = ") }
     val words = filters.firstOrNull { !it.startsWith("project = ") }.orEmpty()
@@ -82,6 +91,11 @@ private fun PagedIssues(api: TasklaneApi, filters: List<String>, onUnauthorized:
     }
     LaunchedEffect(query, tick) { if (rows.isEmpty()) loadMore() }
 
+    // the lens needs the rows themselves rather than a scrolling window onto them, so it loads pages until it has LENS_ROWS
+    LaunchedEffect(lens, rows.size, loading, total) {
+        if (lens && !loading && failure == null && rows.isNotEmpty() && rows.size < minOf(total, LENS_ROWS)) loadMore()
+    }
+
     val listState = rememberLazyListState()
     val nearEnd by remember { derivedStateOf { val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0; last >= rows.size - 5 } }
     LaunchedEffect(nearEnd, rows.size, loading) {
@@ -92,6 +106,17 @@ private fun PagedIssues(api: TasklaneApi, filters: List<String>, onUnauthorized:
         rows.isEmpty() && loading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
         rows.isEmpty() && failure != null -> ErrorView(failure!!) { tick++ }
         rows.isEmpty() -> Empty("No issues")
+        lens -> LensIssues(rows, {
+            when {
+                failure != null -> TextButton({ failure = null }) { Text("Could not load more. Retry") }
+                loading -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                else -> Text(
+                    if (rows.size < total) "${rows.size} of $total issues, touch outside the highlight to slide the lens"
+                    else "$total issues, touch outside the highlight to slide the lens",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }, onOpen)
         else -> LazyColumn(Modifier.fillMaxSize(), listState) {
             items(rows, key = { it.key }) { IssueRowItem(it) { onOpen(it.key) } }
             item {

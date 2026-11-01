@@ -24,9 +24,11 @@ html,body{margin:0;height:100%}
 body{font-family:Roboto,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--stage);color:var(--text);
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;min-height:100%}
 .bar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;font-size:13px;color:var(--muted);align-items:center}
+.bar select{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;padding:5px 10px}
 .bar button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;padding:5px 12px;cursor:pointer}
 .bar a{color:var(--primary)}
-.phone{width:380px;max-width:100%;height:760px;max-height:calc(100vh - 90px);min-height:560px;border-radius:38px;border:10px solid #000;
+.stage{position:relative;flex:none}
+.phone{position:absolute;left:0;top:0;transform-origin:0 0;border-radius:38px;border:10px solid #000;
   background:var(--bg);overflow:hidden;display:flex;flex-direction:column;position:relative;box-shadow:0 20px 50px rgba(0,0,0,.35)}
 .status{height:30px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:12px;font-weight:500;flex:none}
 .top{height:56px;display:flex;align-items:center;gap:6px;padding:0 6px 0 16px;font-size:22px;flex:none}
@@ -86,7 +88,24 @@ body{font-family:Roboto,system-ui,-apple-system,"Segoe UI",sans-serif;background
 .btn{height:44px;border:0;border-radius:22px;background:var(--primary);color:var(--bg);font:inherit;font-weight:500;cursor:pointer}
 body:not(.dark) .btn{color:#fff}
 .err{color:var(--err);font-size:14px}
-.note{font-size:12px;color:var(--muted);text-align:center;max-width:380px}
+.note{margin:0;font-size:12px;color:var(--muted);text-align:center;max-width:380px}
+.body.fixed{display:flex;flex-direction:column;overflow:hidden}
+.lens{user-select:none;-webkit-user-select:none;flex:1;min-height:0;position:relative;overflow:hidden;touch-action:none}
+.lr{border-bottom:1px solid var(--line);padding:0 16px;overflow:hidden;display:flex;flex-direction:column;justify-content:center;cursor:pointer;transition:height .07s linear;background:var(--bg)}
+.lr .l1{display:flex;gap:7px;align-items:center;font-size:12px;margin-bottom:2px;line-height:1.2}
+.lr .sum{font-size:14.5px;line-height:1.2}
+.lr .sub{font-size:12px;color:var(--muted);margin-top:2px}
+.lr.inlens{background:var(--primary-c);box-shadow:inset 3px 0 0 var(--primary)}
+.lv1,.lv2{flex-direction:row;align-items:center;justify-content:flex-start;gap:8px}
+.lv1 .l1,.lv2 .l1{margin:0;flex:none}
+.lv1 .chip,.lv1 .sub{display:none}
+.lv2 .sub,.lv2 .chip.pc{display:none}
+.lv1 .sum,.lv2 .sum{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1}
+.lv2 .sum{font-size:13.5px}
+.lv0{padding:0;border-bottom:1px solid var(--bg);border-left:4px solid var(--st-todo);background:var(--surface)}
+.lv0 *{display:none}
+.lv0.c-prog{border-left-color:var(--st-prog)}.lv0.c-done{border-left-color:var(--st-done)}
+.lcount{flex:none;text-align:center;font-size:11px;color:var(--muted);padding:4px}
 .toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:13px;z-index:9;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
 </style>
@@ -94,17 +113,19 @@ body:not(.dark) .btn{color:#fff}
 <body>
 <div class="bar">
   <button id="theme">Dark mode</button>
+  <select id="dev" title="Screen size (dp)"><option value="360x640">Compact 360×640</option><option value="412x915">Pixel 412×915</option><option value="411x960" selected>4K phone 411×960 (1644×3840 px)</option></select>
+  <button id="lensbtn">Lens: on</button>
   <button id="reset">Sign out / restart</button>
   <span>Mock with sample data. The real app is native (Kotlin, Jetpack Compose, Material 3).
   <a href="https://github.com/larytet/tasklane/tree/main/android">Source</a></span>
 </div>
-<div class="phone" id="phone">
+<div class="stage" id="stage"><div class="phone" id="phone">
   <div class="status"><span id="clock">9:41</span><span>▾ ◢ ▮</span></div>
   <div id="app" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>
   <div class="gesture"><i></i></div>
   <div class="toast" id="toast"></div>
-</div>
-<div class="note">Sign in with any server, email and password. Try the "Mark all read" button, a comment, a board tab, or search.</div>
+</div></div>
+<div class="note" style="margin-top:2px">Sign in with any server, email and password. Try the "Mark all read" button, a comment, a board tab, or search.</div>
 
 <script>
 const DATA = {
@@ -138,9 +159,21 @@ const DATA = {
     {issue:"SHOP-5", who:"Administrator", summary:"Refund email has wrong total", what:"Moved to Done", at:"Oct 19, 2026, 9:03 AM", unread:false},
   ],
 };
+(function(){
+  const A=["Fix","Investigate","Add","Refactor","Document","Upgrade","Remove","Speed up","Cover with tests","Monitor"];
+  const B=["checkout retry logic","coupon endpoint rate limit","order page dark mode","payment SDK","guest cart merge","Google Pay button","invoice PDF layout","catalog search","wishlist share link","German email templates","stock count rounding","address autocomplete","webhook retry queue","cookie banner copy","gift card balance check","return label generator","sitemap generation","mobile menu overlap","tax rounding on refunds","session cookie lifetime","image CDN cache headers","product import job","admin audit export","password reset email","order status polling","shipping rate lookup","loyalty points display","3DS fallback flow","currency switcher","review moderation queue"];
+  const ty=["Bug","Task","Task","Bug","Task"], ca=[["To Do","todo"],["In Progress","prog"],["Done","done"]], pr=["low","medium","high","medium","low","highest"];
+  const who=["","","Dana Levi","","Sam Cohen","Noa Bar"];
+  for(let n=0;n<52;n++){
+    const c=ca[(n*7+n%4)%3], bug=ty[n%5]==="Bug";
+    DATA.issues.push({key:"SHOP-"+(7+n),summary:(bug?"":A[(n*3)%A.length]+" ")+(bug?"Bug: "+B[(n*7)%B.length]:B[(n*7+n)%B.length]),type:ty[n%5],status:c[0],cat:c[1],priority:pr[(n*5)%6],assignee:who[(n*5)%6],comments:n%6===0?n%4+1:0});
+  }
+  DATA.issues.sort((a,b)=>+b.key.split("-")[1]-+a.key.split("-")[1]);
+})();
+
 const $ = (s,r=document)=>r.querySelector(s);
 const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const st = {signedIn:false, stack:[{r:"issues"}], q:"", menu:false, boardTab:0, mfa:false, err:""};
+const st = {lens:true, lensC:6, signedIn:false, stack:[{r:"issues"}], q:"", menu:false, boardTab:0, mfa:false, err:""};
 const ICON = {issues:"☰", projects:"📁", inbox:"🔔"};
 const TITLES = {issues:"Issues", projects:"Projects", inbox:"Inbox"};
 const cur = ()=>st.stack[st.stack.length-1];
@@ -165,6 +198,9 @@ function login(){
 function issues(){
   const q=st.q.toLowerCase();
   const l=DATA.issues.filter(i=>!q||(i.key+" "+i.summary).toLowerCase().includes(q));
+  if(st.lens)return `<div class="search"><span>🔍</span><input id="q" placeholder="Search issues" value="${esc(st.q)}"></div>
+  <div class="lens" id="lens">`+l.map((i,n)=>`<div class="lr c-${i.cat}" data-key="${i.key}" data-i="${n}" data-c="c-${i.cat}"><div class="l1"><span class="key">${i.key}</span><span class="chip s-${i.cat}">${esc(i.status)}</span><span class="chip pc p-${i.priority}">${esc(i.priority)}</span></div><div class="sum">${esc(i.summary)}</div><div class="sub">${i.type}${i.assignee?" · "+esc(i.assignee):""}${i.comments?` · ${i.comments} comments`:""}</div></div>`).join("")+
+  `</div><div class="lcount">${l.length} issues · move or touch outside the highlight to slide the lens, click inside it to open</div>`;
   return `<div class="search"><span>🔍</span><input id="q" placeholder="Search issues" value="${esc(st.q)}"></div>`+
   l.map(i=>`<div class="row" data-open="${i.key}"><div class="line1"><span class="key">${i.key}</span>${chips(i)}</div>
     <div class="sum">${esc(i.summary)}</div><div class="sub">${i.type}${i.assignee?" · "+esc(i.assignee):""}${i.comments?` · ${i.comments} comments`:""}</div></div>`).join("")+
@@ -208,7 +244,7 @@ function draw(){
   const tabs=isTab(c.r)?`<div class="nav">${Object.keys(TITLES).map(t=>`<button class="${t===c.r?"on":""}" data-tab="${t}"><span class="pill">${ICON[t]}</span>${TITLES[t]}</button>`).join("")}</div>`:"";
   const compose=c.r==="issue"?`<div class="compose"><input id="cm" placeholder="Add a comment"><button class="ib" id="send" style="color:var(--muted)">➤</button></div>`:"";
   app.innerHTML=`<div class="top">${isTab(c.r)?"":'<button class="ib back" id="back">←</button>'}<span class="t">${esc(title)}</span><button class="ib" id="more">⋮</button></div>
-  <div class="body" id="scroll">${body}</div>${compose}${tabs}${st.menu?`<div class="menu"><div class="dis">Signed in as ${DATA.user.name}</div><div class="act" id="out">Sign out</div></div>`:""}`;
+  <div class="body${st.lens&&c.r==="issues"?" fixed":""}" id="scroll">${body}</div>${compose}${tabs}${st.menu?`<div class="menu"><div class="dis">Signed in as ${DATA.user.name}</div><div class="act" id="out">Sign out</div></div>`:""}`;
   wire();
 }
 function wireLogin(){
@@ -229,6 +265,7 @@ function wire(){
   document.querySelectorAll("[data-tab]").forEach(e=>e.onclick=()=>tab(e.dataset.tab));
   document.querySelectorAll("[data-bt]").forEach(e=>e.onclick=()=>{st.boardTab=+e.dataset.bt;draw()});
   const b=$("#back"); if(b)b.onclick=back;
+  const L=$("#lens"); if(L)initLens(L);
   $("#more").onclick=()=>{st.menu=!st.menu;draw()};
   const o=$("#out"); if(o)o.onclick=reset;
   const q=$("#q"); if(q){q.oninput=()=>{st.q=q.value;const p=q.selectionStart;draw();const n=$("#q");n.focus();n.setSelectionRange(p,p)}}
@@ -239,12 +276,58 @@ function wire(){
     $("#send").onclick=send; cm.onkeydown=e=>{if(e.key==="Enter")send()};
   }
 }
+const LENS={ROW_MAX:88,ROW_CAP:96,SHARE:2/3,MIN:.1,FALL:3};
+function lensLayout(n,H,c){
+  const {ROW_MAX,ROW_CAP,SHARE,MIN,FALL}=LENS;
+  if(n<=0||H<=0)return {h:[],tops:[],start:0,k:0};
+  const fin=(h,start,k)=>{let y=0;const tops=h.map(v=>{const t=y;y+=v;return t});return {h,tops,start,k}};
+  if(n*ROW_MAX<=H)return fin(Array(n).fill(ROW_MAX),0,n);
+  const k=Math.min(n,Math.max(1,Math.round(SHARE*H/ROW_MAX)));
+  const start=Math.min(n-k,Math.max(0,Math.round(c-(k-1)/2)));
+  const hw=Math.min(SHARE*H/k,ROW_CAP);
+  const w=Array.from({length:n},(_,i)=>{if(i>=start&&i<start+k)return 0;const d=i<start?start-i:i-(start+k-1),x=(d-1)/FALL;return MIN+(1-MIN)*Math.exp(-(x*x))});
+  const sum=w.reduce((a,b)=>a+b,0), out=H-k*hw;
+  return fin(w.map((v,i)=>i>=start&&i<start+k?hw:(sum>0?out*v/sum:0)),start,k);
+}
+const rowAt=(lay,y)=>{if(!lay.h.length)return -1;for(let i=0;i<lay.h.length;i++)if(y<lay.tops[i]+lay.h[i])return i;return lay.h.length-1};
+function layoutLens(L){
+  const rows=[...L.children], H=L.clientHeight; if(!rows.length||!H)return;
+  const lay=lensLayout(rows.length,H,st.lensC); L._lay=lay;
+  rows.forEach((r,i)=>{
+    const h=lay.h[i], inw=i>=lay.start&&i<lay.start+lay.k;
+    r.style.height=h+"px";
+    r.className="lr "+(r.dataset.c||"")+" "+(h>=50?"lv3":h>=24?"lv2":h>=10?"lv1":"lv0")+(inw?" inlens":"");
+    r.style.fontSize=h<24&&h>=10?Math.max(8,Math.min(13,h-3))+"px":"";
+  });
+}
+function initLens(L){
+  layoutLens(L);
+  const yOf=e=>{const r=L.getBoundingClientRect();return (e.clientY-r.top)*(L.offsetHeight/r.height)};
+  const inWin=i=>i>=L._lay.start&&i<L._lay.start+L._lay.k;
+  // touching, dragging or hovering outside the window slides it there; inside it nothing moves, so a row can be clicked
+  const slide=e=>{const i=rowAt(L._lay,yOf(e)); if(i>=0&&!inWin(i)){st.lensC=i;layoutLens(L);return true}return false};
+  let slid=false;
+  L.onpointermove=e=>{if(slide(e)&&e.buttons)slid=true};
+  L.onpointerdown=e=>{slid=slide(e)};
+  L.onclick=e=>{if(slid){slid=false;return} const i=rowAt(L._lay,yOf(e)); if(i>=0&&inWin(i))go("issue",{key:L.children[i].dataset.key})};
+  L.onwheel=e=>{e.preventDefault();st.lensC=Math.max(0,Math.min(L.children.length-1,st.lensC+Math.sign(e.deltaY)));layoutLens(L)};
+}
 function reset(){st.signedIn=false;st.stack=[{r:"issues"}];st.q="";st.menu=false;st.mfa=false;st.err="";draw()}
 $("#reset").onclick=reset;
+$("#lensbtn").onclick=()=>{st.lens=!st.lens;$("#lensbtn").textContent="Lens: "+(st.lens?"on":"off");draw()};
 $("#theme").onclick=()=>{const d=document.body.classList.toggle("dark");$("#theme").textContent=d?"Light mode":"Dark mode";try{localStorage.setItem("tl-mock-dark",d?"1":"0")}catch(e){}};
 try{const s=localStorage.getItem("tl-mock-dark"); if(s==="1"||(s===null&&matchMedia("(prefers-color-scheme: dark)").matches)){document.body.classList.add("dark");$("#theme").textContent="Light mode"}}catch(e){}
 $("#clock").textContent=new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
-draw();
+function fit(){
+  const [w,h]=$("#dev").value.split("x").map(Number), ph=$("#phone"), stg=$("#stage");
+  const avail=innerHeight-$(".bar").offsetHeight-$(".note").offsetHeight-70;
+  const sc=Math.min(1.25,Math.max(.3,Math.min(avail/h,(innerWidth-32)/w)));
+  ph.style.width=w+"px"; ph.style.height=h+"px"; ph.style.transform="scale("+sc+")";
+  stg.style.width=w*sc+"px"; stg.style.height=h*sc+"px";
+  const L=$("#lens"); if(L)layoutLens(L);
+}
+$("#dev").onchange=fit; addEventListener("resize",fit);
+draw(); fit();
 </script>
 </body>
 </html>

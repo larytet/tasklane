@@ -179,7 +179,8 @@ token is asked for when they first save, and both live in memory only. See [docs
   so nothing typed is lost, and a save that would overwrite someone else's change opens a merge dialog instead of clobbering it.
 - **Built for agents.** A built-in MCP server lets AI coding agents pick up tickets, report progress, link PRs and hand
   work to a human for review, under the same permissions and audit as people.
-- **A native Android app.** Sign in (with a second factor if your account has one), search and browse issues, read boards
+- **A native Android app.** Sign in (with a second factor if your account has one), search and browse issues (as a scrolling list or
+  as a *lens* that magnifies a window of issues and squeezes the rest), read boards
   and the inbox, and comment, from a phone, against the same REST API. Light and dark. See [android/](android/README.md).
 
 ## What it looks like
@@ -237,7 +238,7 @@ board column by column, check the inbox. It follows the device's day and night s
 [android/README.md](android/README.md) for what it does and how to build it, or download the signed APK from
 [Releases](https://github.com/larytet/tasklane/releases) and install it on your phone. To click through it without
 installing anything, open the **[interactive mock](https://larytet.github.io/tasklane/android/)** (sample data, light and
-dark; the source is [mock/android/](mock/android/index.html)).
+dark, 58 issues to try the lens on, several screen sizes up to a 4K-class phone; the source is [mock/android/](mock/android/index.html)).
 
 <table>
 <tr>
