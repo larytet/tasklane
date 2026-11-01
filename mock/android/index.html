@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tasklane for Android: interactive mock</title>
+<style>
+:root{
+  --bg:#fbfbfe; --surface:#f1f1f8; --card:#eceaf4; --text:#1b1b20; --muted:#5f5f6a; --line:#d8d8e2;
+  --primary:#2F5BEA; --primary-c:#dde3ff; --err:#b3261e;
+  --st-todo-bg:#e4e4ea; --st-todo:#55555f; --st-prog-bg:#dbe5ff; --st-prog:#1d4ed8; --st-done-bg:#d6f0dc; --st-done:#17692b;
+  --p-low:#55555f; --p-med:#a14a00; --p-high:#b3261e; --p-top:#b3261e;
+  --stage:#e9e9f0;
+}
+body.dark{
+  --bg:#121216; --surface:#1c1b20; --card:#2a292f; --text:#e5e1e6; --muted:#a9a6ae; --line:#3a3940;
+  --primary:#b7c4ff; --primary-c:#3b4672; --err:#f2b8b5;
+  --st-todo-bg:#33323a; --st-todo:#b0aeb6; --st-prog-bg:#1c2c52; --st-prog:#7fa5ff; --st-done-bg:#17301d; --st-done:#74d48a;
+  --p-low:#a9a6ae; --p-med:#ffa04d; --p-high:#ff7b72; --p-top:#ff6b62;
+  --stage:#0b0b0e;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:Roboto,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--stage);color:var(--text);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;min-height:100%}
+.bar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;font-size:13px;color:var(--muted);align-items:center}
+.bar button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;padding:5px 12px;cursor:pointer}
+.bar a{color:var(--primary)}
+.phone{width:380px;max-width:100%;height:760px;max-height:calc(100vh - 90px);min-height:560px;border-radius:38px;border:10px solid #000;
+  background:var(--bg);overflow:hidden;display:flex;flex-direction:column;position:relative;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+.status{height:30px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:12px;font-weight:500;flex:none}
+.top{height:56px;display:flex;align-items:center;gap:6px;padding:0 6px 0 16px;font-size:22px;flex:none}
+.top .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:40px;height:40px;border:0;background:none;color:var(--text);border-radius:50%;cursor:pointer;font-size:20px;display:grid;place-items:center}
+.ib:hover{background:var(--card)}
+.top .back{margin-left:-10px}
+.body{flex:1;overflow-y:auto;position:relative}
+.nav{height:76px;display:flex;background:var(--surface);flex:none;padding-top:8px}
+.nav button{flex:1;border:0;background:none;color:var(--muted);font:inherit;font-size:12px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}
+.nav .pill{width:60px;height:30px;border-radius:15px;display:grid;place-items:center;font-size:18px}
+.nav .on{color:var(--text)} .nav .on .pill{background:var(--primary-c)}
+.gesture{height:18px;flex:none;display:grid;place-items:center;background:var(--surface)}
+.gesture i{width:110px;height:4px;border-radius:2px;background:var(--text);opacity:.8}
+.menu{position:absolute;right:10px;top:84px;background:var(--card);border-radius:8px;padding:6px 0;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.35);z-index:5;font-size:15px}
+.menu div{padding:12px 16px}.menu .dis{color:var(--muted)}.menu .act{cursor:pointer}.menu .act:hover{background:var(--surface)}
+.search{margin:6px 14px 10px;border:1px solid var(--muted);border-radius:6px;display:flex;align-items:center;gap:12px;padding:0 14px;height:52px}
+.search input{flex:1;border:0;outline:0;background:none;color:var(--text);font:inherit;font-size:16px}
+.row{padding:11px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.row:hover{background:var(--surface)}
+.line1{display:flex;gap:7px;align-items:center;font-size:12px;margin-bottom:4px}
+.key{color:var(--primary);font-weight:600}
+.chip{border-radius:9px;padding:1px 8px;font-size:11px}
+.s-todo{background:var(--st-todo-bg);color:var(--st-todo)} .s-prog{background:var(--st-prog-bg);color:var(--st-prog)} .s-done{background:var(--st-done-bg);color:var(--st-done)}
+.p-low{background:var(--st-todo-bg);color:var(--p-low)} .p-medium{background:#ffa04d22;color:var(--p-med)} .p-high,.p-highest{background:#ff7b7222;color:var(--p-high)}
+.sum{font-size:15.5px;line-height:1.3}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.count{text-align:center;font-size:12px;color:var(--muted);padding:12px}
+.h{font-weight:600;font-size:14px;margin:14px 16px 6px}
+.pad{padding:8px 16px}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:6px 8px;padding:0 16px;font-size:14px}
+.kv span:nth-child(odd){color:var(--muted)}
+.cmt{background:var(--card);border-radius:12px;margin:8px 16px;padding:11px 14px}
+.cmt b{font-weight:500;font-size:13.5px}.cmt small{color:var(--muted);font-size:11px;margin-left:6px}
+.cmt p{margin:6px 0 0;font-size:15px;line-height:1.4}
+.compose{display:flex;gap:8px;align-items:center;padding:8px 10px;background:var(--bg);border-top:1px solid var(--line);flex:none}
+.compose input{flex:1;height:50px;border:1px solid var(--muted);border-radius:6px;background:none;color:var(--text);font:inherit;padding:0 14px;outline:0}
+.compose input:focus{border-color:var(--primary)}
+.tabs{display:flex;border-bottom:1px solid var(--line);padding:0 6px;position:sticky;top:0;background:var(--bg);z-index:2}
+.tabs button{border:0;background:none;color:var(--muted);font:inherit;font-size:14px;font-weight:500;padding:14px 14px;cursor:pointer;border-bottom:3px solid transparent}
+.tabs .on{color:var(--primary);border-bottom-color:var(--primary)}
+.card{background:var(--card);border-radius:12px;margin:8px 14px;padding:11px 13px;cursor:pointer}
+.inrow{display:flex;gap:8px}.inrow .grow{flex:1}
+.dot{width:7px;height:7px;border-radius:50%;background:#f28b82;margin-top:5px;flex:none}
+.link{color:var(--primary);background:none;border:0;font:inherit;font-weight:500;cursor:pointer}
+.toolbar{display:flex;justify-content:flex-end;padding:4px 10px}
+.pr{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.pr:hover{background:var(--surface)}
+.pr .nm{font-size:16px}.pr .k{font-size:13px;color:var(--muted)}
+.assist{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:7px 12px;margin:4px 14px 4px 0;font-size:13.5px;cursor:pointer}
+.login{padding:40px 24px;display:flex;flex-direction:column;gap:14px;height:100%;justify-content:center}
+.login h1{font-weight:400;font-size:32px;margin:0 0 6px}
+.fld{position:relative}
+.fld label{position:absolute;left:12px;top:-8px;background:var(--bg);padding:0 4px;font-size:12px;color:var(--muted)}
+.fld input{width:100%;height:54px;border:1px solid var(--muted);border-radius:6px;background:none;color:var(--text);font:inherit;font-size:16px;padding:0 14px;outline:0}
+.fld input:focus{border-color:var(--primary)}
+.btn{height:44px;border:0;border-radius:22px;background:var(--primary);color:var(--bg);font:inherit;font-weight:500;cursor:pointer}
+body:not(.dark) .btn{color:#fff}
+.err{color:var(--err);font-size:14px}
+.note{font-size:12px;color:var(--muted);text-align:center;max-width:380px}
+.toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:13px;z-index:9;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="bar">
+  <button id="theme">Dark mode</button>
+  <button id="reset">Sign out / restart</button>
+  <span>Mock with sample data. The real app is native (Kotlin, Jetpack Compose, Material 3).
+  <a href="https://github.com/larytet/tasklane/tree/main/android">Source</a></span>
+</div>
+<div class="phone" id="phone">
+  <div class="status"><span id="clock">9:41</span><span>▾ ◢ ▮</span></div>
+  <div id="app" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>
+  <div class="gesture"><i></i></div>
+  <div class="toast" id="toast"></div>
+</div>
+<div class="note">Sign in with any server, email and password. Try the "Mark all read" button, a comment, a board tab, or search.</div>
+
+<script>
+const DATA = {
+  user: {name: "Administrator"},
+  projects: [
+    {key:"SHOP", name:"Webshop", mirrored:false, boards:[{id:"b1", name:"SHOP board", kind:"kanban"}]},
+    {key:"OPS",  name:"Operations", mirrored:true,  boards:[{id:"b2", name:"Ops board", kind:"scrum"}]},
+    {key:"WEB",  name:"Marketing site", mirrored:false, boards:[]},
+  ],
+  issues: [
+    {key:"SHOP-6", summary:"Update privacy policy page", type:"Task",  status:"To Do",       cat:"todo", priority:"low",     assignee:"",          comments:0},
+    {key:"SHOP-4", summary:"Migrate cart service to Go",  type:"Task",  status:"To Do",       cat:"todo", priority:"medium",  assignee:"",          comments:0},
+    {key:"SHOP-1", summary:"Checkout fails on 3DS challenge", type:"Bug", status:"In Progress", cat:"prog", priority:"high", assignee:"",          comments:3},
+    {key:"SHOP-5", summary:"Refund email has wrong total", type:"Bug",  status:"Done",        cat:"done", priority:"highest", assignee:"",          comments:0},
+    {key:"SHOP-2", summary:"Add Apple Pay button",       type:"Story", status:"In Progress", cat:"prog", priority:"medium",  assignee:"Dana Levi", comments:0},
+    {key:"SHOP-3", summary:"Product images load slowly",  type:"Bug",  status:"To Do",       cat:"todo", priority:"low",     assignee:"",          comments:0},
+  ],
+  detail: {
+    "SHOP-1": {description:"Reported by support. See the linked thread for details and steps to reproduce.", reporter:"Administrator", assignee:"Unassigned", labels:"payments", estimate:"5", created:"Oct 21, 2026, 5:39 AM", updated:"Oct 21, 2026, 5:55 AM"},
+  },
+  comments: {
+    "SHOP-1": [
+      {a:"Administrator", t:"Oct 21, 2026, 5:39 AM", b:"Thanks Dana, taking a look now."},
+      {a:"Dana Levi", t:"Oct 21, 2026, 5:39 AM", b:"I can reproduce this on staging. The 3DS iframe never posts its result back."},
+      {a:"Administrator", t:"Oct 21, 2026, 5:39 AM", b:"Looks like the return URL is lost after the issuer redirect. Checking the session cookie."},
+    ],
+  },
+  inbox: [
+    {issue:"SHOP-1", who:"Dana Levi", summary:"Checkout fails on 3DS challenge", what:"Dana Levi commented", at:"Oct 21, 2026, 5:39 AM", unread:true},
+    {issue:"SHOP-2", who:"Dana Levi", summary:"Add Apple Pay button", what:"Dana Levi assigned you", at:"Oct 20, 2026, 4:12 PM", unread:true},
+    {issue:"SHOP-5", who:"Administrator", summary:"Refund email has wrong total", what:"Moved to Done", at:"Oct 19, 2026, 9:03 AM", unread:false},
+  ],
+};
+const $ = (s,r=document)=>r.querySelector(s);
+const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const st = {signedIn:false, stack:[{r:"issues"}], q:"", menu:false, boardTab:0, mfa:false, err:""};
+const ICON = {issues:"☰", projects:"📁", inbox:"🔔"};
+const TITLES = {issues:"Issues", projects:"Projects", inbox:"Inbox"};
+const cur = ()=>st.stack[st.stack.length-1];
+const isTab = r=>r in TITLES;
+const go = (r,p)=>{st.stack.push({r,...p});st.menu=false;draw()};
+const tab = r=>{st.stack=[{r}];st.menu=false;draw()};
+const back = ()=>{if(st.stack.length>1)st.stack.pop();draw()};
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove("show"),1800)}
+const chips = i=>`<span class="chip s-${i.cat}">${esc(i.status)}</span><span class="chip p-${i.priority}">${esc(i.priority)}</span>`;
+
+function login(){
+  return `<div class="login"><h1>Tasklane</h1>
+  ${st.mfa?`<div>Enter the code from your authenticator app</div><div class="fld"><label>Code</label><input id="code" inputmode="numeric" maxlength="6" autofocus></div>`
+  :`<div class="fld"><label>Server</label><input id="srv" placeholder="tasklane.example.com" value="tasklane.example.com"></div>
+    <div class="fld"><label>Email</label><input id="em" value="admin@example.com"></div>
+    <div class="fld"><label>Password</label><input id="pw" type="password" value="demo"></div>`}
+  ${st.err?`<div class="err">${esc(st.err)}</div>`:""}
+  <button class="btn" id="go">${st.mfa?"Verify":"Sign in"}</button>
+  ${st.mfa?`<button class="link" id="mback">Back</button>`:""}
+  <div class="sub" style="text-align:center">Try the code 123456 to see the second-factor step. Any 6 digits work.</div></div>`;
+}
+function issues(){
+  const q=st.q.toLowerCase();
+  const l=DATA.issues.filter(i=>!q||(i.key+" "+i.summary).toLowerCase().includes(q));
+  return `<div class="search"><span>🔍</span><input id="q" placeholder="Search issues" value="${esc(st.q)}"></div>`+
+  l.map(i=>`<div class="row" data-open="${i.key}"><div class="line1"><span class="key">${i.key}</span>${chips(i)}</div>
+    <div class="sum">${esc(i.summary)}</div><div class="sub">${i.type}${i.assignee?" · "+esc(i.assignee):""}${i.comments?` · ${i.comments} comments`:""}</div></div>`).join("")+
+  `<div class="count">${l.length} issues</div>`;
+}
+function issue(k){
+  const i=DATA.issues.find(x=>x.key===k), d=DATA.detail[k]||{description:"No description.",reporter:"Administrator",assignee:i.assignee||"Unassigned",labels:"-",estimate:"-",created:"Oct 21, 2026, 5:39 AM",updated:"Oct 21, 2026, 5:55 AM"};
+  const cs=DATA.comments[k]||[];
+  return `<div class="pad"><div class="line1" style="font-size:13px"><span class="key">${k}</span>${chips(i)}</div>
+  <div style="font-size:22px;line-height:1.25;margin:2px 0 10px">${esc(i.summary)}</div></div>
+  <div class="h" style="margin-top:0">Description</div><div class="pad" style="font-size:15px;line-height:1.45;padding-top:0">${esc(d.description)}</div>
+  <div class="h">Details</div><div class="kv"><span>Type</span><span>${i.type}</span><span>Assignee</span><span>${esc(d.assignee)}</span><span>Reporter</span><span>${d.reporter}</span><span>Labels</span><span>${esc(d.labels)}</span><span>Estimate</span><span>${d.estimate}</span><span>Created</span><span>${d.created}</span><span>Updated</span><span>${d.updated}</span></div>
+  <div class="h">Comments (${cs.length})</div>`+
+  cs.map(c=>`<div class="cmt"><b>${esc(c.a)}</b><small>${c.t}</small><p>${esc(c.b)}</p></div>`).join("")+`<div style="height:12px"></div>`;
+}
+function projects(){
+  return DATA.projects.map(p=>`<div class="pr" data-proj="${p.key}"><div style="flex:1"><div class="nm">${esc(p.name)}</div><div class="k">${p.key}</div></div>
+   ${p.mirrored?`<span class="chip" style="background:var(--primary-c);color:var(--text)">Jira mirror</span>`:""}</div>`).join("");
+}
+function project(k){
+  const p=DATA.projects.find(x=>x.key===k);
+  return `<div class="h">Boards</div><div class="pad">${p.boards.length?p.boards.map(b=>`<span class="assist" data-board="${b.id}">${esc(b.name)} (${b.kind})</span>`).join(""):`<div class="sub">No boards</div>`}</div>
+  <div class="h">Issues</div>`+DATA.issues.filter(i=>i.key.startsWith(k+"-")).map(i=>`<div class="row" data-open="${i.key}"><div class="line1"><span class="key">${i.key}</span>${chips(i)}</div><div class="sum">${esc(i.summary)}</div></div>`).join("")||"";
+}
+function board(){
+  const cols=[["To Do","todo"],["In Progress","prog"],["Done","done"]];
+  const col=cols[st.boardTab], cards=DATA.issues.filter(i=>i.cat===col[1]);
+  return `<div class="tabs">${cols.map((c,n)=>`<button class="${n===st.boardTab?"on":""}" data-bt="${n}">${c[0]} ${DATA.issues.filter(i=>i.cat===c[1]).length}</button>`).join("")}</div>`+
+  cards.map(i=>`<div class="card" data-open="${i.key}"><div class="line1"><span class="key">${i.key}</span><span class="chip p-${i.priority}">${i.priority}</span></div><div class="sum">${esc(i.summary)}</div></div>`).join("");
+}
+function inbox(){
+  return `<div class="toolbar"><button class="link" id="markall">Mark all read</button></div>`+
+  DATA.inbox.map(n=>`<div class="row" data-open="${n.issue}"><div class="inrow"><div class="grow"><div class="sub" style="margin:0">${n.issue} · ${esc(n.who)}</div>
+   <div style="font-weight:600;font-size:16px;margin:2px 0">${esc(n.summary)}</div><div style="font-size:14px">${esc(n.what)}</div><div class="sub">${n.at}</div></div>${n.unread?'<i class="dot"></i>':""}</div></div>`).join("");
+}
+function draw(){
+  const app=$("#app"), c=cur();
+  if(!st.signedIn){app.innerHTML=`<div class="body">${login()}</div>`;wireLogin();return}
+  const title=isTab(c.r)?TITLES[c.r]:c.r==="issue"?c.key:c.r==="project"?c.key:"Board";
+  let body=c.r==="issues"?issues():c.r==="projects"?projects():c.r==="inbox"?inbox():c.r==="issue"?issue(c.key):c.r==="project"?project(c.key):board();
+  const tabs=isTab(c.r)?`<div class="nav">${Object.keys(TITLES).map(t=>`<button class="${t===c.r?"on":""}" data-tab="${t}"><span class="pill">${ICON[t]}</span>${TITLES[t]}</button>`).join("")}</div>`:"";
+  const compose=c.r==="issue"?`<div class="compose"><input id="cm" placeholder="Add a comment"><button class="ib" id="send" style="color:var(--muted)">➤</button></div>`:"";
+  app.innerHTML=`<div class="top">${isTab(c.r)?"":'<button class="ib back" id="back">←</button>'}<span class="t">${esc(title)}</span><button class="ib" id="more">⋮</button></div>
+  <div class="body" id="scroll">${body}</div>${compose}${tabs}${st.menu?`<div class="menu"><div class="dis">Signed in as ${DATA.user.name}</div><div class="act" id="out">Sign out</div></div>`:""}`;
+  wire();
+}
+function wireLogin(){
+  const go1=()=>{
+    if(st.mfa){const v=($("#code").value||"").trim(); if(!/^\d{6}$/.test(v)){st.err="That code is not valid";draw();return} st.mfa=false;st.err="";st.signedIn=true;draw();return}
+    const pw=$("#pw").value; if(!$("#em").value||!pw){st.err="Enter your email and password";draw();return}
+    if($("#em").value.includes("mfa")){st.mfa=true;st.err="";draw();return}
+    st.err="";st.signedIn=true;draw();
+  };
+  $("#go").onclick=go1; app_enter(go1);
+  const b=$("#mback"); if(b)b.onclick=()=>{st.mfa=false;st.err="";draw()};
+}
+function app_enter(fn){document.querySelectorAll(".login input").forEach(i=>i.onkeydown=e=>{if(e.key==="Enter")fn()})}
+function wire(){
+  document.querySelectorAll("[data-open]").forEach(e=>e.onclick=()=>go("issue",{key:e.dataset.open}));
+  document.querySelectorAll("[data-proj]").forEach(e=>e.onclick=()=>go("project",{key:e.dataset.proj}));
+  document.querySelectorAll("[data-board]").forEach(e=>e.onclick=()=>{st.boardTab=0;go("board",{id:e.dataset.board})});
+  document.querySelectorAll("[data-tab]").forEach(e=>e.onclick=()=>tab(e.dataset.tab));
+  document.querySelectorAll("[data-bt]").forEach(e=>e.onclick=()=>{st.boardTab=+e.dataset.bt;draw()});
+  const b=$("#back"); if(b)b.onclick=back;
+  $("#more").onclick=()=>{st.menu=!st.menu;draw()};
+  const o=$("#out"); if(o)o.onclick=reset;
+  const q=$("#q"); if(q){q.oninput=()=>{st.q=q.value;const p=q.selectionStart;draw();const n=$("#q");n.focus();n.setSelectionRange(p,p)}}
+  const m=$("#markall"); if(m)m.onclick=()=>{DATA.inbox.forEach(n=>n.unread=false);toast("All notifications marked read");draw()};
+  const cm=$("#cm"); if(cm){
+    const send=()=>{const v=cm.value.trim();if(!v)return;(DATA.comments[cur().key]=DATA.comments[cur().key]||[]).push({a:DATA.user.name,t:"Just now",b:v});
+      const i=DATA.issues.find(x=>x.key===cur().key);i.comments=DATA.comments[cur().key].length;draw();const s=$("#scroll");s.scrollTop=s.scrollHeight};
+    $("#send").onclick=send; cm.onkeydown=e=>{if(e.key==="Enter")send()};
+  }
+}
+function reset(){st.signedIn=false;st.stack=[{r:"issues"}];st.q="";st.menu=false;st.mfa=false;st.err="";draw()}
+$("#reset").onclick=reset;
+$("#theme").onclick=()=>{const d=document.body.classList.toggle("dark");$("#theme").textContent=d?"Light mode":"Dark mode";try{localStorage.setItem("tl-mock-dark",d?"1":"0")}catch(e){}};
+try{const s=localStorage.getItem("tl-mock-dark"); if(s==="1"||(s===null&&matchMedia("(prefers-color-scheme: dark)").matches)){document.body.classList.add("dark");$("#theme").textContent="Light mode"}}catch(e){}
+$("#clock").textContent=new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+draw();
+</script>
+</body>
+</html>

@@ -235,7 +235,9 @@ and the rest of the backlog below.
 A native app (Kotlin, Jetpack Compose) for reading and commenting from a phone: sign in, search, open an issue, read a
 board column by column, check the inbox. It follows the device's day and night setting. See
 [android/README.md](android/README.md) for what it does and how to build it, or download the signed APK from
-[Releases](https://github.com/larytet/tasklane/releases) and install it on your phone.
+[Releases](https://github.com/larytet/tasklane/releases) and install it on your phone. To click through it without
+installing anything, open the **[interactive mock](https://larytet.github.io/tasklane/android/)** (sample data, light and
+dark; the source is [mock/android/](mock/android/index.html)).
 
 <table>
 <tr>
