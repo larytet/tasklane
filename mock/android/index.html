@@ -4,260 +4,301 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tasklane for Android: interactive mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
+/* Material 3 baseline colour schemes: what darkColorScheme() / lightColorScheme() give in the app */
 :root{
-  --bg:#fbfbfe; --surface:#f1f1f8; --card:#eceaf4; --text:#1b1b20; --muted:#5f5f6a; --line:#d8d8e2;
-  --primary:#2F5BEA; --primary-c:#dde3ff; --err:#b3261e;
-  --st-todo-bg:#e4e4ea; --st-todo:#55555f; --st-prog-bg:#dbe5ff; --st-prog:#1d4ed8; --st-done-bg:#d6f0dc; --st-done:#17692b;
-  --p-low:#55555f; --p-med:#a14a00; --p-high:#b3261e; --p-top:#b3261e;
+  --primary:#6750A4; --on-primary:#fff; --primary-c:#EADDFF; --on-primary-c:#21005D;
+  --secondary:#625B71; --secondary-c:#E8DEF8; --on-secondary-c:#1D192B; --tertiary:#7D5260;
+  --surface:#FEF7FF; --on-surface:#1D1B20; --surface-var:#E7E0EC; --on-surface-var:#49454F;
+  --outline:#79747E; --outline-var:#CAC4D0; --error:#B3261E;
+  --sc-low:#F7F2FA; --sc:#F3EDF7; --sc-high:#ECE6F0;
   --stage:#e9e9f0;
 }
 body.dark{
-  --bg:#121216; --surface:#1c1b20; --card:#2a292f; --text:#e5e1e6; --muted:#a9a6ae; --line:#3a3940;
-  --primary:#b7c4ff; --primary-c:#3b4672; --err:#f2b8b5;
-  --st-todo-bg:#33323a; --st-todo:#b0aeb6; --st-prog-bg:#1c2c52; --st-prog:#7fa5ff; --st-done-bg:#17301d; --st-done:#74d48a;
-  --p-low:#a9a6ae; --p-med:#ffa04d; --p-high:#ff7b72; --p-top:#ff6b62;
+  --primary:#D0BCFF; --on-primary:#381E72; --primary-c:#4F378B; --on-primary-c:#EADDFF;
+  --secondary:#CCC2DC; --secondary-c:#4A4458; --on-secondary-c:#E8DEF8; --tertiary:#EFB8C8;
+  --surface:#141218; --on-surface:#E6E0E9; --surface-var:#49454F; --on-surface-var:#CAC4D0;
+  --outline:#938F99; --outline-var:#49454F; --error:#F2B8B5;
+  --sc-low:#1D1B20; --sc:#211F26; --sc-high:#2B2930;
   --stage:#0b0b0e;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
-body{font-family:Roboto,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--stage);color:var(--text);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;min-height:100%}
-.bar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;font-size:13px;color:var(--muted);align-items:center}
-.bar select{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;padding:5px 10px}
-.bar button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:16px;padding:5px 12px;cursor:pointer}
+body{font-family:Roboto,system-ui,"Segoe UI",sans-serif;background:var(--stage);color:var(--on-surface);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:12px 16px;min-height:100%;
+  -webkit-font-smoothing:antialiased}
+.bar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;font-size:13px;color:var(--on-surface-var);align-items:center}
+.bar button,.bar select{font:inherit;border:1px solid var(--outline-var);background:var(--sc);color:var(--on-surface);border-radius:16px;padding:5px 12px;cursor:pointer}
 .bar a{color:var(--primary)}
+.note{margin:0;font-size:12px;color:var(--on-surface-var);text-align:center;max-width:420px}
+
+body.bare{padding:0;gap:0;justify-content:flex-start;align-items:flex-start;display:block}
+body.bare .bar,body.bare .note{display:none}
 .stage{position:relative;flex:none}
-.phone{position:absolute;left:0;top:0;transform-origin:0 0;border-radius:38px;border:10px solid #000;
-  background:var(--bg);overflow:hidden;display:flex;flex-direction:column;position:relative;box-shadow:0 20px 50px rgba(0,0,0,.35)}
-.status{height:30px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;font-size:12px;font-weight:500;flex:none}
-.top{height:56px;display:flex;align-items:center;gap:6px;padding:0 6px 0 16px;font-size:22px;flex:none}
-.top .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ib{width:40px;height:40px;border:0;background:none;color:var(--text);border-radius:50%;cursor:pointer;font-size:20px;display:grid;place-items:center}
-.ib:hover{background:var(--card)}
-.top .back{margin-left:-10px}
-.body{flex:1;overflow-y:auto;position:relative}
-.nav{height:76px;display:flex;background:var(--surface);flex:none;padding-top:8px}
-.nav button{flex:1;border:0;background:none;color:var(--muted);font:inherit;font-size:12px;font-weight:500;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer}
-.nav .pill{width:60px;height:30px;border-radius:15px;display:grid;place-items:center;font-size:18px}
-.nav .on{color:var(--text)} .nav .on .pill{background:var(--primary-c)}
-.gesture{height:18px;flex:none;display:grid;place-items:center;background:var(--surface)}
-.gesture i{width:110px;height:4px;border-radius:2px;background:var(--text);opacity:.8}
-.menu{position:absolute;right:10px;top:84px;background:var(--card);border-radius:8px;padding:6px 0;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.35);z-index:5;font-size:15px}
-.menu div{padding:12px 16px}.menu .dis{color:var(--muted)}.menu .act{cursor:pointer}.menu .act:hover{background:var(--surface)}
-.search{margin:6px 14px 10px;border:1px solid var(--muted);border-radius:6px;display:flex;align-items:center;gap:12px;padding:0 14px;height:52px}
-.search input{flex:1;border:0;outline:0;background:none;color:var(--text);font:inherit;font-size:16px}
-.row{padding:11px 16px;border-bottom:1px solid var(--line);cursor:pointer}
-.row:hover{background:var(--surface)}
-.line1{display:flex;gap:7px;align-items:center;font-size:12px;margin-bottom:4px}
-.key{color:var(--primary);font-weight:600}
-.chip{border-radius:9px;padding:1px 8px;font-size:11px}
-.s-todo{background:var(--st-todo-bg);color:var(--st-todo)} .s-prog{background:var(--st-prog-bg);color:var(--st-prog)} .s-done{background:var(--st-done-bg);color:var(--st-done)}
-.p-low{background:var(--st-todo-bg);color:var(--p-low)} .p-medium{background:#ffa04d22;color:var(--p-med)} .p-high,.p-highest{background:#ff7b7222;color:var(--p-high)}
-.sum{font-size:15.5px;line-height:1.3}
-.sub{font-size:12px;color:var(--muted);margin-top:2px}
-.count{text-align:center;font-size:12px;color:var(--muted);padding:12px}
-.h{font-weight:600;font-size:14px;margin:14px 16px 6px}
-.pad{padding:8px 16px}
-.kv{display:grid;grid-template-columns:96px 1fr;gap:6px 8px;padding:0 16px;font-size:14px}
-.kv span:nth-child(odd){color:var(--muted)}
-.cmt{background:var(--card);border-radius:12px;margin:8px 16px;padding:11px 14px}
-.cmt b{font-weight:500;font-size:13.5px}.cmt small{color:var(--muted);font-size:11px;margin-left:6px}
-.cmt p{margin:6px 0 0;font-size:15px;line-height:1.4}
-.compose{display:flex;gap:8px;align-items:center;padding:8px 10px;background:var(--bg);border-top:1px solid var(--line);flex:none}
-.compose input{flex:1;height:50px;border:1px solid var(--muted);border-radius:6px;background:none;color:var(--text);font:inherit;padding:0 14px;outline:0}
-.compose input:focus{border-color:var(--primary)}
-.tabs{display:flex;border-bottom:1px solid var(--line);padding:0 6px;position:sticky;top:0;background:var(--bg);z-index:2}
-.tabs button{border:0;background:none;color:var(--muted);font:inherit;font-size:14px;font-weight:500;padding:14px 14px;cursor:pointer;border-bottom:3px solid transparent}
-.tabs .on{color:var(--primary);border-bottom-color:var(--primary)}
-.card{background:var(--card);border-radius:12px;margin:8px 14px;padding:11px 13px;cursor:pointer}
-.inrow{display:flex;gap:8px}.inrow .grow{flex:1}
-.dot{width:7px;height:7px;border-radius:50%;background:#f28b82;margin-top:5px;flex:none}
-.link{color:var(--primary);background:none;border:0;font:inherit;font-weight:500;cursor:pointer}
-.toolbar{display:flex;justify-content:flex-end;padding:4px 10px}
-.pr{display:flex;align-items:center;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
-.pr:hover{background:var(--surface)}
-.pr .nm{font-size:16px}.pr .k{font-size:13px;color:var(--muted)}
-.assist{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:7px 12px;margin:4px 14px 4px 0;font-size:13.5px;cursor:pointer}
-.login{padding:40px 24px;display:flex;flex-direction:column;gap:14px;height:100%;justify-content:center}
-.login h1{font-weight:400;font-size:32px;margin:0 0 6px}
-.fld{position:relative}
-.fld label{position:absolute;left:12px;top:-8px;background:var(--bg);padding:0 4px;font-size:12px;color:var(--muted)}
-.fld input{width:100%;height:54px;border:1px solid var(--muted);border-radius:6px;background:none;color:var(--text);font:inherit;font-size:16px;padding:0 14px;outline:0}
-.fld input:focus{border-color:var(--primary)}
-.btn{height:44px;border:0;border-radius:22px;background:var(--primary);color:var(--bg);font:inherit;font-weight:500;cursor:pointer}
-body:not(.dark) .btn{color:#fff}
-.err{color:var(--err);font-size:14px}
-.note{margin:0;font-size:12px;color:var(--muted);text-align:center;max-width:380px}
-.body.fixed{display:flex;flex-direction:column;overflow:hidden}
+.phone{position:absolute;left:0;top:0;transform-origin:0 0;border-radius:44px;border:10px solid #000;background:var(--surface);overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+.scr{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--surface);color:var(--on-surface)}
+
+/* Material 3 type scale */
+.t-hl{font-size:32px;line-height:40px;font-weight:400}
+.t-tl{font-size:22px;line-height:28px;font-weight:400}
+.t-ts{font-size:14px;line-height:20px;font-weight:500;letter-spacing:.1px}
+.t-bl{font-size:16px;line-height:24px;font-weight:400;letter-spacing:.5px}
+.t-bm{font-size:14px;line-height:20px;font-weight:400;letter-spacing:.25px}
+.t-bs{font-size:12px;line-height:16px;font-weight:400;letter-spacing:.4px}
+.t-ll{font-size:14px;line-height:20px;font-weight:500;letter-spacing:.1px}
+.t-lm{font-size:12px;line-height:16px;font-weight:500;letter-spacing:.5px}
+.t-lsm{font-size:11px;line-height:16px;font-weight:500;letter-spacing:.5px}
+.muted{color:var(--on-surface-var)}
+.key{color:var(--primary)}
+
+.sb{flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 28px;font-size:16px;font-weight:500}
+.sb svg{width:20px;height:20px;fill:currentColor;margin-left:4px;vertical-align:middle}
+.tb{flex:none;height:64px;display:flex;align-items:center;padding:0 4px 0 16px}
+.tb.back{padding-left:4px}
+.tb .title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb.back .title{padding-left:12px}
+.ib{width:48px;height:48px;border:0;background:none;color:var(--on-surface-var);border-radius:50%;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
+.tb .ib{color:var(--on-surface)}
+.ib:hover{background:color-mix(in srgb,var(--on-surface) 8%,transparent)}
+svg.i{width:24px;height:24px;fill:currentColor}
+.content{flex:1;min-height:0;position:relative;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+.content::-webkit-scrollbar{display:none}
+.content.fixed{display:flex;flex-direction:column;overflow:hidden}
+
+/* bottom: navigation bar (80dp) + gesture inset */
+.nav{flex:none;background:var(--sc);display:flex;padding-bottom:var(--gi)}
+.nav .item{flex:1;height:80px;border:0;background:none;color:var(--on-surface-var);font:inherit;display:flex;flex-direction:column;align-items:center;padding-top:12px;cursor:pointer}
+.nav .pill{width:64px;height:32px;border-radius:16px;display:grid;place-items:center;margin-bottom:4px;color:var(--on-surface-var)}
+.nav .on{color:var(--on-surface)}
+.nav .on .pill{background:var(--secondary-c);color:var(--on-secondary-c)}
+.gi{flex:none;height:var(--gi);position:relative}
+.gi:after{content:"";position:absolute;left:50%;bottom:8px;width:108px;height:4px;margin-left:-54px;border-radius:2px;background:var(--on-surface)}
+.nav{position:relative}
+.nav:after{content:"";position:absolute;left:50%;bottom:8px;width:108px;height:4px;margin-left:-54px;border-radius:2px;background:var(--on-surface)}
+
+/* fields */
+.field{position:relative;height:56px}
+.field .box{position:absolute;inset:0;border:1px solid var(--outline);border-radius:4px;display:flex;align-items:center;padding:0 16px;gap:12px}
+.field:focus-within .box{border:2px solid var(--primary);padding:0 15px}
+.field input{flex:1;min-width:0;border:0;outline:0;background:none;color:var(--on-surface);font:inherit;font-size:16px;letter-spacing:.5px;padding:0;height:100%}
+.field input::placeholder{color:var(--on-surface-var)}
+.field .lead{color:var(--on-surface-var);margin-left:-4px}
+.field label{position:absolute;left:12px;top:-8px;background:var(--surface);padding:0 4px;font-size:12px;line-height:16px;color:var(--on-surface-var)}
+.field:focus-within label{color:var(--primary)}
+.searchrow{flex:none;display:flex;align-items:center;padding:8px 4px 8px 12px}
+.searchrow .field{flex:1}
+.ib.on{color:var(--primary)}
+
+/* chips: status category / priority, as in Common.kt (fixed colours, 15% fill) */
+.chip{display:inline-block;border-radius:8px;padding:2px 8px;font-size:11px;line-height:16px;font-weight:500;letter-spacing:.5px;white-space:nowrap}
+.c-todo{--c:#616161}.c-in_progress{--c:#1565C0}.c-done{--c:#2E7D32}
+.p-low{--c:#616161}.p-medium{--c:#EF6C00}.p-high,.p-highest{--c:#C62828}
+.chip{color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent)}
+.chip.sec{--c:var(--secondary)}
+hr,.div{border:0;height:1px;background:var(--outline-var);margin:0}
+
+/* issue rows */
+.irow{padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--outline-var)}
+.irow:hover{background:color-mix(in srgb,var(--on-surface) 6%,transparent)}
+.irow .l1{display:flex;gap:8px;align-items:center}
+.irow .sum{margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* lens */
 .lens{user-select:none;-webkit-user-select:none;flex:1;min-height:0;position:relative;overflow:hidden;touch-action:none}
-.lr{border-bottom:1px solid var(--line);padding:0 16px;overflow:hidden;display:flex;flex-direction:column;justify-content:center;cursor:pointer;transition:height .07s linear;background:var(--bg)}
-.lr .l1{display:flex;gap:7px;align-items:center;font-size:12px;margin-bottom:2px;line-height:1.2}
-.lr .sum{font-size:14.5px;line-height:1.2}
-.lr .sub{font-size:12px;color:var(--muted);margin-top:2px}
-.lr.inlens{background:var(--primary-c);box-shadow:inset 3px 0 0 var(--primary)}
-.lv1,.lv2{flex-direction:row;align-items:center;justify-content:flex-start;gap:8px}
-.lv1 .l1,.lv2 .l1{margin:0;flex:none}
-.lv1 .chip,.lv1 .sub{display:none}
-.lv2 .sub,.lv2 .chip.pc{display:none}
-.lv1 .sum,.lv2 .sum{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1}
-.lv2 .sum{font-size:13.5px}
-.lv0{padding:0;border-bottom:1px solid var(--bg);border-left:4px solid var(--st-todo);background:var(--surface)}
+.lr{overflow:hidden;display:flex;flex-direction:column;justify-content:center;padding:0 16px;cursor:pointer;background:var(--surface);transition:height .07s linear}
+.lr.inlens{background:color-mix(in srgb,var(--primary-c) 35%,var(--surface))}
+.lr .l1{display:flex;gap:8px;align-items:center}
+.lr .sum{margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lr .sum.two{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lv2,.lv1{flex-direction:row;align-items:center;justify-content:flex-start;gap:8px}
+.lv2 .l1,.lv1 .l1{flex:none}
+.lv2 .sum,.lv1 .sum{margin:0;font-size:14px;line-height:20px;letter-spacing:.25px;white-space:nowrap}
+.lv2 .meta,.lv2 .chip.pc,.lv1 .meta,.lv1 .chip{display:none}
+.lv1 .key{letter-spacing:0;font-weight:400}
+.lv1 .sum{line-height:1.1;letter-spacing:0}
+.lv0{padding:0;border-bottom:1px solid var(--surface);background:color-mix(in srgb,var(--c) 55%,transparent)}
 .lv0 *{display:none}
-.lv0.c-prog{border-left-color:var(--st-prog)}.lv0.c-done{border-left-color:var(--st-done)}
-.lcount{flex:none;text-align:center;font-size:11px;color:var(--muted);padding:4px}
-.toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:13px;z-index:9;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+.lcount{flex:none;text-align:center;padding:6px;color:var(--on-surface-var)}
+
+/* issue screen */
+.pad{padding:16px;display:flex;flex-direction:column;gap:12px}
+.sec{display:flex;flex-direction:column;gap:4px}
+.kv{display:flex}.kv>span:first-child{width:96px;flex:none;color:var(--on-surface-var)}
+.fields{display:flex;flex-direction:column;gap:4px}
+.cmt{border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:4px;background:color-mix(in srgb,var(--surface-var) 40%,transparent)}
+.cmt .h{display:flex;gap:8px;align-items:center}
+.cbar{flex:none;background:color-mix(in srgb,var(--primary) 8.2%,var(--surface));padding:8px;display:flex;align-items:flex-end;gap:0}
+.cbar .field{flex:1}
+.cbar .ib{color:color-mix(in srgb,var(--on-surface) 38%,transparent)}
+.cbar .ib.go{color:var(--on-surface-var)}
+/* list items (projects, inbox) */
+.li{display:flex;align-items:center;gap:16px;padding:8px 16px;min-height:72px;cursor:pointer}
+.li:hover{background:color-mix(in srgb,var(--on-surface) 6%,transparent)}
+.li.three{align-items:center;padding:12px 16px}
+.li .grow{flex:1;min-width:0}
+.badge{width:6px;height:6px;border-radius:3px;background:var(--error);align-self:flex-start;margin-top:4px}
+.tbtn{border:0;background:none;color:var(--primary);font:inherit;font-weight:500;font-size:14px;letter-spacing:.1px;height:40px;margin:4px 0;padding:0 12px;border-radius:20px;cursor:pointer}
+.tbtn:hover{background:color-mix(in srgb,var(--primary) 8%,transparent)}
+.assist{display:inline-flex;align-items:center;height:32px;padding:0 13px;border:1px solid var(--outline);border-radius:8px;color:var(--on-surface);margin-right:8px;cursor:pointer}
+/* board */
+.tabs{display:flex;padding:0 8px;position:relative;border-bottom:1px solid var(--outline-var);overflow-x:auto;scrollbar-width:none}
+.tabs button{border:0;background:none;color:var(--on-surface-var);font:inherit;font-size:14px;font-weight:500;letter-spacing:.1px;height:48px;min-width:90px;padding:0 16px;cursor:pointer;position:relative;white-space:nowrap}
+.tabs .on{color:var(--primary)}
+.tabs .on:after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--primary)}
+.cards{padding:12px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--sc-low);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:4px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.2),0 1px 3px 1px rgba(0,0,0,.1)}
+.card .l1{display:flex;gap:8px}
+/* login */
+.login{flex:1;padding:24px;display:flex;flex-direction:column;justify-content:center;align-items:stretch;text-align:center}
+.login .t-hl{margin-bottom:24px}
+.login .field{margin-top:8px}.login .field:first-of-type{margin-top:0}
+.btn{margin-top:16px;height:40px;border:0;border-radius:20px;background:var(--primary);color:var(--on-primary);font:inherit;font-weight:500;font-size:14px;letter-spacing:.1px;cursor:pointer}
+.err{color:var(--error);margin-top:8px;text-align:left}
+.menu{position:absolute;right:8px;top:calc(var(--sbh) + 56px);background:var(--sc);border-radius:4px;padding:8px 0;min-width:112px;box-shadow:0 2px 6px 2px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.3);z-index:5}
+.menu div{height:48px;display:flex;align-items:center;padding:0 12px;white-space:nowrap}
+.menu .dis{color:color-mix(in srgb,var(--on-surface) 38%,transparent)}.menu .act{cursor:pointer}
+.menu .act:hover{background:color-mix(in srgb,var(--on-surface) 8%,transparent)}
+.toast{position:absolute;left:50%;bottom:110px;transform:translateX(-50%);background:var(--on-surface);color:var(--surface);padding:9px 16px;border-radius:4px;font-size:14px;z-index:9;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
 </style>
 </head>
 <body>
 <div class="bar">
   <button id="theme">Dark mode</button>
-  <select id="dev" title="Screen size (dp)"><option value="360x640">Compact 360×640</option><option value="412x915">Pixel 412×915</option><option value="411x960" selected>4K phone 411×960 (1644×3840 px)</option></select>
+  <select id="dev" title="Screen size (dp)"><option value="360x640x24">Compact 360×640</option><option value="411x914x49" selected>Pixel 6 411×914</option><option value="411x960x38">4K phone 411×960 (1644×3840 px)</option></select>
   <button id="lensbtn">Lens: on</button>
   <button id="reset">Sign out / restart</button>
   <span>Mock with sample data. The real app is native (Kotlin, Jetpack Compose, Material 3).
   <a href="https://github.com/larytet/tasklane/tree/main/android">Source</a></span>
 </div>
-<div class="stage" id="stage"><div class="phone" id="phone">
-  <div class="status"><span id="clock">9:41</span><span>▾ ◢ ▮</span></div>
-  <div id="app" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>
-  <div class="gesture"><i></i></div>
-  <div class="toast" id="toast"></div>
-</div></div>
-<div class="note" style="margin-top:2px">Sign in with any server, email and password. Try the "Mark all read" button, a comment, a board tab, or search.</div>
+<div class="stage" id="stage"><div class="phone" id="phone"><div class="scr" id="scr"></div></div></div>
+<div class="note">Sign in with any server, email and password. Try the lens (move or touch outside the highlight to slide it), "Mark all read", a comment, a board tab, or search.</div>
 
 <script>
-const DATA = {
-  user: {name: "Administrator"},
-  projects: [
-    {key:"SHOP", name:"Webshop", mirrored:false, boards:[{id:"b1", name:"SHOP board", kind:"kanban"}]},
-    {key:"OPS",  name:"Operations", mirrored:true,  boards:[{id:"b2", name:"Ops board", kind:"scrum"}]},
-    {key:"WEB",  name:"Marketing site", mirrored:false, boards:[]},
-  ],
-  issues: [
-    {key:"SHOP-6", summary:"Update privacy policy page", type:"Task",  status:"To Do",       cat:"todo", priority:"low",     assignee:"",          comments:0},
-    {key:"SHOP-4", summary:"Migrate cart service to Go",  type:"Task",  status:"To Do",       cat:"todo", priority:"medium",  assignee:"",          comments:0},
-    {key:"SHOP-1", summary:"Checkout fails on 3DS challenge", type:"Bug", status:"In Progress", cat:"prog", priority:"high", assignee:"",          comments:3},
-    {key:"SHOP-5", summary:"Refund email has wrong total", type:"Bug",  status:"Done",        cat:"done", priority:"highest", assignee:"",          comments:0},
-    {key:"SHOP-2", summary:"Add Apple Pay button",       type:"Story", status:"In Progress", cat:"prog", priority:"medium",  assignee:"Dana Levi", comments:0},
-    {key:"SHOP-3", summary:"Product images load slowly",  type:"Bug",  status:"To Do",       cat:"todo", priority:"low",     assignee:"",          comments:0},
-  ],
-  detail: {
-    "SHOP-1": {description:"Reported by support. See the linked thread for details and steps to reproduce.", reporter:"Administrator", assignee:"Unassigned", labels:"payments", estimate:"5", created:"Oct 21, 2026, 5:39 AM", updated:"Oct 21, 2026, 5:55 AM"},
-  },
-  comments: {
-    "SHOP-1": [
-      {a:"Administrator", t:"Oct 21, 2026, 5:39 AM", b:"Thanks Dana, taking a look now."},
-      {a:"Dana Levi", t:"Oct 21, 2026, 5:39 AM", b:"I can reproduce this on staging. The 3DS iframe never posts its result back."},
-      {a:"Administrator", t:"Oct 21, 2026, 5:39 AM", b:"Looks like the return URL is lost after the issuer redirect. Checking the session cookie."},
-    ],
-  },
-  inbox: [
-    {issue:"SHOP-1", who:"Dana Levi", summary:"Checkout fails on 3DS challenge", what:"Dana Levi commented", at:"Oct 21, 2026, 5:39 AM", unread:true},
-    {issue:"SHOP-2", who:"Dana Levi", summary:"Add Apple Pay button", what:"Dana Levi assigned you", at:"Oct 20, 2026, 4:12 PM", unread:true},
-    {issue:"SHOP-5", who:"Administrator", summary:"Refund email has wrong total", what:"Moved to Done", at:"Oct 19, 2026, 9:03 AM", unread:false},
-  ],
+/* Same data as the stand-in server used to take the reference screenshots of the real app. */
+const A=["Fix","Investigate","Add","Refactor","Document","Upgrade","Remove","Speed up","Cover with tests","Monitor"];
+const B=["checkout retry logic","coupon endpoint rate limit","order page dark mode","payment SDK","guest cart merge","Google Pay button","invoice PDF layout","catalog search","wishlist share link","German email templates","stock count rounding","address autocomplete","webhook retry queue","cookie banner copy","gift card balance check","return label generator","sitemap generation","mobile menu overlap"];
+const CATS=[["To Do","todo"],["In Progress","in_progress"],["Done","done"]], PR=["low","medium","high","medium","low","highest"], WHO=["","","Dana Levi","","Sam Cohen","Noa Bar"];
+const ISS=[];
+for(let n=0;n<58;n++){const c=CATS[(n*7+n%4)%3], bug=n%5===0||n%5===3;
+  ISS.push({key:"SHOP-"+(58-n),summary:bug?"Bug: "+B[(n*7)%18]:A[(n*3)%10]+" "+B[(n*7+n)%18],type:bug?"Bug":"Task",status:c[0],cat:c[1],priority:PR[(n*5)%6],assignee:WHO[(n*5)%6],comments:n%6===0?n%4+1:0})}
+Object.assign(ISS[57],{summary:"Checkout fails on 3DS challenge",type:"Bug",status:"In Progress",cat:"in_progress",priority:"high",assignee:"",comments:3});
+Object.assign(ISS[56],{summary:"Add Apple Pay button",type:"Story",status:"In Progress",cat:"in_progress",priority:"medium",assignee:"Dana Levi",comments:0});
+Object.assign(ISS[53],{summary:"Refund email has wrong total",type:"Bug",status:"Done",cat:"done",priority:"highest",assignee:"",comments:0});
+const DATA={
+  user:"Administrator",
+  projects:[{key:"SHOP",name:"Webshop",boards:[{id:"b1",name:"Webshop board",kind:"kanban"}]},{key:"OPS",name:"Operations",mirrored:true,boards:[]},{key:"WEB",name:"Marketing site",boards:[]}],
+  comments:{"SHOP-1":[
+    {a:"Administrator",t:"Oct 21, 2026, 8:39 AM",b:"Thanks Dana, taking a look now."},
+    {a:"Dana Levi",t:"Oct 21, 2026, 8:39 AM",b:"I can reproduce this on staging. The 3DS iframe never posts its result back."},
+    {a:"Administrator",t:"Oct 21, 2026, 8:39 AM",b:"Looks like the return URL is lost after the issuer redirect. Checking the session cookie."}]},
+  inbox:[
+    {issue:"SHOP-1",who:"Dana Levi",summary:"Checkout fails on 3DS challenge",what:"Dana Levi commented",at:"Oct 21, 2026, 8:39 AM",unread:true},
+    {issue:"SHOP-2",who:"Dana Levi",summary:"Add Apple Pay button",what:"Dana Levi assigned you",at:"Oct 20, 2026, 7:12 PM",unread:true},
+    {issue:"SHOP-5",who:"Administrator",summary:"Refund email has wrong total",what:"Moved to Done",at:"Oct 19, 2026, 12:03 PM",unread:false}],
 };
-(function(){
-  const A=["Fix","Investigate","Add","Refactor","Document","Upgrade","Remove","Speed up","Cover with tests","Monitor"];
-  const B=["checkout retry logic","coupon endpoint rate limit","order page dark mode","payment SDK","guest cart merge","Google Pay button","invoice PDF layout","catalog search","wishlist share link","German email templates","stock count rounding","address autocomplete","webhook retry queue","cookie banner copy","gift card balance check","return label generator","sitemap generation","mobile menu overlap","tax rounding on refunds","session cookie lifetime","image CDN cache headers","product import job","admin audit export","password reset email","order status polling","shipping rate lookup","loyalty points display","3DS fallback flow","currency switcher","review moderation queue"];
-  const ty=["Bug","Task","Task","Bug","Task"], ca=[["To Do","todo"],["In Progress","prog"],["Done","done"]], pr=["low","medium","high","medium","low","highest"];
-  const who=["","","Dana Levi","","Sam Cohen","Noa Bar"];
-  for(let n=0;n<52;n++){
-    const c=ca[(n*7+n%4)%3], bug=ty[n%5]==="Bug";
-    DATA.issues.push({key:"SHOP-"+(7+n),summary:(bug?"":A[(n*3)%A.length]+" ")+(bug?"Bug: "+B[(n*7)%B.length]:B[(n*7+n)%B.length]),type:ty[n%5],status:c[0],cat:c[1],priority:pr[(n*5)%6],assignee:who[(n*5)%6],comments:n%6===0?n%4+1:0});
-  }
-  DATA.issues.sort((a,b)=>+b.key.split("-")[1]-+a.key.split("-")[1]);
-})();
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const IC={
+  menu:'M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z',
+  back:'M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z',
+  search:'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
+  zoom:'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm2.5-4h-2v2H9v-2H7V9h2V7h1v2h2v1z',
+  issues:'M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z',
+  projects:'M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z',
+  inbox:'M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z',
+  send:'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z',
+};
+const svg=(n,c="i")=>`<svg class="${c}" viewBox="0 0 24 24"><path d="${IC[n]}"/></svg>`;
+const st={lens:true,lensC:4,signedIn:false,stack:[{r:"issues"}],q:"",menu:false,boardTab:0,mfa:false,err:"",sb:48,gi:24};
+const TABS={issues:"Issues",projects:"Projects",inbox:"Inbox"};
+const cur=()=>st.stack[st.stack.length-1], isTab=r=>r in TABS;
+const go=(r,p)=>{st.stack.push({r,...p});st.menu=false;draw()};
+const tab=r=>{st.stack=[{r}];st.menu=false;draw()};
+const back=()=>{if(st.stack.length>1)st.stack.pop();draw()};
+function toast(m){const t=$("#toast")||Object.assign(document.createElement("div"),{id:"toast",className:"toast"});if(!t.parentNode)$("#scr").appendChild(t);t.textContent=m;t.classList.add("show");clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove("show"),1800)}
+const chip=(t,c)=>t?`<span class="chip ${c}">${esc(t)}</span>`:"";
+const meta=i=>[i.type,i.assignee,i.comments?i.comments+" comments":""].filter(Boolean).join(" · ");
 
-const $ = (s,r=document)=>r.querySelector(s);
-const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const st = {lens:true, lensC:6, signedIn:false, stack:[{r:"issues"}], q:"", menu:false, boardTab:0, mfa:false, err:""};
-const ICON = {issues:"☰", projects:"📁", inbox:"🔔"};
-const TITLES = {issues:"Issues", projects:"Projects", inbox:"Inbox"};
-const cur = ()=>st.stack[st.stack.length-1];
-const isTab = r=>r in TITLES;
-const go = (r,p)=>{st.stack.push({r,...p});st.menu=false;draw()};
-const tab = r=>{st.stack=[{r}];st.menu=false;draw()};
-const back = ()=>{if(st.stack.length>1)st.stack.pop();draw()};
-function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove("show"),1800)}
-const chips = i=>`<span class="chip s-${i.cat}">${esc(i.status)}</span><span class="chip p-${i.priority}">${esc(i.priority)}</span>`;
-
-function login(){
-  return `<div class="login"><h1>Tasklane</h1>
-  ${st.mfa?`<div>Enter the code from your authenticator app</div><div class="fld"><label>Code</label><input id="code" inputmode="numeric" maxlength="6" autofocus></div>`
-  :`<div class="fld"><label>Server</label><input id="srv" placeholder="tasklane.example.com" value="tasklane.example.com"></div>
-    <div class="fld"><label>Email</label><input id="em" value="admin@example.com"></div>
-    <div class="fld"><label>Password</label><input id="pw" type="password" value="demo"></div>`}
-  ${st.err?`<div class="err">${esc(st.err)}</div>`:""}
+function loginView(){
+  return `<div class="login"><div class="t-hl">Tasklane</div>
+  ${st.mfa?`<div class="t-bl" style="text-align:left;margin-bottom:8px">Enter the code from your authenticator app</div><div class="field"><div class="box"><input id="code" inputmode="numeric" maxlength="6" autofocus></div><label>Code</label></div>`
+  :`<div class="field"><div class="box"><input id="srv" placeholder="tasklane.example.com" value="tasklane.example.com"></div><label>Server</label></div>
+    <div class="field"><div class="box"><input id="em" value="admin@example.com"></div><label>Email</label></div>
+    <div class="field"><div class="box"><input id="pw" type="password" value="demo"></div><label>Password</label></div>`}
+  ${st.err?`<div class="err t-bl">${esc(st.err)}</div>`:""}
   <button class="btn" id="go">${st.mfa?"Verify":"Sign in"}</button>
-  ${st.mfa?`<button class="link" id="mback">Back</button>`:""}
-  <div class="sub" style="text-align:center">Try the code 123456 to see the second-factor step. Any 6 digits work.</div></div>`;
+  ${st.mfa?`<button class="tbtn" id="mback" style="align-self:center;margin-top:4px">Back</button>`:""}
+  <div class="t-bs muted" style="margin-top:16px">Any server, email and password work. An email with "mfa" in it asks for a code (any 6 digits).</div></div>`;
 }
-function issues(){
-  const q=st.q.toLowerCase();
-  const l=DATA.issues.filter(i=>!q||(i.key+" "+i.summary).toLowerCase().includes(q));
-  if(st.lens)return `<div class="search"><span>🔍</span><input id="q" placeholder="Search issues" value="${esc(st.q)}"></div>
-  <div class="lens" id="lens">`+l.map((i,n)=>`<div class="lr c-${i.cat}" data-key="${i.key}" data-i="${n}" data-c="c-${i.cat}"><div class="l1"><span class="key">${i.key}</span><span class="chip s-${i.cat}">${esc(i.status)}</span><span class="chip pc p-${i.priority}">${esc(i.priority)}</span></div><div class="sum">${esc(i.summary)}</div><div class="sub">${i.type}${i.assignee?" · "+esc(i.assignee):""}${i.comments?` · ${i.comments} comments`:""}</div></div>`).join("")+
-  `</div><div class="lcount">${l.length} issues · move or touch outside the highlight to slide the lens, click inside it to open</div>`;
-  return `<div class="search"><span>🔍</span><input id="q" placeholder="Search issues" value="${esc(st.q)}"></div>`+
-  l.map(i=>`<div class="row" data-open="${i.key}"><div class="line1"><span class="key">${i.key}</span>${chips(i)}</div>
-    <div class="sum">${esc(i.summary)}</div><div class="sub">${i.type}${i.assignee?" · "+esc(i.assignee):""}${i.comments?` · ${i.comments} comments`:""}</div></div>`).join("")+
-  `<div class="count">${l.length} issues</div>`;
+function searchRow(){
+  return `<div class="searchrow"><div class="field"><div class="box"><span class="lead">${svg("search")}</span><input id="q" placeholder="Search issues" value="${esc(st.q)}"></div></div>
+  <button class="ib ${st.lens?"on":""}" id="lenstoggle" title="Lens">${svg("zoom")}</button></div>`;
 }
-function issue(k){
-  const i=DATA.issues.find(x=>x.key===k), d=DATA.detail[k]||{description:"No description.",reporter:"Administrator",assignee:i.assignee||"Unassigned",labels:"-",estimate:"-",created:"Oct 21, 2026, 5:39 AM",updated:"Oct 21, 2026, 5:55 AM"};
-  const cs=DATA.comments[k]||[];
-  return `<div class="pad"><div class="line1" style="font-size:13px"><span class="key">${k}</span>${chips(i)}</div>
-  <div style="font-size:22px;line-height:1.25;margin:2px 0 10px">${esc(i.summary)}</div></div>
-  <div class="h" style="margin-top:0">Description</div><div class="pad" style="font-size:15px;line-height:1.45;padding-top:0">${esc(d.description)}</div>
-  <div class="h">Details</div><div class="kv"><span>Type</span><span>${i.type}</span><span>Assignee</span><span>${esc(d.assignee)}</span><span>Reporter</span><span>${d.reporter}</span><span>Labels</span><span>${esc(d.labels)}</span><span>Estimate</span><span>${d.estimate}</span><span>Created</span><span>${d.created}</span><span>Updated</span><span>${d.updated}</span></div>
-  <div class="h">Comments (${cs.length})</div>`+
-  cs.map(c=>`<div class="cmt"><b>${esc(c.a)}</b><small>${c.t}</small><p>${esc(c.b)}</p></div>`).join("")+`<div style="height:12px"></div>`;
+function issuesView(){
+  const q=st.q.toLowerCase(), l=ISS.filter(i=>!q||i.summary.toLowerCase().includes(q));
+  if(!l.length)return searchRow()+`<div style="flex:1;display:grid;place-items:center;padding:24px" class="muted t-bl">No issues</div>`;
+  if(st.lens)return searchRow()+`<div class="lens" id="lens">`+l.map((i,n)=>`<div class="lr c-${i.cat}" data-key="${i.key}" data-i="${n}"><div class="l1"><span class="key t-lm">${i.key}</span>${chip(i.status,"c-"+i.cat)}${chip(i.priority,"pc p-"+i.priority)}</div><div class="sum t-bl">${esc(i.summary)}</div><div class="meta t-bs muted">${esc(meta(i))}</div></div>`).join("")+
+    `</div><div class="lcount t-lsm">${l.length} issues, touch outside the highlight to slide the lens</div>`;
+  return searchRow()+`<div style="flex:1;overflow-y:auto;min-height:0;scrollbar-width:none">`+l.map(i=>`<div class="irow" data-open="${i.key}"><div class="l1"><span class="key t-lm">${i.key}</span>${chip(i.status,"c-"+i.cat)}${chip(i.priority,"p-"+i.priority)}</div><div class="sum t-bl">${esc(i.summary)}</div>${meta(i)?`<div class="t-bs muted">${esc(meta(i))}</div>`:""}</div>`).join("")+`<div class="lcount t-lsm">${l.length} issues</div></div>`;
 }
-function projects(){
-  return DATA.projects.map(p=>`<div class="pr" data-proj="${p.key}"><div style="flex:1"><div class="nm">${esc(p.name)}</div><div class="k">${p.key}</div></div>
-   ${p.mirrored?`<span class="chip" style="background:var(--primary-c);color:var(--text)">Jira mirror</span>`:""}</div>`).join("");
+function issueView(k){
+  const i=ISS.find(x=>x.key===k), cs=DATA.comments[k]||[];
+  return `<div class="pad"><div style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;gap:8px;align-items:center"><span class="key t-ll">${k}</span>${chip(i.status,"c-"+i.cat)}${chip(i.priority,"p-"+i.priority)}</div><div class="t-tl">${esc(i.summary)}</div></div>
+  <div class="sec"><div class="t-ts">Description</div><div class="t-bl">Reported by support. See the linked thread for details and steps to reproduce.</div></div>
+  <div class="sec"><div class="t-ts">Details</div><div class="fields t-bm">
+    <div class="kv"><span>Type</span><span>${i.type}</span></div><div class="kv"><span>Assignee</span><span>${esc(i.assignee||"Unassigned")}</span></div><div class="kv"><span>Reporter</span><span>Administrator</span></div>
+    <div class="kv"><span>Labels</span><span>payments</span></div><div class="kv"><span>Estimate</span><span>5</span></div><div class="kv"><span>Created</span><span>Oct 21, 2026, 8:39 AM</span></div><div class="kv"><span>Updated</span><span>Oct 21, 2026, 8:55 AM</span></div></div></div>
+  <div class="t-ts">Comments (${cs.length})</div>`+(cs.length?"":`<div class="muted t-bl">No comments yet</div>`)+
+  cs.map(c=>`<div class="cmt"><div class="h"><span class="t-ll">${esc(c.a)}</span><span class="t-lsm muted">${c.t}</span></div><div class="t-bl">${esc(c.b)}</div></div>`).join("")+`</div>`;
 }
-function project(k){
+function projectsView(){
+  return DATA.projects.map(p=>`<div class="li" data-proj="${p.key}"><div class="grow"><div class="t-bl">${esc(p.name)}</div><div class="t-bm muted">${p.key}</div></div>${p.mirrored?chip("Jira mirror","sec"):""}</div><div class="div"></div>`).join("");
+}
+function projectView(k){
   const p=DATA.projects.find(x=>x.key===k);
-  return `<div class="h">Boards</div><div class="pad">${p.boards.length?p.boards.map(b=>`<span class="assist" data-board="${b.id}">${esc(b.name)} (${b.kind})</span>`).join(""):`<div class="sub">No boards</div>`}</div>
-  <div class="h">Issues</div>`+DATA.issues.filter(i=>i.key.startsWith(k+"-")).map(i=>`<div class="row" data-open="${i.key}"><div class="line1"><span class="key">${i.key}</span>${chips(i)}</div><div class="sum">${esc(i.summary)}</div></div>`).join("")||"";
+  return (p.boards.length?`<div style="padding:16px 12px;flex:none;display:flex">${p.boards.map(b=>`<span class="assist t-ll" data-board="${b.id}">${esc(b.name)} (${b.kind})</span>`).join("")}</div>`:"")+issuesView();
 }
-function board(){
-  const cols=[["To Do","todo"],["In Progress","prog"],["Done","done"]];
-  const col=cols[st.boardTab], cards=DATA.issues.filter(i=>i.cat===col[1]);
-  return `<div class="tabs">${cols.map((c,n)=>`<button class="${n===st.boardTab?"on":""}" data-bt="${n}">${c[0]} ${DATA.issues.filter(i=>i.cat===c[1]).length}</button>`).join("")}</div>`+
-  cards.map(i=>`<div class="card" data-open="${i.key}"><div class="line1"><span class="key">${i.key}</span><span class="chip p-${i.priority}">${i.priority}</span></div><div class="sum">${esc(i.summary)}</div></div>`).join("");
+function boardView(){
+  const cols=[["To Do","todo"],["In Progress","in_progress"],["Done","done"]], col=cols[st.boardTab];
+  const all=ISS.slice(0,12), cnt=c=>all.filter(i=>i.cat===c).length;
+  return `<div class="tabs">${cols.map((c,n)=>`<button class="${n===st.boardTab?"on":""}" data-bt="${n}">${c[0]} ${cnt(c[1])}</button>`).join("")}</div><div class="cards">`+
+  all.filter(i=>i.cat===col[1]).map(i=>`<div class="card" data-open="${i.key}"><div class="l1"><span class="key t-lm">${i.key}</span>${chip(i.priority,"p-"+i.priority)}</div><div class="t-bl">${esc(i.summary)}</div>${i.assignee?`<div class="t-bs muted">${esc(i.assignee)}</div>`:""}</div>`).join("")+`</div>`;
 }
-function inbox(){
-  return `<div class="toolbar"><button class="link" id="markall">Mark all read</button></div>`+
-  DATA.inbox.map(n=>`<div class="row" data-open="${n.issue}"><div class="inrow"><div class="grow"><div class="sub" style="margin:0">${n.issue} · ${esc(n.who)}</div>
-   <div style="font-weight:600;font-size:16px;margin:2px 0">${esc(n.summary)}</div><div style="font-size:14px">${esc(n.what)}</div><div class="sub">${n.at}</div></div>${n.unread?'<i class="dot"></i>':""}</div></div>`).join("");
+function inboxView(){
+  const any=DATA.inbox.some(n=>n.unread);
+  return (any?`<div style="display:flex;justify-content:flex-end;padding:0 8px"><button class="tbtn" id="markall">Mark all read</button></div>`:"")+
+  DATA.inbox.map(n=>`<div class="li three" data-open="${n.issue}"><div class="grow"><div class="t-lsm muted">${n.issue} · ${esc(n.who)}</div><div class="t-bl" style="${n.unread?"font-weight:700":""};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(n.summary)}</div><div class="t-bm muted">${esc(n.what)}</div><div class="t-lsm muted">${n.at}</div></div>${n.unread?'<i class="badge"></i>':""}</div><div class="div"></div>`).join("");
 }
+
 function draw(){
-  const app=$("#app"), c=cur();
-  if(!st.signedIn){app.innerHTML=`<div class="body">${login()}</div>`;wireLogin();return}
-  const title=isTab(c.r)?TITLES[c.r]:c.r==="issue"?c.key:c.r==="project"?c.key:"Board";
-  let body=c.r==="issues"?issues():c.r==="projects"?projects():c.r==="inbox"?inbox():c.r==="issue"?issue(c.key):c.r==="project"?project(c.key):board();
-  const tabs=isTab(c.r)?`<div class="nav">${Object.keys(TITLES).map(t=>`<button class="${t===c.r?"on":""}" data-tab="${t}"><span class="pill">${ICON[t]}</span>${TITLES[t]}</button>`).join("")}</div>`:"";
-  const compose=c.r==="issue"?`<div class="compose"><input id="cm" placeholder="Add a comment"><button class="ib" id="send" style="color:var(--muted)">➤</button></div>`:"";
-  app.innerHTML=`<div class="top">${isTab(c.r)?"":'<button class="ib back" id="back">←</button>'}<span class="t">${esc(title)}</span><button class="ib" id="more">⋮</button></div>
-  <div class="body${st.lens&&c.r==="issues"?" fixed":""}" id="scroll">${body}</div>${compose}${tabs}${st.menu?`<div class="menu"><div class="dis">Signed in as ${DATA.user.name}</div><div class="act" id="out">Sign out</div></div>`:""}`;
+  const scr=$("#scr"), c=cur();
+  scr.style.setProperty("--gi",st.gi+"px"); scr.style.setProperty("--sbh",st.sb+"px");
+  const status=`<div class="sb" style="height:${st.sb}px;align-items:flex-end;padding-bottom:${Math.max(4,st.sb/2-9)}px"><span id="clock">${new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}).replace(/\s?[AP]M/i,"")}</span><span><svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg><svg viewBox="0 0 24 24"><path d="M2 22h20V2z"/></svg><svg viewBox="0 0 24 24"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg></span></div>`;
+  if(!st.signedIn){scr.innerHTML=status+loginView()+`<div class="gi"></div>`;wireLogin();return}
+  const title=isTab(c.r)?TABS[c.r]:c.r==="issue"||c.r==="project"?c.key:"Board";
+  const body=c.r==="issues"?issuesView():c.r==="projects"?projectsView():c.r==="inbox"?inboxView():c.r==="issue"?issueView(c.key):c.r==="project"?projectView(c.key):boardView();
+  const fixed=(c.r==="issues"&&st.lens)||c.r==="project";
+  const nav=isTab(c.r)?`<div class="nav">${Object.keys(TABS).map(t=>`<button class="item ${t===c.r?"on":""}" data-tab="${t}"><span class="pill">${svg(t)}</span><span class="t-lm">${TABS[t]}</span></button>`).join("")}</div>`:"";
+  const compose=c.r==="issue"?`<div class="cbar"><div class="field"><div class="box"><input id="cm" placeholder="Add a comment"></div></div><button class="ib" id="send">${svg("send")}</button></div>`:"";
+  scr.innerHTML=status+`<div class="tb ${isTab(c.r)?"":"back"}">${isTab(c.r)?"":`<button class="ib" id="back">${svg("back")}</button>`}<span class="title t-tl">${esc(title)}</span><button class="ib" id="more">${svg("menu")}</button></div>
+  <div class="content${fixed?" fixed":""}" id="scroll">${body}</div>${compose}${nav||`<div class="gi"></div>`}
+  ${st.menu?`<div class="menu t-bl"><div class="dis">Signed in as ${DATA.user}</div><div class="act" id="out">Sign out</div></div>`:""}`;
   wire();
 }
 function wireLogin(){
-  const go1=()=>{
-    if(st.mfa){const v=($("#code").value||"").trim(); if(!/^\d{6}$/.test(v)){st.err="That code is not valid";draw();return} st.mfa=false;st.err="";st.signedIn=true;draw();return}
-    const pw=$("#pw").value; if(!$("#em").value||!pw){st.err="Enter your email and password";draw();return}
+  const submit=()=>{
+    if(st.mfa){if(!/^\d{6}$/.test(($("#code").value||"").trim())){st.err="That code is not valid";draw();return}st.mfa=false;st.err="";st.signedIn=true;draw();return}
+    if(!$("#em").value||!$("#pw").value){st.err="Enter your email and password";draw();return}
     if($("#em").value.includes("mfa")){st.mfa=true;st.err="";draw();return}
     st.err="";st.signedIn=true;draw();
   };
-  $("#go").onclick=go1; app_enter(go1);
+  $("#go").onclick=submit; document.querySelectorAll(".login input").forEach(i=>i.onkeydown=e=>{if(e.key==="Enter")submit()});
   const b=$("#mback"); if(b)b.onclick=()=>{st.mfa=false;st.err="";draw()};
 }
-function app_enter(fn){document.querySelectorAll(".login input").forEach(i=>i.onkeydown=e=>{if(e.key==="Enter")fn()})}
 function wire(){
   document.querySelectorAll("[data-open]").forEach(e=>e.onclick=()=>go("issue",{key:e.dataset.open}));
   document.querySelectorAll("[data-proj]").forEach(e=>e.onclick=()=>go("project",{key:e.dataset.proj}));
@@ -268,14 +309,17 @@ function wire(){
   const L=$("#lens"); if(L)initLens(L);
   $("#more").onclick=()=>{st.menu=!st.menu;draw()};
   const o=$("#out"); if(o)o.onclick=reset;
+  const lt=$("#lenstoggle"); if(lt)lt.onclick=()=>setLens(!st.lens);
   const q=$("#q"); if(q){q.oninput=()=>{st.q=q.value;const p=q.selectionStart;draw();const n=$("#q");n.focus();n.setSelectionRange(p,p)}}
   const m=$("#markall"); if(m)m.onclick=()=>{DATA.inbox.forEach(n=>n.unread=false);toast("All notifications marked read");draw()};
   const cm=$("#cm"); if(cm){
-    const send=()=>{const v=cm.value.trim();if(!v)return;(DATA.comments[cur().key]=DATA.comments[cur().key]||[]).push({a:DATA.user.name,t:"Just now",b:v});
-      const i=DATA.issues.find(x=>x.key===cur().key);i.comments=DATA.comments[cur().key].length;draw();const s=$("#scroll");s.scrollTop=s.scrollHeight};
+    const send=()=>{const v=cm.value.trim();if(!v)return;const k=cur().key;(DATA.comments[k]=DATA.comments[k]||[]).push({a:DATA.user,t:"Just now",b:v});draw();const s=$("#scroll");s.scrollTop=s.scrollHeight};
     $("#send").onclick=send; cm.onkeydown=e=>{if(e.key==="Enter")send()};
+    cm.oninput=()=>$("#send").classList.toggle("go",!!cm.value.trim());
   }
 }
+
+/* The lens: the same layout rule as android/.../ui/Lens.kt */
 const LENS={ROW_MAX:88,ROW_CAP:96,SHARE:2/3,MIN:.1,FALL:3};
 function lensLayout(n,H,c){
   const {ROW_MAX,ROW_CAP,SHARE,MIN,FALL}=LENS;
@@ -296,11 +340,15 @@ function layoutLens(L){
   rows.forEach((r,i)=>{
     const h=lay.h[i], inw=i>=lay.start&&i<lay.start+lay.k;
     r.style.height=h+"px";
-    r.className="lr "+(r.dataset.c||"")+" "+(h>=50?"lv3":h>=24?"lv2":h>=10?"lv1":"lv0")+(inw?" inlens":"");
+    r.className="lr "+(r.dataset.c||r.className.split(" ").find(x=>x.startsWith("c-"))||"")+" "+(h>=50?"lv3":h>=24?"lv2":h>=10?"lv1":"lv0")+(inw?" inlens":"");
+    r.querySelector(".sum").classList.toggle("two",h>=76);
+    r.querySelector(".meta").style.display=h>=64||h<50?"":"none";
     r.style.fontSize=h<24&&h>=10?Math.max(8,Math.min(13,h-3))+"px":"";
+    const s=r.querySelector(".sum"); if(h<24&&h>=10)s.style.fontSize=Math.max(8,Math.min(13,h-3))+"px"; else s.style.fontSize="";
   });
 }
 function initLens(L){
+  L.querySelectorAll(".lr").forEach(r=>{r.dataset.c=[...r.classList].find(x=>x.startsWith("c-"))});
   layoutLens(L);
   const yOf=e=>{const r=L.getBoundingClientRect();return (e.clientY-r.top)*(L.offsetHeight/r.height)};
   const inWin=i=>i>=L._lay.start&&i<L._lay.start+L._lay.k;
@@ -312,22 +360,32 @@ function initLens(L){
   L.onclick=e=>{if(slid){slid=false;return} const i=rowAt(L._lay,yOf(e)); if(i>=0&&inWin(i))go("issue",{key:L.children[i].dataset.key})};
   L.onwheel=e=>{e.preventDefault();st.lensC=Math.max(0,Math.min(L.children.length-1,st.lensC+Math.sign(e.deltaY)));layoutLens(L)};
 }
+function setLens(on){st.lens=on;$("#lensbtn").textContent="Lens: "+(on?"on":"off");draw()}
 function reset(){st.signedIn=false;st.stack=[{r:"issues"}];st.q="";st.menu=false;st.mfa=false;st.err="";draw()}
-$("#reset").onclick=reset;
-$("#lensbtn").onclick=()=>{st.lens=!st.lens;$("#lensbtn").textContent="Lens: "+(st.lens?"on":"off");draw()};
+$("#reset").onclick=reset; $("#lensbtn").onclick=()=>setLens(!st.lens);
 $("#theme").onclick=()=>{const d=document.body.classList.toggle("dark");$("#theme").textContent=d?"Light mode":"Dark mode";try{localStorage.setItem("tl-mock-dark",d?"1":"0")}catch(e){}};
 try{const s=localStorage.getItem("tl-mock-dark"); if(s==="1"||(s===null&&matchMedia("(prefers-color-scheme: dark)").matches)){document.body.classList.add("dark");$("#theme").textContent="Light mode"}}catch(e){}
-$("#clock").textContent=new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+/* ?theme=light|dark and ?dev=WxHxSB for screenshots and links */
+{const p=new URLSearchParams(location.search);
+ if(p.get("theme")){const d=p.get("theme")==="dark";document.body.classList.toggle("dark",d);$("#theme").textContent=d?"Light mode":"Dark mode"}
+ if(p.get("dev"))$("#dev").value=p.get("dev");
+ if(p.get("lens")==="0"){st.lens=false;$("#lensbtn").textContent="Lens: off"}
+ if(p.has("in"))st.signedIn=true
+ if(p.has("bare"))document.body.classList.add("bare")
+ if(p.get("screen")){const [r,a]=p.get("screen").split(":"); st.stack=isTab(r)?[{r}]:[{r:"issues"},{r,key:a,id:a}]}
+ if(p.get("q"))st.q=p.get("q"); if(p.has("menu"))st.menu=true}
 function fit(){
-  const [w,h]=$("#dev").value.split("x").map(Number), ph=$("#phone"), stg=$("#stage");
-  const avail=innerHeight-$(".bar").offsetHeight-$(".note").offsetHeight-70;
-  const sc=Math.min(1.25,Math.max(.3,Math.min(avail/h,(innerWidth-32)/w)));
-  ph.style.width=w+"px"; ph.style.height=h+"px"; ph.style.transform="scale("+sc+")";
-  stg.style.width=w*sc+"px"; stg.style.height=h*sc+"px";
-  const L=$("#lens"); if(L)layoutLens(L);
+  const [w,h,sb]=$("#dev").value.split("x").map(Number); st.sb=sb; st.gi=24;
+  const ph=$("#phone"), stg=$("#stage"), W=w+20, H=h+20;
+  const avail=innerHeight-$(".bar").offsetHeight-$(".note").offsetHeight-48;
+  const p=new URLSearchParams(location.search), fixed=p.get("scale");
+  const sc=fixed?+fixed:Math.min(1.25,Math.max(.3,Math.min(avail/H,(innerWidth-32)/W)));
+  ph.style.width=W+"px"; ph.style.height=H+"px"; ph.style.transform="scale("+sc+")";
+  stg.style.width=W*sc+"px"; stg.style.height=H*sc+"px";
+  draw();
 }
 $("#dev").onchange=fit; addEventListener("resize",fit);
-draw(); fit();
+fit();
 </script>
 </body>
 </html>
