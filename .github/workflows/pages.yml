@@ -1,10 +1,11 @@
 name: Pages
 
-# Publishes the static mocks under mock/ (for example mock/android/ -> /android/).
+# Publishes the static mocks under mock/ (mock/android/ -> /android/) and the web UI mock (/web/), which is the real app from
+# internal/web/static run against a pretend server in the browser (mock/web/build.mjs), so it follows every change to the UI.
 on:
   push:
     branches: [main]
-    paths: ['mock/**', '.github/workflows/pages.yml']
+    paths: ['mock/**', 'internal/web/static/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -25,8 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Assemble the site
+        run: |
+          mkdir _site
+          cp -r mock/. _site/
+          node mock/web/build.mjs _site/web
+          rm _site/web/build.mjs
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: mock
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

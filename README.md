@@ -197,11 +197,18 @@ token is asked for when they first save, and both live in memory only. See [docs
 
 ## Screenshots
 
-Real screenshots of a running server with a small demo project, not mockups. Shots are in dark mode (the
-reference theme), with one light-theme shot for the web UI and one for the Android app. Tokens, type and spacing are in
-[DESIGN.md](DESIGN.md).
+Real screenshots of a running server with a small demo project, not mockups. Shots are in dark mode (the reference theme),
+with one light-theme shot for the web UI and one for the Android app. Tokens, type and spacing are in [DESIGN.md](DESIGN.md).
+Both the web UI and the Android app also have an interactive mock to try in the browser, linked below.
 
 ### Web
+
+To click through the web UI without installing anything, open the **[interactive mock](https://larytet.github.io/tasklane/web/)**.
+It is the real web UI, the same code the server sends, running against a pretend server in the browser with a small sample project
+(issue list and search, tickets with comments and reactions, board, backlog and sprints, reports, inbox, settings and
+administration). Changes you make stay in the tab until you reload; realtime, email, attachments and integrations are not in it.
+The pretend server is [mock/web/](mock/web/mock-api.js) and its sample data is recorded from a real server by
+[scripts/mockweb/](scripts/mockweb/record.mjs).
 
 **Issue list.** Search box with plain text and TQL, bulk select, density and column controls.
 
